@@ -1,0 +1,64 @@
+dense:
+  bge_base:
+    enable: true
+    module: dense/huggingface
+    model_name: bge-base-zh-v1.5
+  bge_m3:
+    enable: false
+    module: dense/huggingface
+    model_name: bge-m3
+
+sparse:
+  bm25:
+    enable: true
+    module: sparse/bm25
+    tokenizer: jieba
+  bge_m3:
+    enable: false
+    module: sparse/qdrant_bge_m3
+    model_name: bge-m3
+
+store:
+  qdrant:
+    enable: true
+    module: store/qdrant
+    url: http://qdrant:6333
+    collections:
+      common: knowledge_common
+      scoped: knowledge_scoped
+
+search:
+  default_mode: hybrid
+  top_k: 20
+  fetch_k: 50
+  dense_weight: 0.5
+  sparse_weight: 0.5
+  rrf_k: 60
+
+rerank:
+  bge_base:
+    enable: true
+    module: rerank/cross_encoder
+    model_name: bge-reranker-base
+  bge_large:
+    enable: false
+    module: rerank/cross_encoder
+    model_name: bge-reranker-large
+  bge_m3:
+    enable: false
+    module: rerank/cross_encoder
+    model_name: bge-reranker-v2-m3
+
+ocr:
+  rapid:
+    enable: true
+    module: ocr/rapid
+    model_name: rapidocr
+  paddle:
+    enable: false
+    module: ocr/paddle
+    model_name: paddleocr
+  tesseract:
+    enable: false
+    module: ocr/tesseract
+    model_name: tesseract

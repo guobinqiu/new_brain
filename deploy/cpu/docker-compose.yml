@@ -1,0 +1,96 @@
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.18.3
+    container_name: qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - ../../qdrant_data/docker:/qdrant/storage
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ../..
+      dockerfile: deploy/cpu/Dockerfile
+    container_name: rag-backend
+    ports:
+      - "8000:8000"
+    environment:
+      CONFIG_FILE: ${CONFIG_FILE:-docker.yaml}
+    volumes:
+      - ../../backend:/app/backend
+      - ../../models:/app/models:ro
+      - ../../chroma_data/docker:/app/chroma_data
+      - ../../milvus_data/lite/docker:/app/milvus_data
+      - ../../backend/.uv-cache-docker:/root/.cache/uv
+    restart: unless-stopped
+
+  frontend:
+    image: node:22-bookworm-slim
+    container_name: rag-frontend
+    working_dir: /app/frontend
+    environment:
+      VITE_API_TARGET: http://backend:8000
+      CHOKIDAR_USEPOLLING: "true"
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    ports:
+      - "5175:5175"
+    volumes:
+      - ../../frontend:/app/frontend
+      - ../../frontend/.node_modules-docker:/app/frontend/node_modules
+    restart: unless-stopped
+
+  milvus-etcd:
+    image: quay.io/coreos/etcd:v3.5.25
+    container_name: milvus-etcd
+    profiles:
+      - milvus
+    environment:
+      ETCD_AUTO_COMPACTION_MODE: revision
+      ETCD_AUTO_COMPACTION_RETENTION: "1000"
+      ETCD_QUOTA_BACKEND_BYTES: "4294967296"
+      ETCD_SNAPSHOT_COUNT: "50000"
+    command: >
+      etcd
+      -advertise-client-urls=http://milvus-etcd:2379
+      -listen-client-urls http://0.0.0.0:2379
+      --data-dir /etcd
+    volumes:
+      - ../../milvus_data/standalone/etcd:/etcd
+    restart: unless-stopped
+
+  milvus-minio:
+    image: minio/minio:RELEASE.2024-05-28T17-19-04Z
+    container_name: milvus-minio
+    profiles:
+      - milvus
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+    command: minio server /minio_data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - ../../milvus_data/standalone/minio:/minio_data
+    restart: unless-stopped
+
+  milvus-standalone:
+    image: milvusdb/milvus:v2.6.20
+    container_name: milvus-standalone
+    profiles:
+      - milvus
+    command: ["milvus", "run", "standalone"]
+    security_opt:
+      - seccomp:unconfined
+    environment:
+      ETCD_ENDPOINTS: milvus-etcd:2379
+      MINIO_ADDRESS: milvus-minio:9000
+      MINIO_REGION: us-east-1
+    ports:
+      - "19530:19530"
+      - "9091:9091"
+    volumes:
+      - ../../milvus_data/standalone/milvus:/var/lib/milvus
+    restart: unless-stopped
