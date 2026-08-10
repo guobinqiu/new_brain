@@ -116,7 +116,12 @@ def _start_application(batch: BenchmarkBatch, tmp_path: Path):
     application.dense.start()
     application.sparse.start()
     application.store.drop_collections()
-    application.start()
+    application.store.start()
+    application.search.start()
+    if batch.rerank != "none":
+        application.rerank.start()
+    application.ocr.start()
+    application.ready = True
     return application
 
 
