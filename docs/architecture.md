@@ -823,102 +823,7 @@ backend/config/docker-gpu.yaml
 
 ---
 
-## 16. API
-
-### 上传
-
-`POST /api/upload`
-
-Multipart fields：
-
-| 参数 | 类型 | 默认 | 说明 |
-|---|---|---|---|
-| `file` | file | 必填 | 上传文件 |
-| `collection_type` | str | 必填 | `common` / `scoped` |
-| `namespace` | str | `default` | 系统命名空间 |
-| `scope_id` | str | null | `collection_type=scoped` 时必填 |
-
-返回：
-
-```json
-{
-  "filename": "faq.pdf",
-  "chunks": 12,
-  "collection_type": "scoped",
-  "namespace": "default",
-  "scope_id": "scope_001",
-  "status": "ok"
-}
-```
-
-### 搜索
-
-`POST /api/search`
-
-```json
-{
-  "query": "查询内容",
-  "mode": "hybrid",
-  "top_k": 10,
-  "rerank": true,
-  "fetch_k": 50,
-  "namespace": "default",
-  "scope_ids": ["scope_001", "scope_002"]
-}
-```
-
-返回：
-
-```json
-{
-  "results": [
-    {
-      "id": "point-id",
-      "content": "命中的文本片段",
-      "metadata": {
-        "namespace": "default",
-        "scope_id": "scope_001",
-        "filename": "faq.pdf",
-        "chunk_index": 0,
-        "created_at": "2026-08-03T10:00:00"
-      },
-      "collection_type": "scoped"
-    }
-  ],
-  "mode": "hybrid",
-  "rerank": true,
-  "fetch_k": 50,
-  "elapsed_ms": 123.4
-}
-```
-
-### 文档列表
-
-`GET /api/documents`
-
-查询参数：
-
-| 参数 | 默认 | 说明 |
-|---|---|---|
-| `collection_type` | `all` | `common` / `scoped` / `all` |
-| `namespace` | `default` | 系统命名空间 |
-| `scope_ids` | 空 | 多个范围过滤 |
-
-### 删除
-
-`DELETE /api/documents/{filename:path}`
-
-查询参数：
-
-| 参数 | 默认 | 说明 |
-|---|---|---|
-| `collection_type` | 必填 | `common` / `scoped` |
-| `namespace` | `default` | 系统命名空间 |
-| `scope_id` | null | scoped 删除范围；为空时删除该 namespace 下同名 scoped 文档 |
-
----
-
-## 17. 前端
+## 16. 前端
 
 上传区：
 
@@ -944,7 +849,7 @@ Multipart fields：
 
 ---
 
-## 18. 部署
+## 17. 部署
 
 后端启动只依赖一个配置入口：
 
