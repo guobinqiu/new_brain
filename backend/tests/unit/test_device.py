@@ -47,6 +47,41 @@ def test_falls_back_to_cpu_when_torch_cannot_be_loaded(monkeypatch):
     assert device.auto_device() == "cpu"
 
 
+def test_release_memory_clears_cuda_cache_when_available(monkeypatch):
+    import device
+
+    calls = []
+
+    class FakeCuda:
+        @staticmethod
+        def is_available():
+            return True
+
+        @staticmethod
+        def empty_cache():
+            calls.append("empty_cache")
+
+    class FakeTorch:
+        cuda = FakeCuda()
+
+    monkeypatch.setattr(device, "_load_torch", lambda: FakeTorch())
+
+    device.release_memory()
+
+    assert calls == ["empty_cache"]
+
+
+def test_release_memory_ignores_missing_torch(monkeypatch):
+    import device
+
+    def fail():
+        raise ImportError("torch unavailable")
+
+    monkeypatch.setattr(device, "_load_torch", fail)
+
+    device.release_memory()
+
+
 def test_dense_passes_auto_device_to_huggingface_embeddings(monkeypatch):
     from dense.huggingface import HuggingFaceDense
 
@@ -69,6 +104,25 @@ def test_dense_passes_auto_device_to_huggingface_embeddings(monkeypatch):
     assert calls["model_kwargs"] == {"device": "cuda"}
 
 
+def test_dense_stop_releases_loaded_model(monkeypatch):
+    from dense.huggingface import HuggingFaceDense
+
+    calls = []
+
+    dense = HuggingFaceDense(model_name="/models/bge")
+    dense._dense = object()
+    dense._vector_size = 2
+    dense.ready = True
+    monkeypatch.setattr("device.release_memory", lambda: calls.append("release"))
+
+    dense.stop()
+
+    assert dense._dense is None
+    assert dense._vector_size is None
+    assert dense.ready is False
+    assert calls == ["release"]
+
+
 def test_rerank_passes_auto_device_to_cross_encoder(monkeypatch):
     import importlib
     import rerank.cross_encoder
@@ -87,3 +141,20 @@ def test_rerank_passes_auto_device_to_cross_encoder(monkeypatch):
     rerank._load_reranker()
 
     assert calls == {"model_name": "/models/rerank", "device": "cuda"}
+
+
+def test_bge_m3_sparse_stop_releases_loaded_model(monkeypatch):
+    from sparse.bge_m3_common import BGEM3LexicalEncoder
+
+    calls = []
+
+    sparse = BGEM3LexicalEncoder(model_name="/models/bge-m3")
+    sparse._model = object()
+    sparse.ready = True
+    monkeypatch.setattr("device.release_memory", lambda: calls.append("release"))
+
+    sparse.stop()
+
+    assert sparse._model is None
+    assert sparse.ready is False
+    assert calls == ["release"]

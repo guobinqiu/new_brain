@@ -26,7 +26,10 @@ class HuggingFaceDense:
         self.ready = True
 
     def stop(self) -> None:
+        self._dense = None
+        self._vector_size = None
         self.ready = False
+        device.release_memory()
 
     def embed_query(self, text: str) -> list[float]:
         self._require_ready()

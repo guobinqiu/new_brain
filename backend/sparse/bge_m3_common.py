@@ -20,7 +20,9 @@ class BGEM3LexicalEncoder:
         self.ready = True
 
     def stop(self) -> None:
+        self._model = None
         self.ready = False
+        device.release_memory()
 
     def embed_query(self, text: str) -> dict[int, float]:
         return self.embed_documents([text])[0]
