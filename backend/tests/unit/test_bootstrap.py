@@ -74,19 +74,16 @@ def test_application_selects_bge_m3_store_sparse(tmp_path):
     path.write_text(
         """
 dense:
-  selected:
+  bge_m3:
     enable: true
-    module: dense/huggingface
     model_name: bge-m3
 sparse:
-  selected:
+  bge_m3:
     enable: true
-    module: sparse/qdrant_bge_m3
     model_name: bge-m3
 store:
-  selected:
+  qdrant:
     enable: true
-    module: store/qdrant
     url: http://localhost:6333
     collections:
       common: common
@@ -94,14 +91,12 @@ store:
 search:
   default_mode: hybrid
 rerank:
-  selected:
+  bge_m3:
     enable: true
-    module: rerank/cross_encoder
     model_name: bge-reranker-v2-m3
 ocr:
-  selected:
+  rapid:
     enable: true
-    module: ocr/rapid
     model_name: rapidocr
 """,
         encoding="utf-8",
@@ -132,7 +127,7 @@ def test_application_reads_config_name_from_explicit_yaml(monkeypatch):
     application = bootstrap.Application()
 
     assert application.config_name == "qdrant"
-    assert application.config.dense.name == "dense/huggingface"
+    assert application.config.dense.name == "bge_base"
 
 
 def test_build_dense_rejects_unsupported_dense_type():

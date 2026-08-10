@@ -4,58 +4,53 @@ import pytest
 pytestmark = pytest.mark.unit
 
 
-def _config_file(tmp_path, store_module: str = "store/qdrant", sparse_module: str = "sparse/bm25", sparse_extra: str = "    tokenizer: jieba\n", ocr_module: str = "ocr/rapid", ocr_model_name: str = "rapidocr"):
+def _config_file(tmp_path, store_key: str = "qdrant", sparse_key: str = "bm25", sparse_extra: str = "    tokenizer: jieba\n", ocr_key: str = "rapid", ocr_model_name: str = "rapidocr"):
     store_settings = {
-        "store/qdrant": """
+        "qdrant": """
     url: http://localhost:6333
     collections:
       common: common
       scoped: scoped
 """,
-        "store/chroma": """
+        "chroma": """
     persist_dir: ./chroma_data
     collections:
       common: common
       scoped: scoped
 """,
-        "store/milvus": """
+        "milvus": """
     uri: http://localhost:19530
     collections:
       common: common
       scoped: scoped
 """,
-    }[store_module]
+    }[store_key]
     path = tmp_path / "profile.yaml"
     path.write_text(
         f"""
 dense:
-  selected:
+  bge_base:
     enable: true
-    module: dense/huggingface
     model_name: bge-base-zh-v1.5
 sparse:
-  selected:
+  {sparse_key}:
     enable: true
-    module: {sparse_module}
 {sparse_extra.rstrip()}
 store:
-  selected:
+  {store_key}:
     enable: true
-    module: {store_module}
 {store_settings.rstrip()}
 search:
   default_mode: hybrid
   top_k: 20
   fetch_k: 50
 rerank:
-  selected:
+  bge_base:
     enable: true
-    module: rerank/cross_encoder
     model_name: bge-reranker-base
 ocr:
-  selected:
+  {ocr_key}:
     enable: true
-    module: {ocr_module}
     model_name: {ocr_model_name}
 """,
         encoding="utf-8",
@@ -64,7 +59,7 @@ ocr:
 
 
 def test_container_maps_sparse_config_to_injected_tokenizer(tmp_path):
-    from container import create_container
+    from container import build_sparse, create_container
     from loader import load_config_file
     from sparse.bm25 import BM25Sparse
 
@@ -72,8 +67,10 @@ def test_container_maps_sparse_config_to_injected_tokenizer(tmp_path):
     container = create_container(config)
 
     sparse = container.sparse()
+    built_sparse = build_sparse(config)
 
     assert isinstance(sparse, BM25Sparse)
+    assert isinstance(built_sparse, BM25Sparse)
     assert sparse.tokenizer.__class__.__name__ == "JiebaTokenizer"
 
 
@@ -82,7 +79,7 @@ def test_container_selects_chroma_store(tmp_path):
     from loader import load_config_file
     from store.chroma import ChromaStore
 
-    config = load_config_file(_config_file(tmp_path, store_module="store/chroma"))
+    config = load_config_file(_config_file(tmp_path, store_key="chroma"))
     container = create_container(config)
 
     store = container.store()
@@ -97,7 +94,7 @@ def test_container_selects_milvus_store(tmp_path):
     from loader import load_config_file
     from store.milvus import MilvusStore
 
-    config = load_config_file(_config_file(tmp_path, store_module="store/milvus"))
+    config = load_config_file(_config_file(tmp_path, store_key="milvus"))
     container = create_container(config)
 
     store = container.store()
@@ -107,25 +104,12 @@ def test_container_selects_milvus_store(tmp_path):
     assert store.common_collection == config.store.collections.common
 
 
-def test_container_selects_chroma_bge_m3_sparse_adapter(tmp_path):
-    from container import create_container
-    from loader import load_config_file
-    from sparse.chroma_bge_m3 import ChromaBGEM3Sparse
-
-    config = load_config_file(_config_file(tmp_path, store_module="store/chroma", sparse_module="sparse/chroma_bge_m3", sparse_extra="    model_name: bge-m3\n"))
-    container = create_container(config)
-
-    sparse = container.sparse()
-
-    assert isinstance(sparse, ChromaBGEM3Sparse)
-
-
 def test_container_selects_qdrant_bge_m3_sparse_adapter(tmp_path):
     from container import create_container
     from loader import load_config_file
     from sparse.qdrant_bge_m3 import QdrantBGEM3Sparse
 
-    config = load_config_file(_config_file(tmp_path, sparse_module="sparse/qdrant_bge_m3", sparse_extra="    model_name: bge-m3\n"))
+    config = load_config_file(_config_file(tmp_path, sparse_key="bge_m3", sparse_extra="    model_name: bge-m3\n"))
     container = create_container(config)
 
     sparse = container.sparse()
@@ -138,7 +122,7 @@ def test_container_selects_milvus_bge_m3_sparse_adapter(tmp_path):
     from loader import load_config_file
     from sparse.milvus_bge_m3 import MilvusBGEM3Sparse
 
-    config = load_config_file(_config_file(tmp_path, store_module="store/milvus", sparse_module="sparse/milvus_bge_m3", sparse_extra="    model_name: bge-m3\n"))
+    config = load_config_file(_config_file(tmp_path, store_key="milvus", sparse_key="bge_m3", sparse_extra="    model_name: bge-m3\n"))
     container = create_container(config)
 
     sparse = container.sparse()
@@ -151,7 +135,7 @@ def test_container_selects_milvus_builtin_bm25_sparse_adapter(tmp_path):
     from loader import load_config_file
     from sparse.milvus_bm25 import MilvusBM25Sparse
 
-    config = load_config_file(_config_file(tmp_path, store_module="store/milvus", sparse_module="sparse/milvus_bm25", sparse_extra=""))
+    config = load_config_file(_config_file(tmp_path, store_key="milvus", sparse_key="milvus_bm25", sparse_extra=""))
     container = create_container(config)
 
     sparse = container.sparse()
@@ -164,7 +148,7 @@ def test_container_selects_paddle_ocr_adapter(tmp_path):
     from loader import load_config_file
     from ocr.paddle import PaddleOCR
 
-    config = load_config_file(_config_file(tmp_path, ocr_module="ocr/paddle", ocr_model_name="paddleocr"))
+    config = load_config_file(_config_file(tmp_path, ocr_key="paddle", ocr_model_name="paddleocr"))
     container = create_container(config)
 
     ocr = container.ocr()
@@ -178,7 +162,7 @@ def test_container_selects_tesseract_ocr_adapter(tmp_path):
     from loader import load_config_file
     from ocr.tesseract import TesseractOCR
 
-    config = load_config_file(_config_file(tmp_path, ocr_module="ocr/tesseract", ocr_model_name="tesseract"))
+    config = load_config_file(_config_file(tmp_path, ocr_key="tesseract", ocr_model_name="tesseract"))
     container = create_container(config)
 
     ocr = container.ocr()

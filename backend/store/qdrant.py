@@ -78,6 +78,10 @@ class QdrantStore:
         close_store()
         self.dense.stop()
 
+    def drop_collections(self) -> None:
+        _configure_store(self.url, self.common_collection, self.scoped_collection)
+        drop_collections()
+
     @property
     def ready(self) -> bool:
         return is_search_ready()
@@ -137,6 +141,14 @@ def close_store():
             close()
     _client = None
     _ready = False
+
+
+def drop_collections() -> None:
+    client = get_qdrant_client()
+    for collection_name in COLLECTION_BY_TYPE.values():
+        if client.collection_exists(collection_name):
+            client.delete_collection(collection_name)
+    _stores.clear()
 
 
 def init_store(
@@ -238,6 +250,10 @@ def _get_sparse() -> Sparse | None:
 
 def _sparse_uses_store(sparse: Sparse | None = None) -> bool:
     return isinstance(_get_sparse() if sparse is None else sparse, SparseEmbeddings)
+
+
+def sparse_uses_store(sparse: Sparse | None = None) -> bool:
+    return _sparse_uses_store(sparse)
 
 
 def _get_dense_vector_size() -> int:

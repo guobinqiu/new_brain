@@ -14,7 +14,7 @@ docker compose -f deploy/cpu/docker-compose.yml up -d qdrant
 
 ```bash
 cd backend
-CONFIG_FILE=default.yaml .venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8000
+CONFIG_FILE=local.yaml .venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
 3. 启动前端：
@@ -33,23 +33,42 @@ http://localhost:5175
 
 ## Docker 启动
 
-默认使用 CPU 版 Docker 配置：
+CPU 版：
 
 ```bash
-just deploy build
-just deploy up
+just deploy cpu build
+just deploy cpu up
 ```
 
 停止：
 
 ```bash
-just deploy down
+just deploy cpu down
 ```
 
 重启：
 
 ```bash
-just deploy down up
+just deploy cpu restart
+```
+
+GPU 版：
+
+```bash
+just deploy gpu build
+just deploy gpu up
+```
+
+停止：
+
+```bash
+just deploy gpu down
+```
+
+重启：
+
+```bash
+just deploy gpu restart
 ```
 
 Docker 前端访问地址：
@@ -58,27 +77,174 @@ Docker 前端访问地址：
 http://localhost:5175
 ```
 
+## API
+
+外部系统只需要调用知识写入、知识查询、文档列表和文档删除接口。健康检查和运行时配置接口属于内部运维接口，这里不列入外部集成 API。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| `POST` | `/api/upload` | 上传并索引文档 |
+| `POST` | `/api/search` | 搜索知识库 |
+| `GET` | `/api/documents` | 查询已索引文档列表 |
+| `DELETE` | `/api/documents/{filename}` | 删除已索引文档 |
+
+### 上传文档
+
+`POST /api/upload`
+
+请求类型：`multipart/form-data`
+
+| 字段 | 类型 | 必填 | 默认值 | 说明 |
+|---|---|---|---|---|
+| `file` | file | 是 | - | 支持 `.pdf`、`.txt`、`.md`、`.markdown`、`.docx`、`.png`、`.jpg`、`.jpeg`、`.webp`、`.bmp` |
+| `collection_type` | string | 否 | `common` | `common` 表示通用知识，`scoped` 表示范围专属知识 |
+| `namespace` | string | 否 | `default` | 外部系统隔离标识；同一个外部系统的上传、搜索、列表、删除必须使用同一个值 |
+| `scope_id` | string | `scoped` 时必填 | - | 范围标识 |
+
+响应示例：
+
+```json
+{
+  "filename": "example.pdf",
+  "chunks": 12,
+  "collection_type": "common",
+  "namespace": "default",
+  "scope_id": null,
+  "status": "ok"
+}
+```
+
+### 搜索
+
+`POST /api/search`
+
+请求类型：`application/json`
+
+| 字段 | 类型 | 必填 | 默认值 | 说明 |
+|---|---|---|---|---|
+| `query` | string | 是 | - | 查询内容 |
+| `mode` | string | 否 | `hybrid` | `dense`、`sparse`、`hybrid` |
+| `top_k` | int | 否 | 配置文件里的 `search.top_k` | 最多返回条数，范围 `1..50` |
+| `rerank` | bool | 否 | `false` | 是否启用重排 |
+| `fetch_k` | int | 否 | 配置文件里的 `search.fetch_k` | 重排候选池，必须大于等于 `top_k` |
+| `namespace` | string | 否 | `default` | 外部系统隔离标识；只搜索同一 `namespace` 下的数据 |
+| `scope_ids` | string[] | 否 | `[]` | 范围标识列表；为空时只查通用知识，非空时同时查通用知识和范围专属知识 |
+
+请求示例：
+
+```json
+{
+  "query": "有多少华为卡",
+  "mode": "hybrid",
+  "top_k": 5,
+  "rerank": true,
+  "fetch_k": 50,
+  "namespace": "default",
+  "scope_ids": []
+}
+```
+
+响应字段：
+
+| 字段 | 说明 |
+|---|---|
+| `results` | 搜索结果列表 |
+| `mode` | 本次搜索模式 |
+| `rerank` | 本次是否启用重排 |
+| `fetch_k` | 本次候选池大小 |
+| `elapsed_ms` | 后端搜索耗时，单位毫秒 |
+
+### 文档列表
+
+`GET /api/documents`
+
+查询参数：
+
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+|---|---|---|---|---|
+| `collection_type` | string | 否 | `all` | `all`、`common`、`scoped` |
+| `namespace` | string | 否 | `default` | 外部系统隔离标识；只列出同一 `namespace` 下的文档 |
+| `scope_ids` | string[] | 否 | `[]` | 范围标识列表 |
+
+### 删除文档
+
+`DELETE /api/documents/{filename}`
+
+查询参数：
+
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+|---|---|---|---|---|
+| `collection_type` | string | 是 | - | `common` 或 `scoped` |
+| `namespace` | string | 否 | `default` | 外部系统隔离标识；只删除同一 `namespace` 下的文档 |
+| `scope_id` | string | 否 | - | 删除 scoped 文档时用于限定范围 |
+
 ## 配置文件
 
 后端通过 `CONFIG_FILE` 选择配置文件，配置文件位于 `backend/config/`。
 
-Native 默认配置：
+本地 native 运行默认使用 `local.yaml`。手动启动后端时可以显式指定：
 
 ```bash
-CONFIG_FILE=default.yaml
+CONFIG_FILE=local.yaml
 ```
 
-Docker 默认配置：
+Docker 运行使用前面的 `just deploy cpu ...` 或 `just deploy gpu ...` 命令启动。
 
-```bash
-CONFIG_FILE=docker.yaml
-```
-
-临时切换配置示例：
+本地 native 临时切换配置示例：
 
 ```bash
 CONFIG_FILE=milvus.yaml .venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8000
 ```
+
+## LangSmith
+
+LangSmith 默认关闭。需要跟踪搜索链路时设置环境变量：
+
+```bash
+export LANGSMITH_TRACING=true
+export LANGSMITH_API_KEY=你的 LangSmith API Key
+export LANGSMITH_PROJECT=rag-search
+```
+
+native 后端启动时会读取这些环境变量。Docker 启动时 compose 会把这些变量透传到 backend 容器。
+
+搜索链路已经使用 LangChain Runnable / Retriever 组织，开启 LangSmith 后可以看到：
+
+```text
+search
+  prepare_plan
+  common / scoped parallel
+  dense / sparse retriever
+  fusion
+  dedupe
+  rerank
+  format_response
+```
+
+## 日志
+
+应用日志由配置文件里的 `logging` 控制：
+
+```yaml
+logging:
+  level: INFO
+  max_bytes: 10485760
+  backup_count: 5
+  search_trace: true
+```
+
+默认只输出 JSONL 到 stdout。需要 native 运行时同时落文件，可以加：
+
+```yaml
+logging:
+  level: INFO
+  file: logs/rag.jsonl
+  max_bytes: 10485760
+  backup_count: 5
+  search_trace: true
+```
+
+Docker 运行时由 Docker `json-file` driver 按大小滚动容器 stdout 日志。
 
 ## 数据目录
 
@@ -86,17 +252,13 @@ CONFIG_FILE=milvus.yaml .venv/bin/python -m uvicorn main:app --host 0.0.0.0 --po
 
 ```text
 qdrant_data/
-  docker/
 
 chroma_data/
-  native/
-  docker/
 
 milvus_data/
   standalone/
   lite/
-    native/
-    docker/
+    lite.db
 ```
 
-Chroma local 和 Milvus Lite 是嵌入式文件库，native 和 Docker 使用不同子目录，避免两个运行环境同时读写同一份文件。
+Qdrant 和 Milvus Standalone 是服务型数据库，backend 通过网络访问。Chroma local 和 Milvus Lite 是嵌入式文件库，本地后端和 Docker 后端使用同一份数据目录；不要同时启动两个后端访问同一份嵌入式库文件。

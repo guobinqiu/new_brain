@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import logging
+
 import device
 
 from config import RERANKER_MODEL_DIR
+
+logger = logging.getLogger("rag.app")
 
 MODEL_NAME = RERANKER_MODEL_DIR
 RERANK_MIN_SCORE = 0.0
@@ -43,6 +47,6 @@ class CrossEncoderRerank:
         ]
 
     def _load_reranker(self):
-        print(f"Loading reranker model: {self.model_name} ...")
+        logger.info("Loading reranker model", extra={"event": "model_load", "component": "rerank", "model": self.model_name})
         from sentence_transformers import CrossEncoder
         return CrossEncoder(model_name=self.model_name, device=device.auto_device())

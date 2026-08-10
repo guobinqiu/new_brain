@@ -60,6 +60,10 @@ class MilvusStore:
         close_store()
         self.dense.stop()
 
+    def drop_collections(self) -> None:
+        _configure_store(self.uri, self.common_collection, self.scoped_collection)
+        drop_collections()
+
     @property
     def ready(self) -> bool:
         return is_search_ready()
@@ -111,9 +115,39 @@ class MilvusStore:
 
 def close_store():
     global _builtin_function, _ready
+    _close_store_clients()
     _stores.clear()
+    if _is_lite_uri(_uri):
+        _release_lite_server(_connection_uri(_uri))
     _builtin_function = None
     _ready = False
+
+
+def drop_collections() -> None:
+    from pymilvus import MilvusClient
+
+    uri = _connection_uri(_uri)
+    client = MilvusClient(uri=uri)
+    try:
+        for collection_name in COLLECTION_BY_TYPE.values():
+            if client.has_collection(collection_name):
+                client.drop_collection(collection_name)
+    finally:
+        client.close()
+    _stores.clear()
+
+
+def _close_store_clients() -> None:
+    seen: set[int] = set()
+    for store in _stores.values():
+        for attr in ("client", "_milvus_client"):
+            client = getattr(store, attr, None)
+            if client is None or id(client) in seen:
+                continue
+            seen.add(id(client))
+            close = getattr(client, "close", None)
+            if callable(close):
+                close()
 
 
 def init_store(
@@ -215,6 +249,10 @@ def _sparse_uses_store(sparse: Sparse | None = None) -> bool:
     )
 
 
+def sparse_uses_store(sparse: Sparse | None = None) -> bool:
+    return _sparse_uses_store(sparse)
+
+
 def _store_for(collection_type: CollectionType, mode: SearchMode):
     _require_search_ready()
     key = (collection_type, mode)
@@ -275,6 +313,7 @@ def _get_store_unchecked(collection_type: CollectionType, mode: SearchMode):
             embedding_function=_embedding_function_for_mode(mode),
             collection_name=COLLECTION_BY_TYPE[collection_type],
             connection_args={"uri": _connection_uri(_uri)},
+            index_params=_index_params_for_mode(mode),
             auto_id=False,
             enable_dynamic_field=True,
             vector_field=_vector_field_for_mode(mode),
@@ -300,6 +339,18 @@ def _connection_uri(uri: str | None, project_root: Path = PROJECT_ROOT) -> str |
     return str(path)
 
 
+def _is_lite_uri(uri: str | None) -> bool:
+    return bool(uri and "://" not in uri and uri.endswith(".db"))
+
+
+def _release_lite_server(uri: str | None) -> None:
+    if not uri:
+        return
+    from milvus_lite.server_manager import server_manager_instance
+
+    server_manager_instance.release_server(uri)
+
+
 def _embedding_function_for_mode(mode: SearchMode):
     if not _sparse_uses_store():
         return _get_langchain_dense()
@@ -317,8 +368,6 @@ def _vector_field_for_mode(mode: SearchMode):
         return "dense"
     if mode == "sparse":
         return "sparse"
-    if _milvus_builtin_function() is not None:
-        return "dense"
     return ["dense", "sparse"]
 
 
@@ -347,12 +396,41 @@ def _search_params_for_mode(mode: SearchMode):
         return None
     if mode == "dense":
         return {"metric_type": "L2", "params": {}}
+    sparse_params = _sparse_search_params()
     if mode == "sparse":
-        return {"metric_type": "BM25", "params": {}}
+        return sparse_params
     return [
         {"metric_type": "L2", "params": {}},
-        {"metric_type": "BM25", "params": {}},
+        sparse_params,
     ]
+
+
+def _sparse_search_params():
+    if _milvus_builtin_function() is not None:
+        return {"metric_type": "BM25", "params": {}}
+    return {"metric_type": "IP", "params": {}}
+
+
+def _index_params_for_mode(mode: SearchMode):
+    if not _is_lite_uri(_uri):
+        return None
+    dense_index = {"metric_type": "L2", "index_type": "FLAT", "params": {}}
+    if not _sparse_uses_store() or mode == "dense":
+        return dense_index
+    sparse_index = _sparse_index_params()
+    if mode == "sparse":
+        return sparse_index
+    return [dense_index, sparse_index]
+
+
+def _sparse_index_params():
+    if _milvus_builtin_function() is not None:
+        return {"metric_type": "BM25", "index_type": "AUTOINDEX", "params": {}}
+    return {
+        "metric_type": "IP",
+        "index_type": "SPARSE_INVERTED_INDEX",
+        "params": {"drop_ratio_build": 0.2},
+    }
 
 
 def _query_data_for_mode(mode: SearchMode, query: str):
@@ -447,7 +525,7 @@ def _hybrid_search(collection_type: CollectionType, query: str, limit: int, meta
         AnnSearchRequest(
             data=[_query_data_for_mode("sparse", query)],
             anns_field="sparse",
-            param={"metric_type": "BM25", "params": {}},
+            param=_sparse_search_params(),
             limit=limit,
             filter=metadata_filter,
         ),

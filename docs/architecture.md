@@ -2,7 +2,7 @@
 
 本文说明知识检索后端的目标架构。系统支持通用知识和范围专属知识，适用于多系统、多区域、多部门、多项目等知识问答场景。
 
-架构目标是：向量库、dense 模型、sparse 检索、rerank 模型都可以通过 yaml 配置切换。BGE-M3、Chroma、Milvus 等能力作为可选组件接入，不影响默认的 Qdrant + BGE-base + BM25 功能。
+架构目标是：向量库、dense 模型、sparse 检索、rerank 模型都可以通过 yaml 配置切换。BGE-M3、Chroma、Milvus 等能力作为可选组件接入，不影响默认的 Qdrant + `bge_base` dense + `bm25` sparse 功能。
 
 ---
 
@@ -10,9 +10,9 @@
 
 - API 保持稳定，调用方不需要知道底层使用哪种向量库或模型。
 - 向量库可切换：Qdrant、Chroma、Milvus 等。
-- dense 能力可切换：当前支持 BGE-base 和 BGE-M3。
-- sparse 能力可切换：当前支持 jieba + BM25、BGE-M3 sparse vector、Milvus 内置 BM25。
-- rerank 能力可切换：当前支持 BGE reranker base、large 和 v2-m3。
+- dense 能力可切换：当前支持 `bge-base-zh-v1.5` 和 `bge-m3`。
+- sparse 能力可切换：当前支持 `bm25`（`tokenizer=jieba`）、`bge_m3` 和 `milvus_bm25`。`bge_m3` 只用于支持稀疏向量的 store，当前可用于 Qdrant 和 Milvus。
+- rerank 能力可切换：当前支持 `bge-reranker-base`、`bge-reranker-large` 和 `bge-reranker-v2-m3`。
 - 使用两个知识集合隔离通用知识和范围专属知识。
 - 支持 `namespace` 隔离不同系统或租户。
 - 支持通过多个 `scope_id` 查询范围专属知识。
@@ -60,26 +60,30 @@ backend/
   loader.py
   schema.py
   config/
-    default.yaml
-    docker.yaml
+    local.yaml
+    docker-cpu.yaml
+    docker-gpu.yaml
     qdrant.yaml
     chroma.yaml
     milvus.yaml
 ```
 
-后端通过 `CONFIG_FILE` 指定配置文件。`CONFIG_FILE` 可以写配置文件名，也可以写完整路径。只写文件名时，后端会从 `backend/config/` 读取。未设置 `CONFIG_FILE` 时，后端默认使用 `default.yaml`。
+后端通过 `CONFIG_FILE` 指定配置文件。`CONFIG_FILE` 可以写配置文件名，也可以写完整路径。只写文件名时，后端会从 `backend/config/` 读取。未设置 `CONFIG_FILE` 时，后端默认使用 `local.yaml`。
 
 每个运行 profile 使用一个 yaml 文件。yaml 内部用 `enable: true` 选择 dense、sparse、store、rerank、ocr 的具体组件。同一类组件只能启用一个。
+
+每个可启用组件都显式写 `import_path`。组件名负责表达“我要哪种能力”，`import_path` 负责表达“这类能力由哪个 Python 类实现”。这样配置文件里能直接看出实现位置，也方便以后把组件迁移成插件。
 
 当前配置文件：
 
 | 文件 | 状态 | 说明 |
 |---|---|---|
-| `default.yaml` | native 默认入口 | 连接 `http://localhost:6333`，collection 固定为 `knowledge_common` / `knowledge_scoped`。 |
-| `docker.yaml` | Docker 默认入口 | 连接 Docker Compose 内的 Qdrant 服务名 `qdrant`，collection 固定为 `knowledge_common` / `knowledge_scoped`。 |
-| `qdrant.yaml` | 可运行 | Qdrant profile，collection 使用 `qdrant_` 前缀。默认启用 BGE-base dense、jieba/BM25 sparse、BGE reranker base；可切换到 BGE-M3 dense 或 Qdrant BGE-M3 sparse。 |
-| `chroma.yaml` | 可运行 | Chroma profile，collection 使用 `chroma_` 前缀，native 本地数据目录是 `chroma_data/native`。Chroma Cloud 支持 sparse vector index；当前本地 Chroma 不支持 sparse vector index，本地运行时不要启用 BGE-M3 sparse。 |
-| `milvus.yaml` | 可运行 | Milvus profile，collection 使用 `milvus_` 前缀。默认连接 Standalone；保留 Milvus Lite 配置但默认禁用。可切换到 BGE-M3 sparse 或 Milvus 内置 BM25。 |
+| `local.yaml` | native 默认入口 | 连接 `http://localhost:6333`，collection 固定为 `knowledge_common` / `knowledge_scoped`。 |
+| `docker-cpu.yaml` | Docker CPU 入口 | 连接 Docker Compose 内的 Qdrant 服务名 `qdrant`，默认启用 `bge_base` dense、`bm25` sparse（`tokenizer=jieba`）、`bge_base` rerank。 |
+| `docker-gpu.yaml` | Docker GPU 入口 | 连接 Docker Compose 内的 Qdrant 服务名 `qdrant`，默认启用 `bge_base` dense、`bm25` sparse（`tokenizer=jieba`）、`bge_m3` rerank。 |
+| `qdrant.yaml` | 可运行 | Qdrant profile，collection 使用 `qdrant_` 前缀。默认启用 `bge_base` dense、`bm25` sparse（`tokenizer=jieba`）、`bge_base` rerank；可切换到 `bge_m3` dense 或 `bge_m3` sparse。 |
+| `chroma.yaml` | 可运行 | Chroma profile，collection 使用 `chroma_` 前缀，本地数据目录是 `chroma_data`。当前只启用 `bm25` sparse，不配置 `bge_m3` sparse。 |
+| `milvus.yaml` | 可运行 | Milvus profile，collection 使用 `milvus_` 前缀。默认连接 Standalone；保留 Milvus Lite 配置但默认禁用。可切换到 `bge_m3` sparse 或 `milvus_bm25` sparse。 |
 
 `bootstrap.py` 负责应用启动和关闭。`container.py` 负责按配置组装 dense、sparse、store、search、rerank、ocr。它们不保存具体业务规则，也不把某个模型或向量库写死到搜索逻辑里。
 
@@ -95,31 +99,31 @@ backend/
 dense:
   bge_base:
     enable: true
-    module: dense/huggingface
     model_name: bge-base-zh-v1.5
+    import_path: dense.huggingface.HuggingFaceDense
   bge_m3:
     enable: false
-    module: dense/huggingface
     model_name: bge-m3
+    import_path: dense.huggingface.HuggingFaceDense
 
 sparse:
   bm25:
     enable: true
-    module: sparse/bm25
     tokenizer: jieba
+    import_path: sparse.bm25.BM25Sparse
   bge_m3:
     enable: false
-    module: sparse/qdrant_bge_m3
     model_name: bge-m3
+    import_path: sparse.qdrant_bge_m3.QdrantBGEM3Sparse
 
 store:
   qdrant:
     enable: true
-    module: store/qdrant
     url: http://localhost:6333
     collections:
       common: knowledge_common
       scoped: knowledge_scoped
+    import_path: store.qdrant.QdrantStore
 
 search:
   default_mode: hybrid
@@ -129,33 +133,39 @@ search:
   sparse_weight: 0.5
   rrf_k: 60
 
+logging:
+  level: INFO
+  max_bytes: 10485760
+  backup_count: 5
+  search_trace: true
+
 rerank:
   bge_base:
     enable: true
-    module: rerank/cross_encoder
     model_name: bge-reranker-base
+    import_path: rerank.cross_encoder.CrossEncoderRerank
   bge_large:
     enable: false
-    module: rerank/cross_encoder
     model_name: bge-reranker-large
+    import_path: rerank.cross_encoder.CrossEncoderRerank
   bge_m3:
     enable: false
-    module: rerank/cross_encoder
     model_name: bge-reranker-v2-m3
+    import_path: rerank.cross_encoder.CrossEncoderRerank
 
 ocr:
   rapid:
     enable: true
-    module: ocr/rapid
     model_name: rapidocr
+    import_path: ocr.rapid.RapidOCR
   paddle:
     enable: false
-    module: ocr/paddle
     model_name: paddleocr
+    import_path: ocr.paddle.PaddleOCR
   tesseract:
     enable: false
-    module: ocr/tesseract
     model_name: tesseract
+    import_path: ocr.tesseract.TesseractOCR
 ```
 
 BGE-M3 配置：
@@ -164,31 +174,31 @@ BGE-M3 配置：
 dense:
   bge_base:
     enable: false
-    module: dense/huggingface
     model_name: bge-base-zh-v1.5
+    import_path: dense.huggingface.HuggingFaceDense
   bge_m3:
     enable: true
-    module: dense/huggingface
     model_name: bge-m3
+    import_path: dense.huggingface.HuggingFaceDense
 
 sparse:
   bm25:
     enable: false
-    module: sparse/bm25
     tokenizer: jieba
+    import_path: sparse.bm25.BM25Sparse
   bge_m3:
     enable: true
-    module: sparse/qdrant_bge_m3
     model_name: bge-m3
+    import_path: sparse.qdrant_bge_m3.QdrantBGEM3Sparse
 
 store:
   qdrant:
     enable: true
-    module: store/qdrant
     url: http://localhost:6333
     collections:
       common: knowledge_common
       scoped: knowledge_scoped
+    import_path: store.qdrant.QdrantStore
 
 search:
   default_mode: hybrid
@@ -198,17 +208,23 @@ search:
   sparse_weight: 0.5
   rrf_k: 60
 
+logging:
+  level: INFO
+  max_bytes: 10485760
+  backup_count: 5
+  search_trace: true
+
 rerank:
   bge_m3:
     enable: true
-    module: rerank/cross_encoder
     model_name: bge-reranker-v2-m3
+    import_path: rerank.cross_encoder.CrossEncoderRerank
 
 ocr:
   rapid:
     enable: true
-    module: ocr/rapid
     model_name: rapidocr
+    import_path: ocr.rapid.RapidOCR
 ```
 
 不同向量库的连接字段不强行统一。统一的是 `store` 暴露给 `search` 的能力。
@@ -219,11 +235,11 @@ Qdrant 示例：
 store:
   qdrant:
     enable: true
-    module: store/qdrant
     url: http://localhost:6333
     collections:
       common: qdrant_knowledge_common
       scoped: qdrant_knowledge_scoped
+    import_path: store.qdrant.QdrantStore
 ```
 
 Chroma 本地持久化示例：
@@ -232,11 +248,11 @@ Chroma 本地持久化示例：
 store:
   chroma:
     enable: true
-    module: store/chroma
-    persist_dir: chroma_data/native
+    persist_dir: chroma_data
     collections:
       common: chroma_knowledge_common
       scoped: chroma_knowledge_scoped
+    import_path: store.chroma.ChromaStore
 ```
 
 Milvus 示例：
@@ -245,21 +261,27 @@ Milvus 示例：
 store:
   milvus:
     enable: true
-    module: store/milvus
     uri: http://localhost:19530
     collections:
       common: milvus_knowledge_common
       scoped: milvus_knowledge_scoped
+    import_path: store.milvus.MilvusStore
 ```
 
 Milvus 配置文件同时保留 Standalone 和 Lite 两种 store 组件，通过 `enable: true` 选择一个。Milvus 的运行形态由 `uri` 决定：
 
 ```text
-milvus_data/lite/native/lite.db -> Milvus Lite，本地文件
+milvus_data/lite/lite.db -> Milvus Lite，本地文件
 http://localhost:19530          -> Milvus Standalone，Docker 服务
 ```
 
 因此不需要为 Standalone 再复制一套配置文件。要切换运行形态，只改 `milvus.yaml` 里两个 store 组件的 `enable`。
+
+Milvus 的索引策略按运行形态区分：
+
+- Milvus Standalone 使用 LangChain Milvus 默认索引参数。
+- Milvus Lite 的 dense 索引显式使用 `FLAT`。Lite 是嵌入式本地库，之前在本机评测中 HNSW/FAISS 后台建索引触发过进程崩溃；`FLAT` 不做近似索引构建，适合本地开发和小数据量 benchmark。
+- Milvus Lite 的 sparse 索引仍按 sparse 类型选择：`bge_m3` 使用 sparse inverted index，`milvus_bm25` 使用 BM25/AUTOINDEX。
 
 ---
 
@@ -280,8 +302,9 @@ backend/
   schema.py
 
   config/
-    default.yaml
-    docker.yaml
+    local.yaml
+    docker-cpu.yaml
+    docker-gpu.yaml
     qdrant.yaml
     chroma.yaml
     milvus.yaml
@@ -295,7 +318,6 @@ backend/
     bm25.py
     bge_m3_common.py
     qdrant_bge_m3.py
-    chroma_bge_m3.py
     milvus_bge_m3.py
     milvus_bm25.py
 
@@ -335,7 +357,7 @@ backend/
 | `config.py` | 应用配置入口，暴露搜索参数、模型路径、向量库配置 |
 | `device.py` | 检测当前可用计算设备；有 GPU 时优先使用 GPU，否则使用 CPU |
 | `download_models.py` | 下载或准备本地模型目录 |
-| `loader.py` | 读取 `CONFIG_FILE` 指定的 yaml；未设置时读取 `default.yaml` |
+| `loader.py` | 读取 `CONFIG_FILE` 指定的 yaml；未设置时读取 `local.yaml` |
 | `schema.py` | 校验配置结构和默认值 |
 | `document_parser.py` | 文件解析、OCR 调用、文本清理、chunk 生成 |
 | `dense/` | 生成 dense 向量 |
@@ -353,7 +375,7 @@ backend/
 - 当前 HuggingFace dense 实现命名为 `HuggingFaceDense`。
 - dense 模型通过 yaml 的 `model_name` 指定，启动时解析到 `models/` 下的实际路径。
 - BGE-M3 的模型加载和 lexical weights 归一化放在 `sparse/bge_m3_common.py`。
-- BGE-M3 的 sparse 向量库适配按向量库拆开，例如 `sparse/qdrant_bge_m3.py`、`sparse/chroma_bge_m3.py`、`sparse/milvus_bge_m3.py`，不放在 `dense/` 里。
+- BGE-M3 的 sparse 向量库适配按向量库拆开，例如 `sparse/qdrant_bge_m3.py`、`sparse/milvus_bge_m3.py`，不放在 `dense/` 里。
 
 ---
 
@@ -362,7 +384,7 @@ backend/
 启动目标流程：
 
 ```text
-1. 读取 CONFIG_FILE，未设置时使用 default.yaml
+1. 读取 CONFIG_FILE，未设置时使用 local.yaml
 2. 解析 yaml
 3. 校验配置
 4. 创建 DI 容器
@@ -417,7 +439,7 @@ class Store:
     def sparse_uses_store(self, sparse: object | None = None) -> bool: ...
 ```
 
-`SearchPipeline` 只依赖 `Store` 接口，不直接依赖 `store.qdrant`、`store.chroma`、全局 store 模块函数或向量库 wrapper。BM25 模式使用 `get_search_documents()` 取文本，再交给 `sparse/bm25.py` 排序；BGE-M3 sparse 模式调用 store 的 `search_sparse()` / `search_hybrid()`，由对应向量库执行 sparse 查询。
+`SearchPipeline` 只依赖 `Store` 接口，不直接依赖 `store.qdrant`、`store.chroma`、全局 store 模块函数或向量库 wrapper。`bm25` sparse 使用 `get_search_documents()` 取文本，再交给 `sparse/bm25.py` 排序；`bge_m3` sparse 只用于支持稀疏向量的 store，由对应向量库执行 sparse 查询。
 
 写入规则：
 
@@ -432,9 +454,22 @@ class Store:
 
 ## 8. Sparse 能力
 
-`sparse` 有三种执行方式。
+`sparse` 有三种执行方式。搜索流程里统一表现为 Sparse Retriever，但内部有两种路线：
 
-BM25 sparse：
+```text
+应用内 Sparse Retriever
+  -> 先从 store 取候选文本
+  -> 应用内 `bm25` sparse 使用 `tokenizer=jieba` 打分
+  -> 适用于 sparse.type=bm25
+
+Store Sparse Retriever
+  -> 查询向量库 sparse vector / 内置 sparse 能力
+  -> 适用于 sparse.type=bge_m3 或 sparse.type=milvus_bm25
+```
+
+这两种都属于检索节点，都会放在 SearchPipeline 的 Retriever 位置；区别只是 sparse 分数在哪里计算。
+
+`bm25` sparse：
 
 ```yaml
 sparse:
@@ -449,7 +484,7 @@ sparse:
 3. 返回排序后的结果
 ```
 
-当前实现使用 jieba + BM25：
+当前实现使用 `bm25` sparse + `tokenizer=jieba`：
 
 ```text
 1. jieba 对查询和候选文本分词
@@ -458,7 +493,7 @@ sparse:
 4. 不返回零命中文本
 ```
 
-BGE-M3 sparse：
+BGE-M3 store sparse：
 
 ```yaml
 sparse:
@@ -474,7 +509,7 @@ sparse:
 4. store 执行 sparse vector 查询
 ```
 
-Milvus 内置 BM25：
+`milvus_bm25` sparse：
 
 ```yaml
 sparse:
@@ -484,25 +519,24 @@ sparse:
 流程：
 
 ```text
-1. 上传时 Milvus 按 analyzer 从文本生成 BM25 sparse vector
+1. 上传时 `milvus_bm25` sparse 按 Milvus analyzer 从文本生成 BM25 sparse vector
 2. 查询时 Milvus 对查询文本执行同一套 analyzer
 3. sparse 和 hybrid 都由 Milvus 执行
 ```
 
-当前 Milvus 内置 BM25 使用 Milvus analyzer 的 `jieba` tokenizer，便于中文评估。它和应用内 `jieba + BM25` 是两条不同路线，配置文件分开。
+当前 `milvus_bm25` 使用 Milvus analyzer 的 `jieba` tokenizer，便于中文评估。它和应用内 `bm25` sparse 是两条不同路线，配置文件分开。
 
 这个设计可以兼容：
 
 ```text
-Qdrant + jieba/BM25
-Qdrant + BGE-M3 sparse vector
-Chroma + jieba/BM25
-Chroma + BGE-M3 dense + jieba/BM25
-Chroma + BGE-M3 sparse vector（Chroma Cloud 支持 sparse vector index；当前 Chroma 本地运行模式不支持）
-Milvus + jieba/BM25
-Milvus + BGE-M3 dense + jieba/BM25
-Milvus + BGE-M3 sparse vector
-Milvus + 内置 BM25
+Qdrant + `bm25` sparse
+Qdrant + `bge_m3` sparse
+Chroma + `bm25` sparse
+Chroma + `bge_m3` dense + `bm25` sparse
+Milvus + `bm25` sparse
+Milvus + `bge_m3` dense + `bm25` sparse
+Milvus + `bge_m3` sparse
+Milvus + `milvus_bm25` sparse
 ```
 
 ---
@@ -642,20 +676,41 @@ rerank=true  -> retrieve_limit = fetch_k
 
 ```text
 1. 检查 application 已 ready
-2. 构造 common filter: namespace = plan.namespace
-3. 始终查询 common
-4. 如果请求带 scope_ids，同时构造 scoped filter 并查询 scoped
-5. 合并结果并按文档 id 去重
-6. rerank=true 时，对合并候选执行 rerank
-7. 最多返回 top_k 条
+2. SearchPlan 进入 SearchPipeline Runnable
+3. prepare_plan 计算 retrieve_limit
+4. retrieve_common_and_scoped 使用 RunnableParallel 并发查询 common / scoped
+5. hybrid 且 sparse 不由 store 执行时，dense / sparse 使用 RunnableParallel 并发查询
+6. fusion 对 dense / sparse 结果做加权倒数排名融合
+7. dedupe 合并 common / scoped 并按文档 id 去重
+8. rerank=true 时，对合并候选执行 rerank
+9. format_response 最多返回 top_k 条
 ```
+
+Runnable 结构：
+
+```text
+SearchPipeline RunnableSequence
+  prepare_plan
+  retrieve_common_and_scoped RunnableParallel
+    common
+      dense/sparse Retriever RunnableParallel
+      fusion
+    scoped
+      dense/sparse Retriever RunnableParallel
+      fusion
+  dedupe
+  rerank
+  format_response
+```
+
+dense、sparse、store-hybrid 检索节点使用 LangChain `BaseRetriever`。这些节点会触发 LangChain retriever 生命周期事件，开启 LangSmith 后会显示为 retriever run。`prepare_plan`、`fusion`、`dedupe`、`rerank`、`format_response` 不是检索动作，继续使用普通 Runnable 阶段。
 
 三种检索模式：
 
 ```text
-dense  -> SearchPipeline 调用 Store.search_dense()，由具体 store 实现 dense 查询
-sparse -> BM25 在应用内检索；BGE-M3 sparse 由向量库检索
-hybrid -> BM25 时应用层融合；BGE-M3 sparse 时由向量库 hybrid 检索
+dense  -> Dense Retriever 调用 Store.search_dense()，由具体 store 实现 dense 查询
+sparse -> 应用内 Sparse Retriever 执行 BM25，或 Store Sparse Retriever 调用向量库 sparse 查询
+hybrid -> dense + 应用内 Sparse Retriever 并发后应用层融合；store sparse/hybrid 时使用 Store Hybrid Retriever
 ```
 
 并发规则：
@@ -677,26 +732,64 @@ hybrid -> BM25 时应用层融合；BGE-M3 sparse 时由向量库 hybrid 检索
 
 ---
 
-## 14. BGE-M3 扩展
+## 14. 日志
 
-BGE-M3 作为新增配置组合接入，不替换 BGE-base 组合。
+日志配置跟随业务 yaml：
+
+```yaml
+logging:
+  level: INFO
+  max_bytes: 10485760
+  backup_count: 5
+  search_trace: true
+```
+
+默认只输出到 stdout，不写本地文件。如果配置 `file`，则同时写 stdout 和本地滚动文件：
+
+```yaml
+logging:
+  level: INFO
+  file: logs/rag.jsonl
+  max_bytes: 10485760
+  backup_count: 5
+  search_trace: true
+```
+
+日志格式统一是 JSONL，一行一条 JSON。普通应用日志和搜索链路日志使用同一个格式，通过 `logger` 和 `event` 区分：
+
+```json
+{"logger":"rag.app","event":"startup_ready","message":"Startup model preload done"}
+{"logger":"rag.trace","event":"search_trace","query":"查询内容","mode":"hybrid","elapsed_ms":123.4}
+```
+
+`rag.app` 记录启动、关闭、模型加载、OCR 加载、上传、删除、异常等应用事件。`rag.trace` 记录一次搜索的链路信息，包括查询参数、总耗时、结果数量和阶段耗时。`search_trace: false` 时不输出搜索链路日志。
+
+Docker 模式下，应用仍输出 JSONL 到 stdout。Docker Compose 使用 `json-file` driver 按大小滚动容器日志，避免日志无限增长。
+
+LangSmith 和本地 JSONL 日志可以同时开启。LangSmith 用于查看 LangChain Runnable / Retriever 的可视化链路；JSONL 日志是本地和生产环境都能保留的基础日志。
+
+---
+
+## 15. BGE-M3 扩展
+
+`bge-m3` 作为新增配置组合接入，不替换 `bge-base-zh-v1.5` 组合。
 
 当前组合：
 
 ```text
 dense  -> bge-base-zh-v1.5
-sparse -> jieba + BM25
+sparse -> bm25 + tokenizer=jieba
 store  -> Qdrant dense vector
 rerank -> bge-reranker-base
 ```
 
-BGE-M3 组合：
+`bge-m3` 相关组合：
 
 ```text
-dense  -> BGE-M3 dense vector，仍通过 LangChain HuggingFaceEmbeddings 执行
-sparse -> BM25 时走应用内检索；BGE-M3 时走向量库 sparse vector
-store  -> Qdrant 或 Chroma dense vector；BGE-M3 sparse 配置会同时保存 sparse vector
-rerank -> BGE-M3 reranker
+dense  -> bge-m3 dense vector，仍通过 LangChain HuggingFaceEmbeddings 执行
+sparse -> bm25 时走应用内检索；bge_m3 时走向量库 sparse vector
+store  -> Qdrant 或 Milvus 使用 bge_m3 sparse 时会同时保存 sparse vector；Chroma 当前只使用 dense vector + 应用内 bm25
+rerank -> bge-reranker-v2-m3
 ```
 
 相关文件：
@@ -704,7 +797,6 @@ rerank -> BGE-M3 reranker
 ```text
 sparse/qdrant_bge_m3.py
 sparse/bge_m3_common.py
-sparse/chroma_bge_m3.py
 sparse/milvus_bge_m3.py
 schema.py
 bootstrap.py
@@ -716,21 +808,22 @@ search/pipeline.py
 backend/config/qdrant.yaml
 backend/config/chroma.yaml
 backend/config/milvus.yaml
-backend/config/default.yaml
-backend/config/docker.yaml
+backend/config/local.yaml
+backend/config/docker-cpu.yaml
+backend/config/docker-gpu.yaml
 ```
 
 索引规则：
 
-- BGE-M3 和 BGE-base 不能混用同一个已有索引；切换配置后需要重新上传、重建索引，或改用另一组 collection 名。
+- `bge-m3` 和 `bge-base-zh-v1.5` 不能混用同一个已有索引；切换配置后需要重新上传、重建索引，或改用另一组 collection 名。
 - 不在同一个 collection 里混用不同 dense 向量维度。
-- 不在旧 dense-only collection 里直接写入 BGE-M3 sparse vector。
+- 不在旧 dense-only collection 里直接写入 BGE-M3 store sparse vector。
 - 代码不会在启动时阻止使用已有 collection；切换模型、sparse 类型或向量库结构后，由配置和 collection 名约定保证索引不混用。
 - 测试用例使用测试 collection 或临时目录，不复用生产 collection。
 
 ---
 
-## 15. API
+## 16. API
 
 ### 上传
 
@@ -825,7 +918,7 @@ Multipart fields：
 
 ---
 
-## 16. 前端
+## 17. 前端
 
 上传区：
 
@@ -851,7 +944,7 @@ Multipart fields：
 
 ---
 
-## 17. 部署
+## 18. 部署
 
 后端启动只依赖一个配置入口：
 
@@ -864,12 +957,13 @@ CONFIG_FILE=/path/to/config.yaml
 - 向量库使用独立持久化存储。
 - 模型文件保存在固定路径。
 - 配置文件由部署环境指定。
+- LangSmith tracing 由部署环境通过 `LANGSMITH_TRACING`、`LANGSMITH_API_KEY`、`LANGSMITH_PROJECT` 控制，不写入 yaml。
 - 不同检索组合使用不同 collection 或 index。
 - Qdrant、Chroma、Milvus 等具体服务按各自方式部署。Milvus Standalone 使用 `--profile milvus` 启动；Milvus Lite 不需要 Docker 服务，只需要把 `uri` 指向本地 `.db` 文件。
 - 同名文件替换使用 document key 细粒度锁或按 document key 分区的写入队列。
 - 向量库数据目录需要独立备份。
 
-Docker 开发模式分 CPU 和 GPU 两套 compose。CPU 配置位于 `deploy/cpu/docker-compose.yml`，GPU 配置位于 `deploy/gpu/docker-compose.yml`。Docker 后端默认使用 `docker.yaml`，代码目录挂载进容器，`uvicorn --reload` 会在代码变更后自动重启。前端使用 Vite dev server，代码目录挂载进容器，支持热更新。
+Docker 开发模式分 CPU 和 GPU 两套 compose。CPU 配置位于 `deploy/cpu/docker-compose.yml`，默认使用 `docker-cpu.yaml`；GPU 配置位于 `deploy/gpu/docker-compose.yml`，默认使用 `docker-gpu.yaml`。代码目录挂载进容器，`uvicorn --reload` 会在代码变更后自动重启。前端使用 Vite dev server，代码目录挂载进容器，支持热更新。
 
 GPU Docker 配置在 `deploy/gpu/docker-compose.yml`，GPU 声明使用 Docker Compose 官方推荐的 device reservation 写法：
 
@@ -887,11 +981,8 @@ deploy:
 
 ```text
 qdrant_data/
-  docker/
 
 chroma_data/
-  native/
-  docker/
 
 milvus_data/
   standalone/
@@ -899,8 +990,7 @@ milvus_data/
     minio/
     milvus/
   lite/
-    native/
-    docker/
+    lite.db
 ```
 
-Qdrant 和 Milvus Standalone 是服务型数据库，backend 通过网络访问。Chroma local 和 Milvus Lite 是嵌入式文件库，native 和 Docker 使用不同子目录，避免两个运行环境同时读写同一份文件。
+Qdrant 和 Milvus Standalone 是服务型数据库，backend 通过网络访问。Chroma local 和 Milvus Lite 是嵌入式文件库，本地后端和 Docker 后端使用同一份数据目录；不要同时启动两个后端访问同一份嵌入式库文件。

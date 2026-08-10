@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import logging
+
 import device
 
 from config import DENSE_MODEL_DIR
+
+logger = logging.getLogger("rag.app")
 
 
 class HuggingFaceDense:
@@ -14,7 +18,7 @@ class HuggingFaceDense:
 
     def start(self) -> None:
         if self._dense is None:
-            print(f"Loading dense model: {self.model_name} ...")
+            logger.info("Loading dense model", extra={"event": "model_load", "component": "dense", "model": self.model_name})
             from langchain_huggingface import HuggingFaceEmbeddings
             self._dense = HuggingFaceEmbeddings(model_name=self.model_name, model_kwargs={"device": device.auto_device()})
         if self._vector_size is None:

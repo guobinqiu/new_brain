@@ -71,16 +71,17 @@ def test_paddle_ocr_extracts_result_texts():
     assert application.image_to_text("image.png") == "百度\nPaddleOCR"
 
 
-def test_paddle_ocr_prints_loading_message(monkeypatch, capsys):
+def test_paddle_ocr_logs_loading_message(monkeypatch, caplog):
     from ocr.paddle import PaddleOCR
 
     monkeypatch.setattr(PaddleOCR, "_load_ocr", lambda self: object())
 
     application = PaddleOCR(model_dir="/models/paddleocr")
 
+    caplog.set_level("INFO", logger="rag.app")
     application.start()
 
-    assert "Loading PaddleOCR: /models/paddleocr ..." in capsys.readouterr().out
+    assert "Loading PaddleOCR" in caplog.text
 
 
 def test_tesseract_ocr_extracts_text_with_langchain_parser():
@@ -101,13 +102,14 @@ def test_tesseract_ocr_extracts_text_with_langchain_parser():
     assert application.image_to_text("image.png") == "Tesseract\nOCR"
 
 
-def test_tesseract_ocr_prints_loading_message(monkeypatch, capsys):
+def test_tesseract_ocr_logs_loading_message(monkeypatch, caplog):
     from ocr.tesseract import TesseractOCR
 
     monkeypatch.setattr(TesseractOCR, "_load_parser", lambda self: object())
 
     application = TesseractOCR(langs=("eng", "chi_sim"))
 
+    caplog.set_level("INFO", logger="rag.app")
     application.start()
 
-    assert "Loading Tesseract OCR languages: eng+chi_sim ..." in capsys.readouterr().out
+    assert "Loading Tesseract OCR" in caplog.text

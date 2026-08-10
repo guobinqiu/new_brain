@@ -11,10 +11,10 @@ def test_milvus_store_resolves_local_lite_uri_from_project_root(tmp_path):
     backend_dir = project_root / "backend"
     backend_dir.mkdir(parents=True)
 
-    uri = milvus._connection_uri("milvus_data/lite/native/lite.db", project_root=project_root)
+    uri = milvus._connection_uri("milvus_data/lite/lite.db", project_root=project_root)
 
-    assert uri == str(project_root / "milvus_data" / "lite" / "native" / "lite.db")
-    assert (project_root / "milvus_data" / "lite" / "native").is_dir()
+    assert uri == str(project_root / "milvus_data" / "lite" / "lite.db")
+    assert (project_root / "milvus_data" / "lite").is_dir()
 
 
 def test_milvus_store_keeps_remote_uri_unchanged():
@@ -85,6 +85,174 @@ def test_milvus_store_uses_builtin_function_as_store_sparse():
     from sparse.milvus_bm25 import MilvusBM25Sparse
 
     assert milvus._sparse_uses_store(MilvusBM25Sparse())
+
+
+def test_milvus_close_store_closes_underlying_clients(monkeypatch):
+    from store import milvus
+
+    closed = []
+
+    class FakeClient:
+        def __init__(self, name):
+            self.name = name
+
+        def close(self):
+            closed.append(self.name)
+
+    class FakeStore:
+        def __init__(self, name):
+            self.client = FakeClient(f"{name}.client")
+            self._milvus_client = FakeClient(f"{name}._milvus_client")
+
+    milvus.close_store()
+    monkeypatch.setattr(milvus, "_stores", {
+        ("common", "dense"): FakeStore("common.dense"),
+        ("common", "sparse"): FakeStore("common.sparse"),
+    })
+
+    milvus.close_store()
+
+    assert closed == [
+        "common.dense.client",
+        "common.dense._milvus_client",
+        "common.sparse.client",
+        "common.sparse._milvus_client",
+    ]
+    assert milvus._stores == {}
+
+
+def test_milvus_close_store_releases_local_lite_server(monkeypatch):
+    from store import milvus
+
+    released = []
+
+    monkeypatch.setattr(milvus, "_uri", "milvus_data/lite/lite.db")
+    monkeypatch.setattr(milvus, "_connection_uri", lambda uri: "/tmp/rag/milvus_data/lite/lite.db")
+    monkeypatch.setattr(milvus, "_release_lite_server", lambda uri: released.append(uri))
+
+    milvus.close_store()
+
+    assert released == ["/tmp/rag/milvus_data/lite/lite.db"]
+
+
+def test_milvus_close_store_does_not_release_standalone_server(monkeypatch):
+    from store import milvus
+
+    released = []
+
+    monkeypatch.setattr(milvus, "_uri", "http://localhost:19530")
+    monkeypatch.setattr(milvus, "_release_lite_server", lambda uri: released.append(uri))
+
+    milvus.close_store()
+
+    assert released == []
+
+
+def test_milvus_drop_collections_keeps_local_lite_server_for_following_start(monkeypatch):
+    from store import milvus
+
+    released = []
+
+    class FakeClient:
+        def __init__(self, uri):
+            self.uri = uri
+
+        def has_collection(self, collection_name):
+            return False
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(milvus, "_uri", "milvus_data/lite/lite.db")
+    monkeypatch.setattr(milvus, "_connection_uri", lambda uri: "/tmp/rag/milvus_data/lite/lite.db")
+    monkeypatch.setattr(milvus, "_release_lite_server", lambda uri: released.append(uri))
+    monkeypatch.setattr("pymilvus.MilvusClient", FakeClient)
+
+    milvus.drop_collections()
+
+    assert released == []
+
+
+def test_milvus_store_uses_ip_metric_for_embedding_sparse_and_bm25_metric_for_builtin_sparse(monkeypatch):
+    from store import milvus
+    from langchain_milvus.utils.sparse import BaseSparseEmbedding
+    from sparse.milvus_bm25 import MilvusBM25Sparse
+
+    class FakeStoreSparse(BaseSparseEmbedding):
+        ready = True
+
+        def start(self):
+            pass
+
+        def embed_query(self, query):
+            return {1: 1.0}
+
+        def embed_documents(self, texts):
+            return [{1: 1.0} for _ in texts]
+
+    milvus.close_store()
+    monkeypatch.setattr(milvus, "_sparse", FakeStoreSparse())
+    assert milvus._search_params_for_mode("sparse") == {"metric_type": "IP", "params": {}}
+    assert milvus._search_params_for_mode("hybrid")[1] == {"metric_type": "IP", "params": {}}
+
+    milvus.close_store()
+    monkeypatch.setattr(milvus, "_sparse", MilvusBM25Sparse())
+    assert milvus._search_params_for_mode("sparse") == {"metric_type": "BM25", "params": {}}
+    assert milvus._search_params_for_mode("hybrid")[1] == {"metric_type": "BM25", "params": {}}
+
+
+def test_milvus_lite_uses_flat_dense_index_to_avoid_hnsw_faiss_background_build(monkeypatch):
+    from store import milvus
+    from langchain_milvus.utils.sparse import BaseSparseEmbedding
+    from sparse.milvus_bm25 import MilvusBM25Sparse
+
+    class FakeStoreSparse(BaseSparseEmbedding):
+        ready = True
+
+        def start(self):
+            pass
+
+        def embed_query(self, query):
+            return {1: 1.0}
+
+        def embed_documents(self, texts):
+            return [{1: 1.0} for _ in texts]
+
+    milvus.close_store()
+    monkeypatch.setattr(milvus, "_uri", "milvus_data/lite/lite.db")
+    monkeypatch.setattr(milvus, "_sparse", None)
+    assert milvus._index_params_for_mode("dense") == {"metric_type": "L2", "index_type": "FLAT", "params": {}}
+
+    monkeypatch.setattr(milvus, "_sparse", FakeStoreSparse())
+    assert milvus._index_params_for_mode("hybrid") == [
+        {"metric_type": "L2", "index_type": "FLAT", "params": {}},
+        {"metric_type": "IP", "index_type": "SPARSE_INVERTED_INDEX", "params": {"drop_ratio_build": 0.2}},
+    ]
+
+    monkeypatch.setattr(milvus, "_sparse", MilvusBM25Sparse())
+    assert milvus._index_params_for_mode("hybrid") == [
+        {"metric_type": "L2", "index_type": "FLAT", "params": {}},
+        {"metric_type": "BM25", "index_type": "AUTOINDEX", "params": {}},
+    ]
+
+
+def test_milvus_builtin_bm25_hybrid_declares_dense_and_sparse_vector_fields(monkeypatch):
+    from store import milvus
+    from sparse.milvus_bm25 import MilvusBM25Sparse
+
+    milvus.close_store()
+    monkeypatch.setattr(milvus, "_sparse", MilvusBM25Sparse())
+
+    assert milvus._vector_field_for_mode("hybrid") == ["dense", "sparse"]
+
+
+def test_milvus_standalone_keeps_langchain_default_index_params(monkeypatch):
+    from store import milvus
+
+    milvus.close_store()
+    monkeypatch.setattr(milvus, "_uri", "http://localhost:19530")
+
+    assert milvus._index_params_for_mode("dense") is None
 
 
 def test_milvus_store_creates_empty_collections_during_initialization(monkeypatch):

@@ -7,7 +7,7 @@ pytestmark = pytest.mark.unit
 def test_qdrant_collection_names_are_production_names():
     from loader import load_config_file
 
-    config = load_config_file("config/default.yaml")
+    config = load_config_file("config/local.yaml")
 
     assert config.store.collections.common == "knowledge_common"
     assert config.store.collections.scoped == "knowledge_scoped"

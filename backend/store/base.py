@@ -18,6 +18,9 @@ class Store(Protocol):
     def stop(self) -> None:
         ...
 
+    def drop_collections(self) -> None:
+        ...
+
     def add_common_documents(self, chunks: list[dict], namespace: str = "default") -> int:
         ...
 

@@ -54,21 +54,51 @@ def test_backend_venv_is_not_mounted_over_image_environment():
         assert "../../backend/.venv-docker:/app/backend/.venv-docker" not in compose
 
 
-def test_embedded_database_dirs_are_separate_for_docker():
+def test_backend_mounts_database_dirs_without_docker_subdirectories():
     for compose_file in ("deploy/cpu/docker-compose.yml", "deploy/gpu/docker-compose.yml"):
         compose = (ROOT / compose_file).read_text(encoding="utf-8")
 
-        assert "../../chroma_data/docker:/app/chroma_data" in compose
-        assert "../../milvus_data/lite/docker:/app/milvus_data" in compose
-        assert "../../chroma_data:/app/chroma_data" not in compose
-        assert "../../milvus_data:/app/milvus_data" not in compose
+        assert "../../chroma_data:/app/chroma_data" in compose
+        assert "../../milvus_data/lite:/app/milvus_data/lite" in compose
+        assert "../../chroma_data/docker:/app/chroma_data" not in compose
+        assert "../../milvus_data/lite/docker:/app/milvus_data" not in compose
 
 
 def test_service_database_dirs_are_grouped_by_database():
     for compose_file in ("deploy/cpu/docker-compose.yml", "deploy/gpu/docker-compose.yml"):
         compose = (ROOT / compose_file).read_text(encoding="utf-8")
 
-        assert "../../qdrant_data/docker:/qdrant/storage" in compose
+        assert "../../qdrant_data:/qdrant/storage" in compose
+        assert "../../qdrant_data/docker:/qdrant/storage" not in compose
         assert "../../milvus_data/standalone/etcd:/etcd" in compose
         assert "../../milvus_data/standalone/minio:/minio_data" in compose
         assert "../../milvus_data/standalone/milvus:/var/lib/milvus" in compose
+
+
+def test_backend_passes_optional_langsmith_environment_to_container():
+    for compose_file in ("deploy/cpu/docker-compose.yml", "deploy/gpu/docker-compose.yml"):
+        compose = (ROOT / compose_file).read_text(encoding="utf-8")
+
+        assert "LANGSMITH_TRACING: ${LANGSMITH_TRACING:-false}" in compose
+        assert "LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}" in compose
+        assert "LANGSMITH_PROJECT: ${LANGSMITH_PROJECT:-rag-search}" in compose
+        assert "LANGSMITH_ENDPOINT: ${LANGSMITH_ENDPOINT:-https://api.smith.langchain.com}" in compose
+
+
+def test_deploy_uses_matching_backend_config_file():
+    cpu_compose = (ROOT / "deploy/cpu/docker-compose.yml").read_text(encoding="utf-8")
+    gpu_compose = (ROOT / "deploy/gpu/docker-compose.yml").read_text(encoding="utf-8")
+
+    assert "CONFIG_FILE: ${CONFIG_FILE:-docker-cpu.yaml}" in cpu_compose
+    assert "CONFIG_FILE: ${CONFIG_FILE:-docker-gpu.yaml}" in gpu_compose
+    assert "CONFIG_FILE: ${CONFIG_FILE:-docker.yaml}" not in cpu_compose
+    assert "CONFIG_FILE: ${CONFIG_FILE:-docker.yaml}" not in gpu_compose
+
+
+def test_deploy_services_use_bounded_json_file_logs():
+    for compose_file in ("deploy/cpu/docker-compose.yml", "deploy/gpu/docker-compose.yml"):
+        compose = (ROOT / compose_file).read_text(encoding="utf-8")
+
+        assert 'driver: "json-file"' in compose
+        assert 'max-size: "10m"' in compose
+        assert 'max-file: "5"' in compose

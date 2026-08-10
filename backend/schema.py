@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 
@@ -8,6 +8,7 @@ from typing import Any
 class DenseConfig:
     name: str
     model_path: str
+    import_path: str | None = None
 
 
 @dataclass(frozen=True)
@@ -15,6 +16,7 @@ class SparseConfig:
     name: str
     model_path: str | None = None
     tokenizer: str | None = None
+    import_path: str | None = None
 
 
 @dataclass(frozen=True)
@@ -30,6 +32,7 @@ class StoreConfig:
     url: str | None = None
     persist_dir: str | None = None
     uri: str | None = None
+    import_path: str | None = None
 
 
 @dataclass(frozen=True)
@@ -43,15 +46,26 @@ class SearchConfig:
 
 
 @dataclass(frozen=True)
+class LoggingConfig:
+    level: str = "INFO"
+    file: str | None = None
+    max_bytes: int = 10485760
+    backup_count: int = 5
+    search_trace: bool = True
+
+
+@dataclass(frozen=True)
 class RerankConfig:
     name: str
     model_path: str
+    import_path: str | None = None
 
 
 @dataclass(frozen=True)
 class OCRConfig:
     name: str
     model_path: str
+    import_path: str | None = None
 
 
 @dataclass(frozen=True)
@@ -62,6 +76,7 @@ class AppConfig:
     search: SearchConfig
     rerank: RerankConfig
     ocr: OCRConfig
+    logging: LoggingConfig = field(default_factory=LoggingConfig)
     name: str = ""
 
 
@@ -71,6 +86,7 @@ def parse_app_config(raw: dict[str, Any]) -> AppConfig:
     store = raw.get("store") or {}
     collections = store.get("collections") or {}
     search = raw.get("search") or {}
+    logging = raw.get("logging") or {}
     rerank = raw.get("rerank")
     ocr = raw.get("ocr")
 
@@ -79,35 +95,40 @@ def parse_app_config(raw: dict[str, Any]) -> AppConfig:
     sparse_name = _sparse_name(sparse)
     rerank_name = _component_name(rerank, "rerank")
     ocr_name = _component_name(ocr, "ocr")
-    _validate_supported("dense", dense_name, {"test_dense", "bge_base_zh_v15", "bge_m3", "dense/huggingface"})
-    _validate_supported("sparse", sparse_name, {"bm25", "bge_m3", "milvus_bm25", "sparse/bm25", "sparse/qdrant_bge_m3", "sparse/chroma_bge_m3", "sparse/milvus_bge_m3", "sparse/milvus_bm25"})
-    _validate_supported("rerank", rerank_name, {"test_rerank", "bge_reranker_base", "bge_reranker_large", "bge_reranker_v2_m3", "rerank/cross_encoder"})
-    _validate_supported("ocr", ocr_name, {"test_ocr", "rapidocr", "paddleocr", "tesseract", "ocr/rapid", "ocr/paddle", "ocr/tesseract"})
-    _validate_supported("store.type", store_type, {"qdrant", "chroma", "milvus", "store/qdrant", "store/chroma", "store/milvus"})
+    _validate_supported("dense", dense_name, {"test_dense", "bge_base", "bge_base_zh_v15", "bge_m3", "dense/huggingface"})
+    _validate_supported("sparse", sparse_name, {"bm25", "bge_m3", "milvus_bm25", "sparse/bm25", "sparse/qdrant_bge_m3", "sparse/milvus_bge_m3", "sparse/milvus_bm25"})
+    _validate_supported("rerank", rerank_name, {"test_rerank", "bge_base", "bge_large", "bge_m3", "bge_reranker_base", "bge_reranker_large", "bge_reranker_v2_m3", "rerank/cross_encoder"})
+    _validate_supported("ocr", ocr_name, {"test_ocr", "rapid", "paddle", "rapidocr", "paddleocr", "tesseract", "ocr/rapid", "ocr/paddle", "ocr/tesseract"})
+    _validate_supported("store.type", store_type, {"qdrant", "chroma", "milvus", "milvus_lite", "store/qdrant", "store/chroma", "store/milvus"})
     _validate_supported("search.default_mode", search.get("default_mode", "hybrid"), {"dense", "sparse", "hybrid"})
     if store_type in ("qdrant", "store/qdrant"):
         _required(store, "url", "store")
     if store_type in ("chroma", "store/chroma"):
         _required(store, "persist_dir", "store")
-    if store_type in ("milvus", "store/milvus"):
+    if store_type in ("milvus", "milvus_lite", "store/milvus"):
         _required(store, "uri", "store")
-    sparse_model_path = _required(sparse, "model_path", "sparse") if sparse_name in ("bge_m3", "sparse/qdrant_bge_m3", "sparse/chroma_bge_m3", "sparse/milvus_bge_m3") else None
+    if store_type in ("chroma", "store/chroma") and sparse_name == "bge_m3":
+        raise ValueError("Chroma 不支持 bge_m3 sparse")
+    sparse_model_path = _required(sparse, "model_path", "sparse") if sparse_name in ("bge_m3", "sparse/qdrant_bge_m3", "sparse/milvus_bge_m3") else None
 
     return AppConfig(
         dense=DenseConfig(
             name=dense_name,
             model_path=_required(dense, "model_path", "dense"),
+            import_path=dense.get("import_path"),
         ),
         sparse=SparseConfig(
             name=sparse_name,
             model_path=sparse_model_path,
             tokenizer=sparse.get("tokenizer"),
+            import_path=sparse.get("import_path"),
         ),
         store=StoreConfig(
             type=store_type,
             url=store.get("url"),
             persist_dir=store.get("persist_dir"),
             uri=store.get("uri"),
+            import_path=store.get("import_path"),
             collections=StoreCollectionsConfig(
                 common=_required(collections, "common", "store.collections"),
                 scoped=_required(collections, "scoped", "store.collections"),
@@ -121,13 +142,22 @@ def parse_app_config(raw: dict[str, Any]) -> AppConfig:
             sparse_weight=float(search.get("sparse_weight", 0.5)),
             rrf_k=int(search.get("rrf_k", 60)),
         ),
+        logging=LoggingConfig(
+            level=str(logging.get("level", "INFO")),
+            file=logging.get("file"),
+            max_bytes=int(logging.get("max_bytes", 10485760)),
+            backup_count=int(logging.get("backup_count", 5)),
+            search_trace=bool(logging.get("search_trace", True)),
+        ),
         rerank=RerankConfig(
             name=rerank_name,
             model_path=_required(rerank, "model_path", "rerank"),
+            import_path=rerank.get("import_path"),
         ),
         ocr=OCRConfig(
             name=ocr_name,
             model_path=_required(ocr, "model_path", "ocr"),
+            import_path=ocr.get("import_path"),
         ),
     )
 

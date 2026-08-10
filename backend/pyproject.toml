@@ -100,4 +100,5 @@ markers = [
     "integration: tests touching local stores or model-backed components",
     "e2e: HTTP/API workflow tests",
     "smoke: minimal availability tests",
+    "benchmark: long-running search benchmark tests",
 ]

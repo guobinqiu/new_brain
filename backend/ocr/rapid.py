@@ -1,22 +1,28 @@
 from __future__ import annotations
 
+import logging
+
 from config import RAPIDOCR_MODEL_DIR
+
+logger = logging.getLogger("rag.app")
 
 
 class RapidOCR:
     def __init__(self, model_dir: str | None = RAPIDOCR_MODEL_DIR):
         self.model_dir = model_dir
         self._parser = None
+        self._ocr = None
         self.ready = False
 
     def start(self) -> None:
         if self._parser is None:
-            print(f"Loading RapidOCR: {self.model_dir} ...")
+            logger.info("Loading RapidOCR", extra={"event": "ocr_load", "component": "ocr", "ocr": "rapidocr", "model_dir": self.model_dir})
             self._parser = self._load_parser()
         self.ready = True
 
     def stop(self) -> None:
         self._parser = None
+        self._ocr = None
         self.ready = False
 
     def image_to_text(self, image_path: str) -> str:
@@ -33,7 +39,8 @@ class RapidOCR:
 
         parser = RapidOCRBlobParser()
         if self.model_dir:
-            parser.ocr = _load_rapidocr(self.model_dir)
+            self._ocr = _load_rapidocr(self.model_dir)
+            parser.ocr = self._ocr
         return parser
 
 

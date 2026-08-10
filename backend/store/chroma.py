@@ -63,6 +63,10 @@ class ChromaStore:
         close_store()
         self.dense.stop()
 
+    def drop_collections(self) -> None:
+        _configure_store(self.persist_dir, self.common_collection, self.scoped_collection)
+        drop_collections()
+
     @property
     def ready(self) -> bool:
         return is_search_ready()
@@ -117,6 +121,16 @@ def close_store():
     _stores.clear()
     _client = None
     _ready = False
+
+
+def drop_collections() -> None:
+    client = _get_chroma_client()
+    for collection_name in COLLECTION_BY_TYPE.values():
+        try:
+            client.delete_collection(collection_name)
+        except Exception:
+            pass
+    _stores.clear()
 
 
 def init_store(
@@ -209,6 +223,10 @@ def _sparse_uses_store(sparse: Sparse | None = None) -> bool:
     return isinstance(candidate, SparseEmbeddingFunction)
 
 
+def sparse_uses_store(sparse: Sparse | None = None) -> bool:
+    return _sparse_uses_store(sparse)
+
+
 def _store_for(collection_type: CollectionType, mode: SearchMode):
     _require_search_ready()
     key = (collection_type, mode)
@@ -261,9 +279,7 @@ def _ensure_collection(collection_type: CollectionType) -> None:
         except Exception as exc:
             if "Sparse vector indexing is not enabled in local" in str(exc):
                 raise RuntimeError(
-                    "Chroma Cloud supports sparse vector indexing, but Chroma local mode does not. "
-                    "Use sparse.type=bm25 for local Chroma, or use Chroma Cloud / a Chroma service "
-                    "with sparse vector indexing enabled."
+                    "本地 Chroma 不支持 store sparse。Chroma 本地配置请使用 sparse.type=bm25。"
                 ) from exc
             raise
         return

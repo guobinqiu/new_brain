@@ -10,12 +10,16 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-os.environ.setdefault("CONFIG_FILE", str(BACKEND_DIR / "config" / "default.yaml"))
+os.environ.setdefault("CONFIG_FILE", str(BACKEND_DIR / "config" / "local.yaml"))
 
 
 @pytest.fixture(autouse=True)
-def store_test_env(tmp_path):
+def store_test_env(request, tmp_path):
     """Save and restore Qdrant store module state for each test."""
+    if request.node.get_closest_marker("benchmark"):
+        yield
+        return
+
     import store as st
     import config as cf
 
@@ -40,7 +44,7 @@ def store_test_env(tmp_path):
     _drop_qdrant_collection(cf.QDRANT_URL, scoped_collection)
     test_config_path = tmp_path / "qdrant_test.yaml"
     test_config_path.write_text(
-        (BACKEND_DIR / "config" / "default.yaml")
+        (BACKEND_DIR / "config" / "local.yaml")
         .read_text(encoding="utf-8")
         .replace("common: knowledge_common", f"common: {common_collection}")
         .replace("scoped: knowledge_scoped", f"scoped: {scoped_collection}"),
@@ -159,11 +163,16 @@ class RealisticFakeReranker:
 
 
 @pytest.fixture(autouse=True)
-def mock_reranker(monkeypatch):
+def mock_reranker(request, monkeypatch):
     """Mock CrossEncoder loading so tests never download bge-reranker-base."""
+    if request.node.get_closest_marker("benchmark"):
+        yield
+        return
+
     from rerank.cross_encoder import CrossEncoderRerank
 
     monkeypatch.setattr(CrossEncoderRerank, "_load_reranker", lambda self: FakeReranker())
+    yield
 
 
 @pytest.fixture

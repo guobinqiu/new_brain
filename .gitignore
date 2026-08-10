@@ -17,6 +17,13 @@ chroma_data/
 milvus_data/
 qdrant_data/
 
+# 日志与测试产物
+logs/
+*.log
+.coverage
+htmlcov/
+.ruff_cache/
+
 # Node / 前端
 node_modules/
 .node_modules-docker/

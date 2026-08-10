@@ -4,20 +4,13 @@ logging:
   backup_count: 5
   search_trace: true
 store:
-  milvus:
+  qdrant:
     enable: true
-    uri: http://localhost:19530
+    url: http://localhost:6333
     collections:
-      common: milvus_knowledge_common
-      scoped: milvus_knowledge_scoped
-    import_path: store.milvus.MilvusStore
-  milvus_lite:
-    enable: false
-    uri: milvus_data/lite/lite.db
-    collections:
-      common: milvus_knowledge_common
-      scoped: milvus_knowledge_scoped
-    import_path: store.milvus.MilvusStore
+      common: knowledge_common
+      scoped: knowledge_scoped
+    import_path: store.qdrant.QdrantStore
 dense:
   bge_base:
     enable: true
@@ -35,10 +28,7 @@ sparse:
   bge_m3:
     enable: false
     model_name: bge-m3
-    import_path: sparse.milvus_bge_m3.MilvusBGEM3Sparse
-  milvus_bm25:
-    enable: false
-    import_path: sparse.milvus_bm25.MilvusBM25Sparse
+    import_path: sparse.qdrant_bge_m3.QdrantBGEM3Sparse
 search:
   default_mode: hybrid
   top_k: 20

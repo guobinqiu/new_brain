@@ -129,7 +129,7 @@ def test_chroma_local_store_rejects_store_sparse_with_clear_error(tmp_path):
 
     chroma.close_store()
     try:
-        with pytest.raises(RuntimeError, match="Chroma Cloud supports sparse vector indexing"):
+        with pytest.raises(RuntimeError, match="本地 Chroma 不支持 store sparse"):
             chroma.init_store(
                 dense=FakeDense(),
                 sparse=FakeChromaSparse(),

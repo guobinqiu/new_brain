@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
 from config import PADDLEOCR_MODEL_DIR
+
+logger = logging.getLogger("rag.app")
 
 
 class PaddleOCR:
@@ -14,7 +17,7 @@ class PaddleOCR:
 
     def start(self) -> None:
         if self._ocr is None:
-            print(f"Loading PaddleOCR: {self.model_dir} ...")
+            logger.info("Loading PaddleOCR", extra={"event": "ocr_load", "component": "ocr", "ocr": "paddleocr", "model_dir": self.model_dir})
             self._ocr = self._load_ocr()
         self.ready = True
 

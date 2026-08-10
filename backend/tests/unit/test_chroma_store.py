@@ -12,10 +12,10 @@ def test_chroma_store_resolves_persist_dir_from_project_root(tmp_path):
     project_root = tmp_path / "rag"
     project_root.mkdir()
 
-    path = chroma._persist_path("chroma_data/native", project_root=project_root)
+    path = chroma._persist_path("chroma_data", project_root=project_root)
 
-    assert path == str(project_root / "chroma_data" / "native")
-    assert (project_root / "chroma_data" / "native").is_dir()
+    assert path == str(project_root / "chroma_data")
+    assert (project_root / "chroma_data").is_dir()
 
 
 def test_chroma_store_keeps_absolute_persist_dir(tmp_path):

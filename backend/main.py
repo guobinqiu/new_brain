@@ -1,5 +1,6 @@
 import os
 import tempfile
+import logging
 from contextlib import asynccontextmanager
 from typing import Literal
 
@@ -10,6 +11,10 @@ from bootstrap import Application
 from document_parser import parse_file
 from search import SearchPlan, _SearchExecutor
 from config import SEARCH_CONFIG
+from logging_config import configure_logging
+
+
+logger = logging.getLogger("rag.app")
 
 
 class SearchRequest(BaseModel):
@@ -34,13 +39,14 @@ application = Application()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """启动时预加载所有模型，避免请求时等待模型加载。"""
-    print("Preloading models ...")
+    configure_logging(application.config.logging)
+    logger.info("Preloading models ...", extra={"event": "startup_preload"})
     application.start()
     app.state.application = application
-    print("Startup model preload done")
+    logger.info("Startup model preload done", extra={"event": "startup_ready"})
     yield
     application.stop()
-    print("Application closed")
+    logger.info("Application closed", extra={"event": "shutdown"})
 
 
 app = FastAPI(title="Qdrant Knowledge Search API", lifespan=lifespan)
@@ -84,6 +90,17 @@ def index_chunks(
         count = application.store.add_common_documents(chunks, namespace=namespace)
     else:
         count = application.store.add_scoped_documents(chunks, namespace=namespace, scope_id=scope_id)
+    logger.info(
+        "Document indexed",
+        extra={
+            "event": "document_indexed",
+            "document_filename": filename,
+            "chunks": count,
+            "collection_type": collection_type,
+            "namespace": namespace,
+            "scope_id": scope_id,
+        },
+    )
     return {
         "filename": filename,
         "chunks": count,
@@ -123,6 +140,7 @@ async def upload_file(
     except ValueError as e:
         raise HTTPException(400, str(e))
     except Exception as e:
+        logger.exception("Upload failed", extra={"event": "upload_failed", "document_filename": file.filename})
         raise HTTPException(500, str(e))
     finally:
         os.unlink(tmp.name)
@@ -141,7 +159,13 @@ def search(req: SearchRequest):
         namespace=req.namespace,
         scope_ids=req.scope_ids,
     )
-    results = _SearchExecutor(plan, rerank=application.rerank, sparse=application.sparse, store=application.store).execute()
+    results = _SearchExecutor(
+        plan,
+        rerank=application.rerank,
+        sparse=application.sparse,
+        store=application.store,
+        search_trace=application.config.logging.search_trace,
+    ).execute()
     elapsed_ms = round((time.perf_counter() - start) * 1000, 1)
     return {"results": results, "mode": req.mode, "rerank": req.rerank, "fetch_k": req.fetch_k, "elapsed_ms": elapsed_ms}
 
@@ -169,4 +193,15 @@ def delete(
         count = application.store.delete_common_document(filename, namespace=namespace)
     else:
         count = application.store.delete_scoped_document(filename, namespace=namespace, scope_id=scope_id)
+    logger.info(
+        "Document deleted",
+        extra={
+            "event": "document_deleted",
+            "document_filename": filename,
+            "deleted_chunks": count,
+            "collection_type": collection_type,
+            "namespace": namespace,
+            "scope_id": scope_id,
+        },
+    )
     return {"deleted_chunks": count}

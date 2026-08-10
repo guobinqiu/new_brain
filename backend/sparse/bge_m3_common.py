@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import logging
+
 import device
+
+logger = logging.getLogger("rag.app")
 
 
 class BGEM3LexicalEncoder:
@@ -11,7 +15,7 @@ class BGEM3LexicalEncoder:
 
     def start(self) -> None:
         if self._model is None:
-            print(f"Loading BGE-M3 sparse model: {self.model_name} ...")
+            logger.info("Loading BGE-M3 sparse model", extra={"event": "model_load", "component": "sparse", "model": self.model_name})
             self._model = self._load_model()
         self.ready = True
 
