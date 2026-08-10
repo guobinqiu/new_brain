@@ -124,7 +124,7 @@ def _start_application(batch: BenchmarkBatch, tmp_path: Path):
 
     combo = batch.combo
     config_path = tmp_path / f"{_slug(combo.database)}_{_slug(combo.dense)}_{_slug(combo.sparse)}_{_slug(combo.sparse_impl)}_{_slug(batch.rerank)}.yaml"
-    config_path.write_text(yaml.safe_dump(_config_for(batch), allow_unicode=True, sort_keys=False), encoding="utf-8")
+    config_path.write_text(yaml.safe_dump(_config_for(batch, tmp_path), allow_unicode=True, sort_keys=False), encoding="utf-8")
     application = Application(config=load_config_file(config_path))
     application.dense.start()
     application.sparse.start()
@@ -202,9 +202,14 @@ def _run_scenario(application, batch: BenchmarkBatch, mode: str, top_k: int) -> 
     }
 
 
-def _config_for(batch: BenchmarkBatch) -> dict[str, Any]:
+def _config_for(batch: BenchmarkBatch, tmp_path: Path) -> dict[str, Any]:
     combo = batch.combo
     collection_suffix = f"{_slug(combo.database)}_{_slug(combo.dense)}_{_slug(combo.sparse)}_{_slug(combo.sparse_impl)}"
+    store_config = dict(combo.store_config)
+    if combo.store_key == "chroma":
+        store_config["persist_dir"] = str(tmp_path / "chroma")
+    if combo.store_key == "milvus_lite":
+        store_config["uri"] = str(tmp_path / "milvus_lite.db")
     store = {
         combo.store_key: {
             "enable": True,
@@ -213,7 +218,7 @@ def _config_for(batch: BenchmarkBatch) -> dict[str, Any]:
                 "common": f"benchmark_{collection_suffix}_common",
                 "scoped": f"benchmark_{collection_suffix}_scoped",
             },
-            **combo.store_config,
+            **store_config,
         }
     }
     dense_model = "bge-m3" if combo.dense == "bge-m3" else "bge-base-zh-v1.5"

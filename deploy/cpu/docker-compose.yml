@@ -105,7 +105,8 @@ services:
       MINIO_REGION: us-east-1
     ports:
       - "19530:19530"
-      - "9091:9091"
+      # 业务和 benchmark 只需要 19530；9091 是 metrics/health 端口，需要接监控时再打开。
+      # - "9091:9091"
     volumes:
       - ../../milvus_data/standalone/milvus:/var/lib/milvus
     logging: *json-logging

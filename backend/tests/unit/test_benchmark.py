@@ -39,7 +39,7 @@ def test_benchmark_start_application_drops_collections_before_start(monkeypatch,
             self.ocr = FakeComponent("ocr")
             self.ready = False
 
-    monkeypatch.setattr(benchmark, "_config_for", lambda batch: {"config": "value"})
+    monkeypatch.setattr(benchmark, "_config_for", lambda batch, tmp_path: {"config": "value"})
     monkeypatch.setattr(benchmark, "yaml", type("FakeYaml", (), {"safe_dump": staticmethod(lambda *args, **kwargs: "config: value\n")}))
     monkeypatch.setattr("bootstrap.Application", FakeApplication)
     monkeypatch.setattr("loader.load_config_file", lambda path: {"loaded": str(path)})
@@ -81,7 +81,7 @@ def test_benchmark_start_application_starts_rerank_only_when_enabled(monkeypatch
             self.ocr = FakeComponent("ocr")
             self.ready = False
 
-    monkeypatch.setattr(benchmark, "_config_for", lambda batch: {"config": "value"})
+    monkeypatch.setattr(benchmark, "_config_for", lambda batch, tmp_path: {"config": "value"})
     monkeypatch.setattr(benchmark, "yaml", type("FakeYaml", (), {"safe_dump": staticmethod(lambda *args, **kwargs: "config: value\n")}))
     monkeypatch.setattr("bootstrap.Application", FakeApplication)
     monkeypatch.setattr("loader.load_config_file", lambda path: {"loaded": str(path)})
@@ -117,3 +117,22 @@ def test_benchmark_batches_can_filter_sparse_by_environment(monkeypatch):
     assert batches
     assert {batch.combo.sparse for batch in batches} == {"bm25"}
     assert {batch.combo.sparse_impl for batch in batches} == {"app"}
+
+
+def test_benchmark_embedded_stores_use_tmp_path(tmp_path):
+    from tests.benchmark import test_search_benchmark as benchmark
+
+    chroma_batch = benchmark.BenchmarkBatch(
+        combo=next(combo for combo in benchmark.BACKEND_COMBOS if combo.store_key == "chroma"),
+        rerank="none",
+    )
+    milvus_lite_batch = benchmark.BenchmarkBatch(
+        combo=next(combo for combo in benchmark.BACKEND_COMBOS if combo.store_key == "milvus_lite"),
+        rerank="none",
+    )
+
+    chroma_config = benchmark._config_for(chroma_batch, tmp_path)
+    milvus_lite_config = benchmark._config_for(milvus_lite_batch, tmp_path)
+
+    assert chroma_config["store"]["chroma"]["persist_dir"] == str(tmp_path / "chroma")
+    assert milvus_lite_config["store"]["milvus_lite"]["uri"] == str(tmp_path / "milvus_lite.db")
