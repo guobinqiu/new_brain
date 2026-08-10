@@ -100,9 +100,22 @@ def _benchmark_batches(database: str) -> list[BenchmarkBatch]:
     return [
         BenchmarkBatch(combo=combo, rerank=rerank)
         for combo in BACKEND_COMBOS
-        if combo.database == database
+        if combo.database == database and _combo_matches_filter(combo)
         for rerank in RERANK_MODELS
     ]
+
+
+def _combo_matches_filter(combo: BackendCombo) -> bool:
+    return (
+        _matches_env_filter("BENCHMARK_DENSE", combo.dense)
+        and _matches_env_filter("BENCHMARK_SPARSE", combo.sparse)
+        and _matches_env_filter("BENCHMARK_SPARSE_IMPL", combo.sparse_impl)
+    )
+
+
+def _matches_env_filter(name: str, value: str) -> bool:
+    values = [item.strip() for item in os.environ.get(name, "").split(",") if item.strip()]
+    return not values or value in values
 
 
 def _start_application(batch: BenchmarkBatch, tmp_path: Path):

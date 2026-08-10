@@ -93,3 +93,27 @@ def test_benchmark_start_application_starts_rerank_only_when_enabled(monkeypatch
 
     assert "rerank.start" in calls
     assert application.ready is True
+
+
+def test_benchmark_batches_can_filter_dense_by_environment(monkeypatch):
+    from tests.benchmark import test_search_benchmark as benchmark
+
+    monkeypatch.setenv("BENCHMARK_DENSE", "bge-base")
+
+    batches = benchmark._benchmark_batches("qdrant")
+
+    assert batches
+    assert {batch.combo.dense for batch in batches} == {"bge-base"}
+
+
+def test_benchmark_batches_can_filter_sparse_by_environment(monkeypatch):
+    from tests.benchmark import test_search_benchmark as benchmark
+
+    monkeypatch.setenv("BENCHMARK_SPARSE", "bm25")
+    monkeypatch.setenv("BENCHMARK_SPARSE_IMPL", "app")
+
+    batches = benchmark._benchmark_batches("qdrant")
+
+    assert batches
+    assert {batch.combo.sparse for batch in batches} == {"bm25"}
+    assert {batch.combo.sparse_impl for batch in batches} == {"app"}
