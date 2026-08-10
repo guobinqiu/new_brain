@@ -43,6 +43,7 @@ _dense: Dense | None = None
 _sparse: Sparse | None = None
 _stores: dict[tuple[CollectionType, SearchMode], QdrantVectorStore] = {}
 _dense_vector_size: int | None = None
+_timeout: int | None = None
 _ready = False
 
 _document_locks: defaultdict[str, threading.Lock] = defaultdict(threading.Lock)
@@ -55,12 +56,14 @@ class QdrantStore:
         dense: Dense | None = None,
         sparse: Sparse | None = None,
         url: str | None = None,
+        timeout: int | None = None,
         common_collection: str | None = None,
         scoped_collection: str | None = None,
     ):
         self.dense = dense or HuggingFaceDense()
         self.sparse = sparse
         self.url = url or QDRANT_URL
+        self.timeout = timeout
         self.common_collection = common_collection or QDRANT_COMMON_COLLECTION
         self.scoped_collection = scoped_collection or QDRANT_SCOPED_COLLECTION
 
@@ -70,6 +73,7 @@ class QdrantStore:
             dense=self.dense,
             sparse=self.sparse,
             url=self.url,
+            timeout=self.timeout,
             common_collection=self.common_collection,
             scoped_collection=self.scoped_collection,
         )
@@ -79,7 +83,7 @@ class QdrantStore:
         self.dense.stop()
 
     def drop_collections(self) -> None:
-        _configure_store(self.url, self.common_collection, self.scoped_collection)
+        _configure_store(self.url, self.common_collection, self.scoped_collection, self.timeout)
         drop_collections()
 
     @property
@@ -155,12 +159,13 @@ def init_store(
     dense: Dense | None = None,
     sparse: Sparse | None = None,
     url: str | None = None,
+    timeout: int | None = None,
     common_collection: str | None = None,
     scoped_collection: str | None = None,
 ):
     """启动阶段完成存储运行时初始化;请求阶段不做懒初始化。"""
     global _ready
-    _configure_store(url, common_collection, scoped_collection)
+    _configure_store(url, common_collection, scoped_collection, timeout)
     _init_dense(dense)
     _init_sparse(sparse)
     _init_dense_vector_size()
@@ -183,10 +188,12 @@ def _configure_store(
     url: str | None = None,
     common_collection: str | None = None,
     scoped_collection: str | None = None,
+    timeout: int | None = None,
 ):
-    global QDRANT_URL, QDRANT_COMMON_COLLECTION, QDRANT_SCOPED_COLLECTION, COLLECTION_BY_TYPE
+    global QDRANT_URL, QDRANT_COMMON_COLLECTION, QDRANT_SCOPED_COLLECTION, COLLECTION_BY_TYPE, _timeout
     if url is not None:
         QDRANT_URL = url
+    _timeout = timeout
     if common_collection is not None:
         QDRANT_COMMON_COLLECTION = common_collection
     if scoped_collection is not None:
@@ -265,7 +272,7 @@ def _get_dense_vector_size() -> int:
 def get_qdrant_client() -> QdrantClient:
     global _client
     if _client is None:
-        _client = QdrantClient(url=os.getenv("QDRANT_URL", QDRANT_URL))
+        _client = QdrantClient(url=os.getenv("QDRANT_URL", QDRANT_URL), timeout=_timeout)
     return _client
 
 

@@ -32,6 +32,7 @@ class StoreConfig:
     url: str | None = None
     persist_dir: str | None = None
     uri: str | None = None
+    timeout: int = 30
     import_path: str | None = None
 
 
@@ -128,6 +129,7 @@ def parse_app_config(raw: dict[str, Any]) -> AppConfig:
             url=store.get("url"),
             persist_dir=store.get("persist_dir"),
             uri=store.get("uri"),
+            timeout=int(store.get("timeout", 30)),
             import_path=store.get("import_path"),
             collections=StoreCollectionsConfig(
                 common=_required(collections, "common", "store.collections"),

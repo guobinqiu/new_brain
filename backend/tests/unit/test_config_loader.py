@@ -45,6 +45,7 @@ sparse:
 store:
   type: qdrant
   url: http://localhost:6333
+  timeout: 42
   collections:
     common: common_custom
     scoped: scoped_custom
@@ -76,6 +77,7 @@ ocr: test_ocr
     assert config.sparse.tokenizer == "jieba"
     assert config.rerank.model_path == str(PROJECT_ROOT / "models" / "rerank")
     assert config.ocr.model_path == str(PROJECT_ROOT / "models" / "ocr")
+    assert config.store.timeout == 42
     assert config.store.collections.common == "common_custom"
     assert config.search.top_k == 12
     assert config.search.fetch_k == 48

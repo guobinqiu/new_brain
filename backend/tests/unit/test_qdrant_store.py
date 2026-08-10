@@ -145,6 +145,26 @@ def test_get_dense_vector_size_requires_explicit_store_initialization():
         store._get_dense_vector_size()
 
 
+def test_qdrant_client_uses_configured_timeout(monkeypatch):
+    import store
+
+    created = []
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            created.append(kwargs)
+
+    monkeypatch.setattr(store, "QdrantClient", FakeClient)
+    store.close_store()
+    try:
+        store._configure_store(url="http://localhost:6333", timeout=30)
+        store.get_qdrant_client()
+    finally:
+        store.close_store()
+
+    assert created[0]["timeout"] == 30
+
+
 def test_store_for_requires_store_prepared_during_initialization(monkeypatch):
     import store
 

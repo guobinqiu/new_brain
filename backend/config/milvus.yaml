@@ -7,6 +7,7 @@ store:
   milvus:
     enable: true
     uri: http://localhost:19530
+    timeout: 30
     collections:
       common: milvus_knowledge_common
       scoped: milvus_knowledge_scoped
@@ -14,6 +15,7 @@ store:
   milvus_lite:
     enable: false
     uri: milvus_data/lite/lite.db
+    timeout: 30
     collections:
       common: milvus_knowledge_common
       scoped: milvus_knowledge_scoped

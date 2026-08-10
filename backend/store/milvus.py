@@ -26,6 +26,7 @@ COLLECTION_BY_TYPE: dict[CollectionType, str] = {
 _dense: Dense | None = None
 _sparse: Sparse | None = None
 _uri: str | None = None
+_timeout: int | None = None
 _stores: dict[tuple[CollectionType, SearchMode], object] = {}
 _builtin_function = None
 _ready = False
@@ -37,12 +38,14 @@ class MilvusStore:
         dense: Dense | None = None,
         sparse: Sparse | None = None,
         uri: str | None = None,
+        timeout: int | None = None,
         common_collection: str | None = None,
         scoped_collection: str | None = None,
     ):
         self.dense = dense or HuggingFaceDense()
         self.sparse = sparse
         self.uri = uri or "http://localhost:19530"
+        self.timeout = timeout
         self.common_collection = common_collection or QDRANT_COMMON_COLLECTION
         self.scoped_collection = scoped_collection or QDRANT_SCOPED_COLLECTION
 
@@ -52,6 +55,7 @@ class MilvusStore:
             dense=self.dense,
             sparse=self.sparse,
             uri=self.uri,
+            timeout=self.timeout,
             common_collection=self.common_collection,
             scoped_collection=self.scoped_collection,
         )
@@ -61,7 +65,7 @@ class MilvusStore:
         self.dense.stop()
 
     def drop_collections(self) -> None:
-        _configure_store(self.uri, self.common_collection, self.scoped_collection)
+        _configure_store(self.uri, self.common_collection, self.scoped_collection, self.timeout)
         drop_collections()
 
     @property
@@ -127,7 +131,7 @@ def drop_collections() -> None:
     from pymilvus import MilvusClient
 
     uri = _connection_uri(_uri)
-    client = MilvusClient(uri=uri)
+    client = MilvusClient(uri=uri, timeout=_timeout)
     try:
         for collection_name in COLLECTION_BY_TYPE.values():
             if client.has_collection(collection_name):
@@ -154,11 +158,12 @@ def init_store(
     dense: Dense | None = None,
     sparse: Sparse | None = None,
     uri: str | None = None,
+    timeout: int | None = None,
     common_collection: str | None = None,
     scoped_collection: str | None = None,
 ):
     global _ready
-    _configure_store(uri, common_collection, scoped_collection)
+    _configure_store(uri, common_collection, scoped_collection, timeout)
     _init_dense(dense)
     _init_sparse(sparse)
     if _sparse_uses_store():
@@ -184,10 +189,12 @@ def _configure_store(
     uri: str | None = None,
     common_collection: str | None = None,
     scoped_collection: str | None = None,
+    timeout: int | None = None,
 ):
-    global _uri, COLLECTION_BY_TYPE
+    global _uri, _timeout, COLLECTION_BY_TYPE
     if uri is not None:
         _uri = uri
+    _timeout = timeout
     if common_collection is not None:
         COLLECTION_BY_TYPE["common"] = common_collection
     if scoped_collection is not None:
@@ -312,7 +319,7 @@ def _get_store_unchecked(collection_type: CollectionType, mode: SearchMode):
         store = Milvus(
             embedding_function=_embedding_function_for_mode(mode),
             collection_name=COLLECTION_BY_TYPE[collection_type],
-            connection_args={"uri": _connection_uri(_uri)},
+            connection_args=_connection_args(),
             index_params=_index_params_for_mode(mode),
             auto_id=False,
             enable_dynamic_field=True,
@@ -327,6 +334,13 @@ def _load_milvus_class():
     from langchain_milvus import Milvus
 
     return Milvus
+
+
+def _connection_args() -> dict:
+    args = {"uri": _connection_uri(_uri)}
+    if _timeout is not None:
+        args["timeout"] = _timeout
+    return args
 
 
 def _connection_uri(uri: str | None, project_root: Path = PROJECT_ROOT) -> str | None:
@@ -507,6 +521,7 @@ def _single_vector_search(collection_type: CollectionType, mode: SearchMode, que
         limit=limit,
         filter=metadata_filter,
         output_fields=["*"],
+        timeout=_timeout,
     )
 
 
@@ -539,6 +554,7 @@ def _hybrid_search(collection_type: CollectionType, query: str, limit: int, meta
         ),
         limit=limit,
         output_fields=["*"],
+        timeout=_timeout,
     )
 
 
@@ -614,6 +630,7 @@ def get_search_documents(collection_type: CollectionType, metadata_filter: str) 
         collection_name=store.collection_name,
         filter=metadata_filter,
         output_fields=["*"],
+        timeout=_timeout,
     )
     results = []
     for row in rows:

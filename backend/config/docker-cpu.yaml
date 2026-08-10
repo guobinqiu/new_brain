@@ -7,6 +7,7 @@ store:
   qdrant:
     enable: true
     url: http://qdrant:6333
+    timeout: 30
     collections:
       common: knowledge_common
       scoped: knowledge_scoped

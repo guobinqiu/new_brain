@@ -80,6 +80,47 @@ def test_milvus_store_initializes_sparse_and_hybrid_stores_for_store_sparse(monk
         milvus.close_store()
 
 
+def test_milvus_store_passes_timeout_to_connection_args(monkeypatch):
+    from store import milvus
+
+    class FakeDense:
+        ready = True
+
+        def start(self):
+            pass
+
+        def as_langchain_dense(self):
+            return self
+
+    created = []
+
+    class FakeClient:
+        def has_collection(self, collection_name):
+            return True
+
+    class FakeMilvus:
+        def __init__(self, **kwargs):
+            created.append(kwargs)
+            self.collection_name = kwargs["collection_name"]
+            self.client = FakeClient()
+
+    monkeypatch.setattr(milvus, "_load_milvus_class", lambda: FakeMilvus)
+    milvus.close_store()
+    try:
+        milvus.init_store(
+            dense=FakeDense(),
+            sparse=None,
+            uri="http://localhost:19530",
+            timeout=30,
+            common_collection="common",
+            scoped_collection="scoped",
+        )
+    finally:
+        milvus.close_store()
+
+    assert created[0]["connection_args"]["timeout"] == 30
+
+
 def test_milvus_store_uses_builtin_function_as_store_sparse():
     from store import milvus
     from sparse.milvus_bm25 import MilvusBM25Sparse
@@ -154,8 +195,9 @@ def test_milvus_drop_collections_keeps_local_lite_server_for_following_start(mon
     released = []
 
     class FakeClient:
-        def __init__(self, uri):
+        def __init__(self, uri, timeout=None):
             self.uri = uri
+            self.timeout = timeout
 
         def has_collection(self, collection_name):
             return False
@@ -171,6 +213,42 @@ def test_milvus_drop_collections_keeps_local_lite_server_for_following_start(mon
     milvus.drop_collections()
 
     assert released == []
+
+
+def test_milvus_search_and_query_use_configured_timeout(monkeypatch):
+    from store import milvus
+
+    calls = []
+
+    class FakeDense:
+        def embed_query(self, query):
+            return [0.1, 0.2, 0.3]
+
+    class FakeClient:
+        def search(self, *args, **kwargs):
+            calls.append(("search", kwargs["timeout"]))
+            return [[]]
+
+    class FakeMilvusClient:
+        def query(self, *args, **kwargs):
+            calls.append(("query", kwargs["timeout"]))
+            return []
+
+    class FakeStore:
+        collection_name = "common"
+        client = FakeClient()
+        _milvus_client = FakeMilvusClient()
+
+    monkeypatch.setattr(milvus, "_ready", True)
+    monkeypatch.setattr(milvus, "_timeout", 30)
+    monkeypatch.setattr(milvus, "_dense", FakeDense())
+    monkeypatch.setattr(milvus, "_stores", {("common", "dense"): FakeStore()})
+    monkeypatch.setattr(milvus, "_sparse_uses_store", lambda sparse=None: True)
+
+    milvus.search_dense("common", "query", 5, "namespace == 'benchmark'")
+    milvus.get_search_documents("common", "namespace == 'benchmark'")
+
+    assert calls == [("search", 30), ("query", 30)]
 
 
 def test_milvus_store_uses_ip_metric_for_embedding_sparse_and_bm25_metric_for_builtin_sparse(monkeypatch):
@@ -307,6 +385,7 @@ def test_milvus_store_creates_empty_collections_during_initialization(monkeypatc
 
     monkeypatch.setattr(milvus, "_load_milvus_class", lambda: FakeMilvus)
     milvus.close_store()
+    monkeypatch.setattr(milvus, "_dense", None)
     try:
         milvus.init_store(
             dense=FakeDense(),

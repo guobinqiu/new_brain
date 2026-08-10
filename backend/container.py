@@ -68,6 +68,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
     store_type = providers.Callable(lambda app_config: _store_key(app_config.store.type), config)
     chroma_persist_dir = providers.Callable(lambda app_config: app_config.store.persist_dir, config)
     milvus_uri = providers.Callable(lambda app_config: app_config.store.uri, config)
+    store_timeout = providers.Callable(lambda app_config: app_config.store.timeout, config)
     common_collection = providers.Callable(lambda app_config: app_config.store.collections.common, config)
     scoped_collection = providers.Callable(lambda app_config: app_config.store.collections.scoped, config)
 
@@ -122,6 +123,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
             dense=dense,
             sparse=sparse,
             url=qdrant_url,
+            timeout=store_timeout,
             common_collection=common_collection,
             scoped_collection=scoped_collection,
         ),
@@ -138,6 +140,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
             dense=dense,
             sparse=sparse,
             uri=milvus_uri,
+            timeout=store_timeout,
             common_collection=common_collection,
             scoped_collection=scoped_collection,
         ),
@@ -195,10 +198,12 @@ def build_store(config: AppConfig, dense: Dense, sparse: Sparse | None = None) -
         }
         if _store_key(config.store.type) == "qdrant":
             kwargs["url"] = config.store.url
+            kwargs["timeout"] = config.store.timeout
         elif _store_key(config.store.type) == "chroma":
             kwargs["persist_dir"] = config.store.persist_dir
         elif _store_key(config.store.type) == "milvus":
             kwargs["uri"] = config.store.uri
+            kwargs["timeout"] = config.store.timeout
         return cls(**kwargs)
     container = create_container(config)
     return container.store(dense=dense, sparse=sparse)

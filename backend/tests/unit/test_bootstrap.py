@@ -115,6 +115,7 @@ def test_application_passes_store_config_to_qdrant_store():
     application = bootstrap.Application()
 
     assert application.store.url == application.config.store.url
+    assert application.store.timeout == application.config.store.timeout
     assert application.store.common_collection == application.config.store.collections.common
     assert application.store.scoped_collection == application.config.store.collections.scoped
 
