@@ -190,6 +190,17 @@ CONFIG_FILE=local.yaml
 
 Docker 运行使用前面的 `just deploy cpu ...` 或 `just deploy gpu ...` 命令启动。
 
+当前配置文件：
+
+| 文件 | 用途 | 说明 |
+|---|---|---|
+| `local.yaml` | native 默认入口 | 连接 `http://localhost:6333`，collection 固定为 `knowledge_common` / `knowledge_scoped`。 |
+| `docker-cpu.yaml` | Docker CPU 入口 | 连接 Docker Compose 内的 Qdrant 服务名 `qdrant`，默认启用 `bge_base` dense、`bm25` sparse（`tokenizer=jieba`），不加载 rerank。 |
+| `docker-gpu.yaml` | Docker GPU 入口 | 连接 Docker Compose 内的 Qdrant 服务名 `qdrant`，默认启用 `bge_m3` dense、`bm25` sparse（`tokenizer=jieba`）、`bge_reranker_v2_m3` rerank。 |
+| `qdrant.yaml` | Qdrant 评估入口 | collection 使用 `qdrant_` 前缀。 |
+| `chroma.yaml` | Chroma 评估入口 | collection 使用 `chroma_` 前缀，本地数据目录是 `chroma_data`。 |
+| `milvus.yaml` | Milvus 评估入口 | collection 使用 `milvus_` 前缀。默认连接 Standalone；保留 Milvus Lite 配置但默认禁用。 |
+
 本地 native 临时切换配置示例：
 
 ```bash
