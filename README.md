@@ -196,6 +196,20 @@ Docker 运行使用前面的 `just deploy cpu ...` 或 `just deploy gpu ...` 命
 CONFIG_FILE=milvus.yaml .venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
+## Benchmark
+
+准确性 benchmark 每个问题执行一次，按问题分别生成报告：
+
+```bash
+RUN_BENCHMARK=1 backend/.venv/bin/python -m pytest backend/tests/benchmark/test_search_accuracy_benchmark.py -m benchmark -s
+```
+
+性能 benchmark 对同一问题重复执行，输出 p50 / p95 / p99：
+
+```bash
+RUN_BENCHMARK=1 BENCHMARK_RUNS=30 backend/.venv/bin/python -m pytest backend/tests/benchmark/test_search_benchmark.py -m benchmark -s
+```
+
 ## LangSmith
 
 LangSmith 默认关闭。需要跟踪搜索链路时设置环境变量：

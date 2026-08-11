@@ -14,20 +14,20 @@ store:
     import_path: store.qdrant.QdrantStore
 dense:
   bge_base:
-    enable: true
+    enable: false
     model_name: bge-base-zh-v1.5
     import_path: dense.huggingface.HuggingFaceDense
   bge_m3:
-    enable: false
+    enable: true
     model_name: bge-m3
     import_path: dense.huggingface.HuggingFaceDense
 sparse:
   bm25:
-    enable: true
+    enable: false
     tokenizer: jieba
     import_path: sparse.bm25.BM25Sparse
   bge_m3:
-    enable: false
+    enable: true
     model_name: bge-m3
     import_path: sparse.qdrant_bge_m3.QdrantBGEM3Sparse
 search:
@@ -39,7 +39,7 @@ search:
   rrf_k: 60
 rerank:
   bge_base:
-    enable: false
+    enable: true
     model_name: bge-reranker-base
     import_path: rerank.cross_encoder.CrossEncoderRerank
   bge_large:
@@ -47,7 +47,7 @@ rerank:
     model_name: bge-reranker-large
     import_path: rerank.cross_encoder.CrossEncoderRerank
   bge_m3:
-    enable: true
+    enable: false
     model_name: bge-reranker-v2-m3
     import_path: rerank.cross_encoder.CrossEncoderRerank
 ocr:

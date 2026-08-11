@@ -153,11 +153,11 @@ def test_milvus_profile_defines_standalone_and_lite_runtimes():
 def test_docker_gpu_profile_uses_benchmark_backed_retrieval_with_stronger_rerank():
     config = _read_config("docker-gpu.yaml")
 
-    assert _enabled_component(config, "dense")["model_name"] == "bge-base-zh-v1.5"
+    assert _enabled_component(config, "dense")["model_name"] == "bge-m3"
     assert _enabled_component(config, "dense")["import_path"] == "dense.huggingface.HuggingFaceDense"
-    assert _enabled_component(config, "sparse")["tokenizer"] == "jieba"
-    assert _enabled_component(config, "sparse")["import_path"] == "sparse.bm25.BM25Sparse"
-    assert _enabled_component(config, "rerank")["model_name"] == "bge-reranker-v2-m3"
+    assert _enabled_component(config, "sparse")["model_name"] == "bge-m3"
+    assert _enabled_component(config, "sparse")["import_path"] == "sparse.qdrant_bge_m3.QdrantBGEM3Sparse"
+    assert _enabled_component(config, "rerank")["model_name"] == "bge-reranker-base"
     assert _enabled_component(config, "rerank")["import_path"] == "rerank.cross_encoder.CrossEncoderRerank"
     assert config["search"]["default_mode"] == "hybrid"
 

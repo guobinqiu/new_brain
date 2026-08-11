@@ -82,7 +82,7 @@ def test_search_benchmark_matrix(database: str, tmp_path):
 
     rows = []
     for batch in _benchmark_batches(database):
-        application = _start_application(batch, tmp_path)
+        application = _start_application(batch, tmp_path, start_ocr=False)
         try:
             _rebuild_index(application)
             for mode in QUERY_MODES:
@@ -118,7 +118,7 @@ def _matches_env_filter(name: str, value: str) -> bool:
     return not values or value in values
 
 
-def _start_application(batch: BenchmarkBatch, tmp_path: Path):
+def _start_application(batch: BenchmarkBatch, tmp_path: Path, start_ocr: bool = True):
     from bootstrap import Application
     from loader import load_config_file
 
@@ -133,7 +133,8 @@ def _start_application(batch: BenchmarkBatch, tmp_path: Path):
     application.search.start()
     if batch.rerank != "none":
         application.rerank.start()
-    application.ocr.start()
+    if start_ocr:
+        application.ocr.start()
     application.ready = True
     return application
 
@@ -142,7 +143,7 @@ def _rebuild_index(application) -> None:
     from document_parser import parse_file
 
     application.store.delete_common_document(DOCUMENT_PATH.name, namespace=NAMESPACE)
-    chunks = parse_file(str(DOCUMENT_PATH), original_filename=DOCUMENT_PATH.name, ocr=application.ocr)
+    chunks = parse_file(str(DOCUMENT_PATH), original_filename=DOCUMENT_PATH.name, ocr=None)
     application.store.add_common_documents(chunks, namespace=NAMESPACE)
 
 

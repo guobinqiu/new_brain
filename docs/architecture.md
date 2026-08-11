@@ -80,7 +80,7 @@ backend/
 |---|---|---|
 | `local.yaml` | native 默认入口 | 连接 `http://localhost:6333`，collection 固定为 `knowledge_common` / `knowledge_scoped`。 |
 | `docker-cpu.yaml` | Docker CPU 入口 | 连接 Docker Compose 内的 Qdrant 服务名 `qdrant`，默认启用 `bge_base` dense、`bm25` sparse（`tokenizer=jieba`）、`bge_base` rerank。 |
-| `docker-gpu.yaml` | Docker GPU 入口 | 连接 Docker Compose 内的 Qdrant 服务名 `qdrant`，默认启用 `bge_base` dense、`bm25` sparse（`tokenizer=jieba`）、`bge_m3` rerank。 |
+| `docker-gpu.yaml` | Docker GPU 入口 | 连接 Docker Compose 内的 Qdrant 服务名 `qdrant`，默认启用 `bge_m3` dense、`bge_m3` sparse、`bge_base` rerank。 |
 | `qdrant.yaml` | 可运行 | Qdrant profile，collection 使用 `qdrant_` 前缀。默认启用 `bge_base` dense、`bm25` sparse（`tokenizer=jieba`）、`bge_base` rerank；可切换到 `bge_m3` dense 或 `bge_m3` sparse。 |
 | `chroma.yaml` | 可运行 | Chroma profile，collection 使用 `chroma_` 前缀，本地数据目录是 `chroma_data`。当前只启用 `bm25` sparse，不配置 `bge_m3` sparse。 |
 | `milvus.yaml` | 可运行 | Milvus profile，collection 使用 `milvus_` 前缀。默认连接 Standalone；保留 Milvus Lite 配置但默认禁用。可切换到 `bge_m3` sparse 或 `milvus_bm25` sparse。 |
@@ -491,6 +491,24 @@ sparse:
 2. 去掉纯标点和单个汉字这类不稳定命中项
 3. BM25 对候选文本打分排序
 4. 不返回零命中文本
+```
+
+应用内 `bm25` sparse 直接使用 `rank_bm25` 计算分数，不使用 LangChain `BM25Retriever.invoke()`。原因是 `BM25Retriever.invoke()` 只返回 `Document` 列表，不直接返回 BM25 分数；搜索流程需要分数做过滤、排序和 hybrid 融合。
+
+向量库检索和应用内 BM25 的 score 来源不同：
+
+```text
+dense 检索
+  -> 使用 LangChain VectorStore 的 similarity_search_with_score
+  -> score 来自向量库
+
+store sparse / store hybrid
+  -> 使用向量库 sparse 或 hybrid 查询
+  -> score 来自向量库
+
+应用内 bm25 sparse
+  -> 使用 rank_bm25 在应用进程里计算
+  -> score 来自 BM25 关键词打分
 ```
 
 BGE-M3 store sparse：
