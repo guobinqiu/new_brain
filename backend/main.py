@@ -190,6 +190,13 @@ def documents(
 ):
     return {"documents": application.store.list_documents(collection_type=collection_type, namespace=namespace, scope_ids=scope_ids)}
 
+@app.get("/api/scopes")
+def scopes(namespace: str = "default"):
+    _require_ready()
+    documents = application.store.list_documents(collection_type="scoped", namespace=namespace, scope_ids=[])
+    scope_ids = sorted({doc["scope_id"] for doc in documents if doc.get("scope_id")})
+    return {"scope_ids": scope_ids}
+
 @app.delete("/api/documents/{filename:path}")
 def delete(
     filename: str,

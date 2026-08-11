@@ -63,13 +63,19 @@
       <div class="search-row-3">
         <div class="scope-controls">
           <span class="scope-title">namespace</span>
-          <input v-model.trim="searchNamespace" class="field-input compact" placeholder="namespace" />
+          <input v-model.trim="searchNamespace" class="field-input compact" placeholder="namespace" @change="onSearchNamespaceChange" />
         </div>
       </div>
       <div class="search-row-3">
         <div class="scope-controls">
           <span class="scope-title">scope_ids</span>
           <input v-model.trim="scopeIdsText" class="field-input scopes" placeholder="scope_ids，多个用逗号分隔" />
+        </div>
+      </div>
+      <div v-if="availableScopeIds.length" class="search-row-3">
+        <div class="scope-list">
+          <button class="scope-chip" @click="selectAllScopes">全部 scope</button>
+          <button v-for="scopeId in availableScopeIds" :key="scopeId" class="scope-chip" @click="scopeIdsText = scopeId">{{ scopeId }}</button>
         </div>
       </div>
       <div v-if="mode === 'hybrid'" class="search-row-3">
@@ -154,6 +160,7 @@ const searchNamespace = ref('default')
 const uploadCollectionType = ref('common')
 const uploadScopeId = ref('')
 const scopeIdsText = ref('')
+const availableScopeIds = ref([])
 const searchConfig = ref({ dense_weight: 0.5, sparse_weight: 0.5, rrf_k: 60 })
 const hybridBalance = ref(0.5)
 const documents = ref([])
@@ -214,6 +221,7 @@ async function uploadFiles(files) {
     }
   }
   await fetchDocuments()
+  await fetchScopes()
   if (uploaded) uploadMsg.value = { type: 'success', text: '上传完成' }
   return uploaded
 }
@@ -295,7 +303,26 @@ async function fetchDocuments() {
   catch (err) { console.error(err) }
 }
 
-onMounted(() => { fetchDocuments(); fetchConfig() })
+async function fetchScopes() {
+  try {
+    const res = await axios.get(`${API}/scopes`, { params: { namespace: searchNamespace.value || 'default' } })
+    availableScopeIds.value = res.data.scope_ids || []
+    if (!scopeIdsText.value && availableScopeIds.value.length) selectAllScopes()
+  }
+  catch (err) { console.error(err) }
+}
+
+async function onSearchNamespaceChange() {
+  scopeIdsText.value = ''
+  await fetchScopes()
+  await fetchDocuments()
+}
+
+function selectAllScopes() {
+  scopeIdsText.value = availableScopeIds.value.join(', ')
+}
+
+onMounted(() => { fetchDocuments(); fetchConfig(); fetchScopes() })
 
 function escapeHtml(text) {
   const el = document.createElement('div')
@@ -372,6 +399,9 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helv
 .field-input:focus, .field-select:focus { border-color: #409eff; }
 .field-input.compact { width: 130px; flex-shrink: 0; }
 .field-input.scopes { flex: 1; }
+.scope-list { display: flex; flex-wrap: wrap; gap: 6px; padding-left: 84px; }
+.scope-chip { border: 1px solid #e5e5ea; background: #fff; color: #6c7680; border-radius: 8px; padding: 4px 8px; font-size: 12px; cursor: pointer; }
+.scope-chip:hover { border-color: #409eff; color: #409eff; }
 
 .search-input-wrap { flex: 1; display: flex; gap: 8px; }
 .search-input { flex: 1; padding: 8px 16px; border: 1.5px solid #e5e5ea; border-radius: 10px; font-size: 14px; outline: none; transition: border-color .2s; }

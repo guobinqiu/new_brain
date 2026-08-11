@@ -90,6 +90,32 @@ class TestSearchAPI:
         assert after["sparse_weight"] == before["sparse_weight"]
         assert after["rrf_k"] == before["rrf_k"]
 
+    def test_scopes_api_returns_existing_scoped_scope_ids(self, api_client, test_txt_path):
+        """``GET /api/scopes`` returns distinct existing scoped scope ids."""
+        with open(test_txt_path, "rb") as f:
+            api_client.post(
+                "/api/upload",
+                data={"collection_type": "common", "namespace": "tenant_a"},
+                files={"file": ("common.txt", f, "text/plain")},
+            )
+        with open(test_txt_path, "rb") as f:
+            api_client.post(
+                "/api/upload",
+                data={"collection_type": "scoped", "namespace": "tenant_a", "scope_id": "scope_b"},
+                files={"file": ("scoped_b.txt", f, "text/plain")},
+            )
+        with open(test_txt_path, "rb") as f:
+            api_client.post(
+                "/api/upload",
+                data={"collection_type": "scoped", "namespace": "tenant_a", "scope_id": "scope_a"},
+                files={"file": ("scoped_a.txt", f, "text/plain")},
+            )
+
+        resp = api_client.get("/api/scopes", params={"namespace": "tenant_a"})
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json() == {"scope_ids": ["scope_a", "scope_b"]}
+
     def test_search_api_rerank_param(self, api_client, test_txt_path):
         """``POST /api/search`` with ``rerank=true`` accepts and applies reranking."""
         with open(test_txt_path, "rb") as f:

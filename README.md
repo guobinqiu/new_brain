@@ -98,6 +98,7 @@ http://<服务器地址>:28000
 |---|---|---|
 | `POST` | `/api/upload` | 上传并索引文档 |
 | `POST` | `/api/search` | 搜索知识库 |
+| `GET` | `/api/scopes` | 查询当前已有范围标识 |
 | `GET` | `/api/documents` | 查询已索引文档列表 |
 | `DELETE` | `/api/documents/{filename}` | 删除已索引文档 |
 
@@ -175,6 +176,24 @@ http://<服务器地址>:28000
 | `sparse_weight` | 本次 hybrid 查询的 sparse 权重 |
 | `rrf_k` | 本次 hybrid 查询的 RRF 参数 |
 | `elapsed_ms` | 后端搜索耗时，单位毫秒 |
+
+### 范围列表
+
+`GET /api/scopes`
+
+查询参数：
+
+| 参数 | 类型 | 必填 | 默认值 | 说明 |
+|---|---|---|---|---|
+| `namespace` | string | 否 | `default` | 外部系统隔离标识；只列出同一 `namespace` 下已有 scoped 文档的 `scope_id` |
+
+响应示例：
+
+```json
+{
+  "scope_ids": ["scope_a", "scope_b"]
+}
+```
 
 ### 文档列表
 
