@@ -97,6 +97,14 @@ def test_backend_passes_optional_langsmith_environment_to_container():
         assert "LANGSMITH_ENDPOINT: ${LANGSMITH_ENDPOINT:-https://api.smith.langchain.com}" in compose
 
 
+def test_backend_host_port_does_not_conflict_with_vllm():
+    for compose_file in ("deploy/cpu/docker-compose.yml", "deploy/gpu/docker-compose.yml"):
+        compose = (ROOT / compose_file).read_text(encoding="utf-8")
+
+        assert '"28000:8000"' in compose
+        assert '"8000:8000"' not in compose
+
+
 def test_deploy_uses_matching_backend_config_file():
     cpu_compose = (ROOT / "deploy/cpu/docker-compose.yml").read_text(encoding="utf-8")
     gpu_compose = (ROOT / "deploy/gpu/docker-compose.yml").read_text(encoding="utf-8")

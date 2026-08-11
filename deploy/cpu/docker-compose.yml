@@ -27,7 +27,7 @@ services:
         UV_DEFAULT_INDEX_CN: ${UV_DEFAULT_INDEX_CN:-https://pypi.tuna.tsinghua.edu.cn/simple}
     container_name: rag-backend
     ports:
-      - "8000:8000"
+      - "28000:8000"
     environment:
       CONFIG_FILE: ${CONFIG_FILE:-docker-cpu.yaml}
       LANGSMITH_TRACING: ${LANGSMITH_TRACING:-false}
