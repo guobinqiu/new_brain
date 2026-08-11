@@ -15,12 +15,22 @@ def test_deploy_has_separate_cpu_and_gpu_entries():
     assert (ROOT / "deploy/gpu/docker-compose.yml").exists()
 
 
+def test_just_deploy_recipes_do_not_echo_commands():
+    justfile = (ROOT / "justfile").read_text(encoding="utf-8")
+
+    assert "\t@just _deploy_{{target}}_{{action}}" in justfile
+    assert "\t@docker compose -f deploy/cpu/docker-compose.yml build" in justfile
+    assert "\t@docker compose -f deploy/gpu/docker-compose.yml build" in justfile
+
+
 def test_cpu_deploy_installs_cpu_extra():
     dockerfile = (ROOT / "deploy/cpu/Dockerfile").read_text(encoding="utf-8")
 
     command = dockerfile.split("CMD", 1)[1]
 
-    assert "RUN uv sync --extra cpu" in dockerfile
+    assert "uv sync --extra cpu" in dockerfile
+    assert "USE_CN_MIRROR" in dockerfile
+    assert "UV_DEFAULT_INDEX_CN" in dockerfile
     assert "uv sync" not in command
     assert '"uv", "run"' not in dockerfile
     assert 'CMD ["/app/.venv/bin/uvicorn"' in dockerfile
@@ -34,7 +44,9 @@ def test_gpu_deploy_installs_gpu_extra_and_exposes_gpu():
 
     command = dockerfile.split("CMD", 1)[1]
 
-    assert "RUN uv sync --extra gpu" in dockerfile
+    assert "uv sync --extra gpu" in dockerfile
+    assert "USE_CN_MIRROR" in dockerfile
+    assert "UV_DEFAULT_INDEX_CN" in dockerfile
     assert "uv sync" not in command
     assert '"uv", "run"' not in dockerfile
     assert 'CMD ["/app/.venv/bin/uvicorn"' in dockerfile
@@ -93,6 +105,16 @@ def test_deploy_uses_matching_backend_config_file():
     assert "CONFIG_FILE: ${CONFIG_FILE:-docker-gpu.yaml}" in gpu_compose
     assert "CONFIG_FILE: ${CONFIG_FILE:-docker.yaml}" not in cpu_compose
     assert "CONFIG_FILE: ${CONFIG_FILE:-docker.yaml}" not in gpu_compose
+
+
+def test_deploy_build_supports_optional_cn_mirror():
+    for compose_file in ("deploy/cpu/docker-compose.yml", "deploy/gpu/docker-compose.yml"):
+        compose = (ROOT / compose_file).read_text(encoding="utf-8")
+
+        assert "USE_CN_MIRROR: ${USE_CN_MIRROR:-false}" in compose
+        assert "APT_MIRROR: ${APT_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/debian}" in compose
+        assert "APT_SECURITY_MIRROR: ${APT_SECURITY_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/debian-security}" in compose
+        assert "UV_DEFAULT_INDEX_CN: ${UV_DEFAULT_INDEX_CN:-https://pypi.tuna.tsinghua.edu.cn/simple}" in compose
 
 
 def test_deploy_services_use_bounded_json_file_logs():

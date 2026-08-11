@@ -20,6 +20,11 @@ services:
     build:
       context: ../..
       dockerfile: deploy/gpu/Dockerfile
+      args:
+        USE_CN_MIRROR: ${USE_CN_MIRROR:-false}
+        APT_MIRROR: ${APT_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/debian}
+        APT_SECURITY_MIRROR: ${APT_SECURITY_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/debian-security}
+        UV_DEFAULT_INDEX_CN: ${UV_DEFAULT_INDEX_CN:-https://pypi.tuna.tsinghua.edu.cn/simple}
     container_name: rag-backend
     ports:
       - "8000:8000"

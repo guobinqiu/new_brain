@@ -59,6 +59,13 @@ just deploy gpu build
 just deploy gpu up
 ```
 
+国内网络构建时可以加镜像开关：
+
+```bash
+USE_CN_MIRROR=true just deploy cpu build
+USE_CN_MIRROR=true just deploy gpu build
+```
+
 停止：
 
 ```bash
