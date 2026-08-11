@@ -48,6 +48,107 @@
 
 搜索时始终查询 common knowledge。如果请求带 `scope_ids`，系统同时查询 scoped knowledge。两路结果合并后统一排序。
 
+### 2.1 总体架构图
+
+```mermaid
+flowchart LR
+  Client[外部系统 / 前端] --> API[FastAPI API]
+  API --> App[Application]
+  App --> Search[SearchPipeline]
+  App --> Parser[Document Parser]
+
+  Parser --> OCR[OCR]
+  Parser --> Dense[Dense 模型]
+  Parser --> Sparse[Sparse 组件]
+  Parser --> Store[Store 接口]
+
+  Search --> Store
+  Search --> Sparse
+  Search --> Rerank[Rerank 可选]
+
+  Store --> DB[(向量库)]
+  DB --> Qdrant[Qdrant]
+  DB --> Chroma[Chroma]
+  DB --> Milvus[Milvus]
+
+  Config[yaml 配置] --> App
+  Config --> Dense
+  Config --> Sparse
+  Config --> Store
+  Config --> Rerank
+  Config --> OCR
+```
+
+这张图表达的是依赖方向：API 不直接知道具体向量库和模型，搜索流程只依赖 `Store`、`Sparse`、`Rerank` 这些能力接口。具体用 Qdrant、Chroma 还是 Milvus，由 yaml 配置决定。
+
+### 2.2 数据库结构图
+
+```mermaid
+flowchart TB
+  DB[(向量库)]
+  DB --> Common[common collection]
+  DB --> Scoped[scoped collection]
+
+  Common --> CommonPayload[metadata: namespace, filename, chunk_index, created_at]
+  Scoped --> ScopedPayload[metadata: namespace, scope_id, filename, chunk_index, created_at]
+
+  Common --> CommonVectors[dense vector / 可选 sparse vector]
+  Scoped --> ScopedVectors[dense vector / 可选 sparse vector]
+```
+
+系统固定使用两个逻辑集合：`common` 存通用知识，`scoped` 存范围专属知识。`namespace` 用来隔离不同外部系统；`scope_id` 只出现在 scoped 集合里，用来限定范围专属知识。
+
+### 2.3 写入流程图
+
+```mermaid
+sequenceDiagram
+  participant Client as 外部系统 / 前端
+  participant API as POST /api/upload
+  participant Parser as Document Parser
+  participant Dense as Dense 模型
+  participant Sparse as Sparse 组件
+  participant Store as Store
+  participant DB as 向量库
+
+  Client->>API: 上传文件 + collection_type + namespace + scope_id
+  API->>Parser: 解析文件
+  Parser->>Parser: 清理文本并切 chunk
+  Parser->>Dense: 生成 dense vector
+  Parser->>Sparse: 需要时生成 sparse vector
+  API->>Store: delete + insert
+  Store->>DB: 删除同名旧文档
+  Store->>DB: 写入新 chunk、vector、metadata
+  DB-->>Client: 写入完成
+```
+
+写入时同名文件使用 `delete + insert` 替换。common 的替换范围是 `namespace + filename`；scoped 的替换范围是 `namespace + scope_id + filename`。
+
+### 2.4 查询流程图
+
+```mermaid
+flowchart TB
+  Query[POST /api/search] --> Plan[SearchPlan]
+  Plan --> Common[查询 common]
+  Plan --> Scoped{scope_ids 为空?}
+  Scoped -- 否 --> ScopedSearch[查询 scoped]
+  Scoped -- 是 --> SkipScoped[跳过 scoped]
+
+  Common --> RetrieveCommon[Dense / Sparse / Hybrid]
+  ScopedSearch --> RetrieveScoped[Dense / Sparse / Hybrid]
+
+  RetrieveCommon --> Merge[合并结果]
+  RetrieveScoped --> Merge
+  SkipScoped --> Merge
+
+  Merge --> Dedupe[去重]
+  Dedupe --> NeedRerank{rerank=true?}
+  NeedRerank -- 是 --> Rerank[Rerank 重排]
+  NeedRerank -- 否 --> Format[格式化返回]
+  Rerank --> Format
+```
+
+查询时始终查 common。如果传入 `scope_ids`，再并行查询 scoped。common 和 scoped 的结果不是简单拼接，而是合并、去重后统一排序；开启 rerank 时，再对候选结果做二次排序。
+
 ---
 
 ## 3. 配置目录
