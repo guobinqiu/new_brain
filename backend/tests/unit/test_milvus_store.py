@@ -121,6 +121,52 @@ def test_milvus_store_passes_timeout_to_connection_args(monkeypatch):
     assert created[0]["connection_args"]["timeout"] == 30
 
 
+def test_milvus_init_store_retries_when_service_is_not_ready(monkeypatch):
+    from store import milvus
+
+    class FakeDense:
+        ready = True
+
+        def start(self):
+            pass
+
+        def as_langchain_dense(self):
+            return self
+
+    attempts = {"count": 0}
+    sleeps = []
+
+    class FakeClient:
+        def has_collection(self, collection_name):
+            return True
+
+    class FakeMilvus:
+        def __init__(self, **kwargs):
+            attempts["count"] += 1
+            if attempts["count"] == 1:
+                raise RuntimeError("milvus not ready")
+            self.collection_name = kwargs["collection_name"]
+            self.client = FakeClient()
+
+    monkeypatch.setattr(milvus, "_load_milvus_class", lambda: FakeMilvus)
+    monkeypatch.setattr("store.startup.time.sleep", lambda seconds: sleeps.append(seconds))
+    milvus.close_store()
+    try:
+        milvus.init_store(
+            dense=FakeDense(),
+            sparse=None,
+            uri="http://localhost:19530",
+            common_collection="common",
+            scoped_collection="scoped",
+        )
+
+        assert attempts["count"] == 3
+        assert sleeps == [1]
+        assert milvus.is_search_ready() is True
+    finally:
+        milvus.close_store()
+
+
 def test_milvus_store_uses_builtin_function_as_store_sparse():
     from store import milvus
     from sparse.milvus_bm25 import MilvusBM25Sparse

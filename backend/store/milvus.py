@@ -12,6 +12,7 @@ from dense.base import Dense
 from dense.huggingface import HuggingFaceDense
 from langchain_core.documents import Document
 from sparse.base import Sparse
+from store.startup import run_with_startup_retry
 
 
 CollectionType = Literal["common", "scoped"]
@@ -166,6 +167,11 @@ def init_store(
     _configure_store(uri, common_collection, scoped_collection, timeout)
     _init_dense(dense)
     _init_sparse(sparse)
+    run_with_startup_retry(_prepare_stores)
+    _ready = True
+
+
+def _prepare_stores() -> None:
     if _sparse_uses_store():
         _get_store_unchecked("common", "hybrid")
         _get_store_unchecked("scoped", "hybrid")
@@ -178,7 +184,6 @@ def init_store(
         _get_store_unchecked("common", "dense")
         _get_store_unchecked("scoped", "dense")
         ensure_collections()
-    _ready = True
 
 
 def init_search():

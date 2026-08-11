@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import os
 import threading
-import time
 import uuid
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -23,6 +22,7 @@ from langchain_qdrant.sparse_embeddings import SparseEmbeddings
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
 from sparse.base import Sparse
+from store.startup import run_with_startup_retry
 
 
 CollectionType = Literal["common", "scoped"]
@@ -46,8 +46,6 @@ _stores: dict[tuple[CollectionType, SearchMode], QdrantVectorStore] = {}
 _dense_vector_size: int | None = None
 _timeout: int | None = None
 _ready = False
-_STARTUP_RETRY_COUNT = 30
-_STARTUP_RETRY_DELAY_SECONDS = 1
 
 _document_locks: defaultdict[str, threading.Lock] = defaultdict(threading.Lock)
 _document_locks_guard = threading.Lock()
@@ -172,7 +170,7 @@ def init_store(
     _init_dense(dense)
     _init_sparse(sparse)
     _init_dense_vector_size()
-    _run_with_startup_retry(ensure_collections)
+    run_with_startup_retry(ensure_collections)
     _get_store_unchecked("common", "dense")
     _get_store_unchecked("scoped", "dense")
     if _sparse_uses_store():
@@ -185,19 +183,6 @@ def init_store(
 
 def init_search():
     init_store()
-
-
-def _run_with_startup_retry(operation):
-    last_error = None
-    for attempt in range(_STARTUP_RETRY_COUNT):
-        try:
-            return operation()
-        except Exception as exc:
-            last_error = exc
-            if attempt == _STARTUP_RETRY_COUNT - 1:
-                break
-            time.sleep(_STARTUP_RETRY_DELAY_SECONDS)
-    raise last_error
 
 
 def _configure_store(

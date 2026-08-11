@@ -199,7 +199,7 @@ def test_init_store_retries_when_qdrant_is_not_ready(monkeypatch):
 
     monkeypatch.setattr(store, "QdrantVectorStore", FakeQdrantStore)
     monkeypatch.setattr(store, "ensure_collections", flaky_ensure_collections)
-    monkeypatch.setattr(store.time, "sleep", lambda seconds: calls.append(("sleep", seconds)))
+    monkeypatch.setattr("store.startup.time.sleep", lambda seconds: calls.append(("sleep", seconds)))
 
     store.init_store(dense=FakeDense())
 
