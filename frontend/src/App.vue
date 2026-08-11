@@ -92,7 +92,7 @@
         </div>
       </div>
       <div class="search-row-3">
-        <label class="rerank-control">
+        <label v-if="rerankAvailable" class="rerank-control">
           <input type="checkbox" v-model="rerank" class="rerank-checkbox" />
           <span>重排</span>
         </label>
@@ -148,6 +148,7 @@ const mode = ref('hybrid')
 const topK = ref(20)
 const fetchK = ref(50)
 const rerank = ref(false)
+const rerankAvailable = ref(false)
 const uploadNamespace = ref('default')
 const searchNamespace = ref('default')
 const uploadCollectionType = ref('common')
@@ -270,6 +271,9 @@ async function fetchConfig() {
   try {
     const res = await axios.get(`${API}/config`)
     searchConfig.value = res.data
+    mode.value = res.data.default_mode ?? mode.value
+    rerankAvailable.value = Boolean(res.data.rerank_available)
+    rerank.value = Boolean(res.data.rerank && res.data.rerank_available)
     hybridBalance.value = res.data.dense_weight
     topK.value = res.data.top_k ?? topK.value
     fetchK.value = res.data.fetch_k ?? fetchK.value

@@ -28,7 +28,7 @@ def test_load_app_config_loads_local_config(monkeypatch):
     assert config.dense.import_path == "dense.huggingface.HuggingFaceDense"
     assert config.sparse.import_path == "sparse.bm25.BM25Sparse"
     assert config.store.import_path == "store.qdrant.QdrantStore"
-    assert config.rerank.import_path == "rerank.cross_encoder.CrossEncoderRerank"
+    assert config.rerank is None
     assert config.ocr.import_path == "ocr.rapid.RapidOCR"
 
 

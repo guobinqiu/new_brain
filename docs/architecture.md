@@ -749,8 +749,8 @@ scoped: namespace, scope_id, filename
 SearchPlan(
     query="查询内容",
     mode="hybrid",
-    top_k=10,
-    rerank=True,
+    top_k=20,
+    rerank=False,
     fetch_k=50,
     namespace="default",
     scope_ids=["scope_001", "scope_002"],
@@ -888,7 +888,7 @@ LangSmith 和本地 JSONL 日志可以同时开启。LangSmith 用于查看 Lang
 dense  -> bge-base-zh-v1.5
 sparse -> bm25 + tokenizer=jieba
 store  -> Qdrant dense vector
-rerank -> bge-reranker-base
+rerank -> 可选；CPU 默认不启用
 ```
 
 `bge-m3` 相关组合：

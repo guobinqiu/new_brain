@@ -123,9 +123,9 @@ http://localhost:5175
 | 字段 | 类型 | 必填 | 默认值 | 说明 |
 |---|---|---|---|---|
 | `query` | string | 是 | - | 查询内容 |
-| `mode` | string | 否 | `hybrid` | `dense`、`sparse`、`hybrid` |
+| `mode` | string | 否 | 配置文件里的 `search.default_mode` | `dense`、`sparse`、`hybrid` |
 | `top_k` | int | 否 | 配置文件里的 `search.top_k` | 最多返回条数，范围 `1..50` |
-| `rerank` | bool | 否 | `false` | 是否启用重排 |
+| `rerank` | bool | 否 | 当前配置是否启用 rerank 组件 | 是否启用重排 |
 | `fetch_k` | int | 否 | 配置文件里的 `search.fetch_k` | 重排候选池，必须大于等于 `top_k` |
 | `namespace` | string | 否 | `default` | 外部系统隔离标识；只搜索同一 `namespace` 下的数据 |
 | `scope_ids` | string[] | 否 | `[]` | 范围标识列表；为空时只查通用知识，非空时同时查通用知识和范围专属知识 |
@@ -194,7 +194,7 @@ Docker 运行使用前面的 `just deploy cpu ...` 或 `just deploy gpu ...` 命
 
 | 文件 | 用途 | 说明 |
 |---|---|---|
-| `local.yaml` | native 默认入口 | 连接 `http://localhost:6333`，collection 固定为 `knowledge_common` / `knowledge_scoped`。 |
+| `local.yaml` | native 默认入口 | 连接 `http://localhost:6333`，collection 固定为 `knowledge_common` / `knowledge_scoped`，默认启用 `bge_base` dense、`bm25` sparse（`tokenizer=jieba`），不加载 rerank。 |
 | `docker-cpu.yaml` | Docker CPU 入口 | 连接 Docker Compose 内的 Qdrant 服务名 `qdrant`，默认启用 `bge_base` dense、`bm25` sparse（`tokenizer=jieba`），不加载 rerank。 |
 | `docker-gpu.yaml` | Docker GPU 入口 | 连接 Docker Compose 内的 Qdrant 服务名 `qdrant`，默认启用 `bge_m3` dense、`bm25` sparse（`tokenizer=jieba`）、`bge_reranker_v2_m3` rerank。 |
 | `qdrant.yaml` | Qdrant 评估入口 | collection 使用 `qdrant_` 前缀。 |

@@ -35,7 +35,6 @@ def test_application_selects_production_components():
     import bootstrap
     from dense.huggingface import HuggingFaceDense
     from ocr.rapid import RapidOCR
-    from rerank.cross_encoder import CrossEncoderRerank
     from search.pipeline import SearchPipeline
     from sparse.bm25 import BM25Sparse
     from store.qdrant import QdrantStore
@@ -46,7 +45,7 @@ def test_application_selects_production_components():
     assert isinstance(application.sparse, BM25Sparse)
     assert isinstance(application.store, QdrantStore)
     assert isinstance(application.search, SearchPipeline)
-    assert isinstance(application.rerank, CrossEncoderRerank)
+    assert application.rerank is None
     assert isinstance(application.ocr, RapidOCR)
 
 
@@ -54,6 +53,7 @@ def test_application_selects_configured_dense_and_bm25_sparse():
     import bootstrap
     from dense.huggingface import HuggingFaceDense
     from loader import load_config_file
+    from rerank.cross_encoder import CrossEncoderRerank
     from sparse.bm25 import BM25Sparse
 
     config = load_config_file("config/qdrant.yaml")
@@ -63,6 +63,7 @@ def test_application_selects_configured_dense_and_bm25_sparse():
     assert application.dense.model_name.endswith("/models/bge-base-zh-v1.5")
     assert isinstance(application.sparse, BM25Sparse)
     assert application.sparse.tokenizer.__class__.__name__ == "JiebaTokenizer"
+    assert isinstance(application.rerank, CrossEncoderRerank)
 
 
 def test_application_selects_bge_m3_store_sparse(tmp_path):

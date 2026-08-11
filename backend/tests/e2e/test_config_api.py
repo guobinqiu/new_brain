@@ -10,7 +10,7 @@ class TestConfigAPI:
         resp = api_client.get("/api/config")
         assert resp.status_code == 200
         cfg = resp.json()
-        for key in ("top_k", "fetch_k", "dense_weight", "sparse_weight", "rrf_k"):
+        for key in ("default_mode", "top_k", "rerank", "rerank_available", "fetch_k", "dense_weight", "sparse_weight", "rrf_k"):
             assert key in cfg
         assert "dense_min_score" not in cfg
 

@@ -39,7 +39,7 @@ search:
   rrf_k: 60
 rerank:
   bge_base:
-    enable: true
+    enable: false
     model_name: bge-reranker-base
     import_path: rerank.cross_encoder.CrossEncoderRerank
   bge_large:

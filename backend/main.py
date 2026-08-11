@@ -19,9 +19,9 @@ logger = logging.getLogger("rag.app")
 
 class SearchRequest(BaseModel):
     query: str = Field(..., min_length=1)
-    mode: Literal["dense", "sparse", "hybrid"] = "hybrid"
+    mode: Literal["dense", "sparse", "hybrid"] = SEARCH_CONFIG["default_mode"]
     top_k: int = Field(SEARCH_CONFIG["top_k"], ge=1, le=50)
-    rerank: bool = False
+    rerank: bool = SEARCH_CONFIG["rerank"]
     fetch_k: int = Field(SEARCH_CONFIG["fetch_k"], ge=1)
     namespace: str = Field("default", min_length=1)
     scope_ids: list[str] = Field(default_factory=list)
@@ -69,9 +69,10 @@ def get_config():
 
 @app.put("/api/config")
 def update_config(config: dict):
-    for key in ("top_k", "fetch_k", "dense_weight", "sparse_weight", "rrf_k"):
+    for key in ("default_mode", "top_k", "rerank", "fetch_k", "dense_weight", "sparse_weight", "rrf_k"):
         if key in config:
             SEARCH_CONFIG[key] = config[key]
+    SEARCH_CONFIG["rerank"] = bool(SEARCH_CONFIG["rerank"] and SEARCH_CONFIG["rerank_available"])
     return dict(SEARCH_CONFIG)
 
 
