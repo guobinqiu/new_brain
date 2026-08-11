@@ -23,6 +23,13 @@ def test_just_deploy_recipes_do_not_echo_commands():
     assert "\t@docker compose -f deploy/gpu/docker-compose.yml build" in justfile
 
 
+def test_deploy_installs_opencv_runtime_library_for_ocr():
+    for dockerfile_path in ("deploy/cpu/Dockerfile", "deploy/gpu/Dockerfile"):
+        dockerfile = (ROOT / dockerfile_path).read_text(encoding="utf-8")
+
+        assert "libgl1" in dockerfile
+
+
 def test_cpu_deploy_installs_cpu_extra():
     dockerfile = (ROOT / "deploy/cpu/Dockerfile").read_text(encoding="utf-8")
 

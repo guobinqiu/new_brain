@@ -18,6 +18,7 @@ RUN if [ "$USE_CN_MIRROR" = "true" ]; then \
     && apt-get install -y --no-install-recommends --fix-missing \
         -o Acquire::Retries=5 \
         -o Acquire::http::Timeout=30 \
+        libgl1 \
         tesseract-ocr \
         tesseract-ocr-chi-sim \
         tesseract-ocr-eng \
