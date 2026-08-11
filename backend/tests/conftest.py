@@ -89,9 +89,14 @@ def api_client(store_test_env):
     import main
 
     main.application = main.Application()
+    orig_startup_in_background = main.STARTUP_IN_BACKGROUND
+    main.STARTUP_IN_BACKGROUND = False
 
-    with TestClient(main.app) as client:
-        yield client
+    try:
+        with TestClient(main.app) as client:
+            yield client
+    finally:
+        main.STARTUP_IN_BACKGROUND = orig_startup_in_background
 
 
 @pytest.fixture

@@ -1,6 +1,7 @@
 import os
 import tempfile
 import logging
+import threading
 from contextlib import asynccontextmanager
 from typing import Literal
 
@@ -37,17 +38,27 @@ class SearchRequest(BaseModel):
 
 
 application = Application()
+STARTUP_IN_BACKGROUND = True
+STARTUP_RETRY_MAX_INTERVAL_SECONDS = 30
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """启动时预加载所有模型，避免请求时等待模型加载。"""
+    """启动进程后在后台初始化 RAG，避免数据库暂时不可用导致进程退出。"""
     configure_logging(application.config.logging)
-    logger.info("Preloading models ...", extra={"event": "startup_preload"})
-    application.start()
     app.state.application = application
-    logger.info("Startup model preload done", extra={"event": "startup_ready"})
+    stop_event = None
+    if STARTUP_IN_BACKGROUND:
+        stop_event = threading.Event()
+        startup_thread = threading.Thread(target=_start_application_until_ready, args=(stop_event,), name="rag-startup", daemon=True)
+        startup_thread.start()
+    else:
+        logger.info("Preloading models ...", extra={"event": "startup_preload"})
+        application.start()
+        logger.info("Startup model preload done", extra={"event": "startup_ready"})
     yield
+    if stop_event is not None:
+        stop_event.set()
     application.stop()
     logger.info("Application closed", extra={"event": "shutdown"})
 
@@ -65,6 +76,12 @@ app.add_middleware(
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
+
+@app.get("/api/ready")
+def ready():
+    if not application.ready:
+        raise HTTPException(503, "search is not initialized")
+    return {"status": "ready"}
 
 @app.get("/api/config")
 def get_config():
@@ -132,6 +149,8 @@ async def upload_file(
             namespace=namespace,
             scope_id=scope_id,
         )
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(400, str(e))
     except Exception as e:
@@ -181,6 +200,28 @@ def search(req: SearchRequest):
 def _require_ready():
     if not application.ready:
         raise HTTPException(503, "search is not initialized")
+
+
+def _start_application_until_ready(stop_event: threading.Event):
+    retry_seconds = 1
+    while not stop_event.is_set() and not application.ready:
+        try:
+            logger.info("Preloading models ...", extra={"event": "startup_preload"})
+            application.start()
+            logger.info("Startup model preload done", extra={"event": "startup_ready"})
+            return
+        except Exception as exc:
+            logger.warning(
+                "Application startup failed; retrying",
+                exc_info=True,
+                extra={"event": "startup_retry", "retry_seconds": retry_seconds, "error": str(exc)},
+            )
+            try:
+                application.stop()
+            except Exception:
+                logger.exception("Application cleanup after failed startup failed", extra={"event": "startup_cleanup_failed"})
+            stop_event.wait(retry_seconds)
+            retry_seconds = min(retry_seconds * 2, STARTUP_RETRY_MAX_INTERVAL_SECONDS)
 
 @app.get("/api/documents")
 def documents(

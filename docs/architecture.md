@@ -479,7 +479,9 @@ backend/
 3. 校验配置
 4. 创建 DI 容器
 5. 容器按配置创建 dense、sparse、store、search、rerank、ocr
-6. Application 按顺序启动所有组件
+6. FastAPI 进程启动
+7. 后台初始化线程按顺序启动 Application 组件
+8. 初始化成功后 application.ready=true
 ```
 
 示意代码：
@@ -496,7 +498,7 @@ rerank = container.rerank()
 ocr = container.ocr()
 ```
 
-`container.py` 使用 DI 容器组装组件。配置里的组件名映射到容器 provider，provider 负责创建具体实现和注入依赖。例如 `sparse.type=bm25` 与 `tokenizer=jieba` 会组装成 `BM25Sparse(tokenizer=JiebaTokenizer())`。`bootstrap.py` 只管理 Application 生命周期。搜索流程只依赖组件能力，不直接依赖具体实现类。
+`container.py` 使用 DI 容器组装组件。配置里的组件名映射到容器 provider，provider 负责创建具体实现和注入依赖。例如 `sparse.type=bm25` 与 `tokenizer=jieba` 会组装成 `BM25Sparse(tokenizer=JiebaTokenizer())`。`bootstrap.py` 只管理 Application 生命周期。FastAPI 启动后由后台线程初始化 Application；如果数据库暂时不可用，后端进程不退出，后台线程按退避间隔继续重试。搜索流程只依赖组件能力，不直接依赖具体实现类。
 
 ---
 
@@ -985,6 +987,9 @@ CONFIG_FILE=/path/to/config.yaml
 - 向量库使用独立持久化存储。
 - 模型文件保存在固定路径。
 - 配置文件由部署环境指定。
+- `/api/health` 表示后端进程存活；`/api/ready` 表示 RAG 组件和向量库已初始化完成。
+- 该设计对应 Kubernetes 的 liveness/readiness 模式：`/api/health` 可作为 liveness probe，`/api/ready` 可作为 readiness probe。
+- RAG 未 ready 时，上传、查询、文档列表、scope 列表等业务接口返回 503；后台初始化成功后自动恢复。
 - LangSmith tracing 由部署环境通过 `LANGSMITH_TRACING`、`LANGSMITH_API_KEY`、`LANGSMITH_PROJECT` 控制，不写入 yaml。
 - 不同检索组合使用不同 collection 或 index。
 - Qdrant、Chroma、Milvus 等具体服务按各自方式部署。Milvus Standalone 使用 `--profile milvus` 启动；Milvus Lite 不需要 Docker 服务，只需要把 `uri` 指向本地 `.db` 文件。
