@@ -525,7 +525,16 @@ class Store:
     def build_scoped_filter(self, namespace: str, scope_ids: list[str]): ...
     def search_dense(self, collection_type: str, query: str, limit: int, metadata_filter: object) -> list[dict]: ...
     def search_sparse(self, collection_type: str, query: str, limit: int, metadata_filter: object) -> list[dict]: ...
-    def search_hybrid(self, collection_type: str, query: str, limit: int, metadata_filter: object) -> list[dict]: ...
+    def search_hybrid(
+        self,
+        collection_type: str,
+        query: str,
+        limit: int,
+        metadata_filter: object,
+        dense_weight: float,
+        sparse_weight: float,
+        rrf_k: int,
+    ) -> list[dict]: ...
     def sparse_uses_store(self, sparse: object | None = None) -> bool: ...
 ```
 
@@ -592,8 +601,8 @@ dense 检索
   -> 使用 LangChain VectorStore 的 similarity_search_with_score
   -> score 来自向量库
 
-store sparse / store hybrid
-  -> 使用向量库 sparse 或 hybrid 查询
+store sparse
+  -> 使用向量库 sparse 查询
   -> score 来自向量库
 
 应用内 bm25 sparse
@@ -629,7 +638,7 @@ sparse:
 ```text
 1. 上传时 `milvus_bm25` sparse 按 Milvus analyzer 从文本生成 BM25 sparse vector
 2. 查询时 Milvus 对查询文本执行同一套 analyzer
-3. sparse 和 hybrid 都由 Milvus 执行
+3. sparse 由 Milvus 执行；hybrid 仍由 SearchPipeline 对 dense 和 sparse 结果做应用层融合
 ```
 
 当前 `milvus_bm25` 使用 Milvus analyzer 的 `jieba` tokenizer，便于中文评估。它和应用内 `bm25` sparse 是两条不同路线，配置文件分开。
@@ -752,6 +761,9 @@ SearchPlan(
     top_k=20,
     rerank=False,
     fetch_k=50,
+    dense_weight=0.5,
+    sparse_weight=0.5,
+    rrf_k=60,
     namespace="default",
     scope_ids=["scope_001", "scope_002"],
 )
@@ -766,6 +778,9 @@ SearchPlan(
 | `top_k` | 最多返回条数 |
 | `rerank` | 是否使用 rerank |
 | `fetch_k` | rerank 候选池大小 |
+| `dense_weight` | 本次 hybrid 查询的 dense 权重 |
+| `sparse_weight` | 本次 hybrid 查询的 sparse 权重 |
+| `rrf_k` | 本次 hybrid 查询的 RRF 参数 |
 | `namespace` | 查询的系统命名空间 |
 | `scope_ids` | 查询的范围列表 |
 
@@ -787,7 +802,7 @@ rerank=true  -> retrieve_limit = fetch_k
 2. SearchPlan 进入 SearchPipeline Runnable
 3. prepare_plan 计算 retrieve_limit
 4. retrieve_common_and_scoped 使用 RunnableParallel 并发查询 common / scoped
-5. hybrid 且 sparse 不由 store 执行时，dense / sparse 使用 RunnableParallel 并发查询
+5. hybrid 时 dense / sparse 使用 RunnableParallel 并发查询
 6. fusion 对 dense / sparse 结果做加权倒数排名融合
 7. dedupe 合并 common / scoped 并按文档 id 去重
 8. rerank=true 时，对合并候选执行 rerank
@@ -811,14 +826,14 @@ SearchPipeline RunnableSequence
   format_response
 ```
 
-dense、sparse、store-hybrid 检索节点使用 LangChain `BaseRetriever`。这些节点会触发 LangChain retriever 生命周期事件，开启 LangSmith 后会显示为 retriever run。`prepare_plan`、`fusion`、`dedupe`、`rerank`、`format_response` 不是检索动作，继续使用普通 Runnable 阶段。
+dense 和 sparse 检索节点使用 LangChain `BaseRetriever`。这些节点会触发 LangChain retriever 生命周期事件，开启 LangSmith 后会显示为 retriever run。`prepare_plan`、`fusion`、`dedupe`、`rerank`、`format_response` 不是检索动作，继续使用普通 Runnable 阶段。
 
 三种检索模式：
 
 ```text
 dense  -> Dense Retriever 调用 Store.search_dense()，由具体 store 实现 dense 查询
 sparse -> 应用内 Sparse Retriever 执行 BM25，或 Store Sparse Retriever 调用向量库 sparse 查询
-hybrid -> dense + 应用内 Sparse Retriever 并发后应用层融合；store sparse/hybrid 时使用 Store Hybrid Retriever
+hybrid -> dense + sparse 并发后应用层 RRF 融合；sparse 可以是应用内 BM25，也可以是向量库 sparse
 ```
 
 并发规则：

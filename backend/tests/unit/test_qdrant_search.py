@@ -33,7 +33,7 @@ class FakeBackendStore:
     def search_sparse(self, collection_type, query, limit, metadata_filter):
         return self._search_with_store(collection_type, "sparse", query, limit, metadata_filter)
 
-    def search_hybrid(self, collection_type, query, limit, metadata_filter):
+    def search_hybrid(self, collection_type, query, limit, metadata_filter, dense_weight, sparse_weight, rrf_k):
         return self._search_with_store(collection_type, "hybrid", query, limit, metadata_filter)
 
     def _search_with_store(self, collection_type, mode, query, limit, metadata_filter):
@@ -380,7 +380,7 @@ def test_memory_sparse_requires_startup_sparse_component(monkeypatch):
         search._retrieve_sparse(backend_store, "common", ("common-filter", "default"), "query", 5, sparse=None)
 
 
-def test_hybrid_store_sparse_uses_qdrant_hybrid_store(monkeypatch):
+def test_hybrid_store_sparse_fuses_dense_and_sparse_with_plan_weights(monkeypatch):
     import search
 
     calls = []
@@ -395,21 +395,27 @@ def test_hybrid_store_sparse_uses_qdrant_hybrid_store(monkeypatch):
             return [SparseVector(indices=[1], values=[1.0]) for _ in texts]
 
     class FakeStore:
-        def similarity_search_with_score(self, query, k, filter):
-            calls.append(("qdrant", query, k, filter))
-            return [(Document(page_content="hybrid result", metadata={}, id="hybrid-store-1"), 1.0)]
+        def __init__(self, mode):
+            self.mode = mode
 
-    backend_store = FakeBackendStore(lambda collection_type, mode: FakeStore())
+        def similarity_search_with_score(self, query, k, filter):
+            calls.append((self.mode, query, k, filter))
+            return [(Document(page_content=f"{self.mode} result", metadata={}, id=f"{self.mode}-store-1"), 1.0)]
+
+    backend_store = FakeBackendStore(lambda collection_type, mode: FakeStore(mode))
 
     executor = search._SearchExecutor(
-        search.SearchPlan("query", mode="hybrid", top_k=5),
+        search.SearchPlan("query", mode="hybrid", top_k=5, dense_weight=0.0, sparse_weight=1.0, rrf_k=1),
         sparse=StoreSparse(),
         store=backend_store,
     )
     results = executor._retrieve_collection("common", ("common-filter", "default"), 5)
 
-    assert calls == [("qdrant", "query", 5, ("common-filter", "default"))]
-    assert results[0]["id"] == "hybrid-store-1"
+    assert sorted(calls) == [
+        ("dense", "query", 5, ("common-filter", "default")),
+        ("sparse", "query", 5, ("common-filter", "default")),
+    ]
+    assert [item["id"] for item in results] == ["sparse-store-1", "dense-store-1"]
 
 
 def test_rerank_receives_dense_candidates_without_dense_score_filter(monkeypatch):

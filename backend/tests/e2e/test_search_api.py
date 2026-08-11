@@ -61,6 +61,35 @@ class TestSearchAPI:
             assert r["collection_type"] in ("common", "scoped")
             assert "method" not in r
 
+    def test_search_accepts_per_request_hybrid_weights(self, api_client, test_txt_path):
+        """``POST /api/search`` accepts hybrid weights without changing global config."""
+        before = api_client.get("/api/config").json()
+        with open(test_txt_path, "rb") as f:
+            api_client.post(
+                "/api/upload", files={"file": ("test_ai.txt", f, "text/plain")}
+            )
+
+        resp = api_client.post(
+            "/api/search",
+            json={
+                "query": "人工智能",
+                "mode": "hybrid",
+                "top_k": 5,
+                "dense_weight": 0.4,
+                "sparse_weight": 0.6,
+                "rrf_k": 30,
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data["dense_weight"] == 0.4
+        assert data["sparse_weight"] == 0.6
+        assert data["rrf_k"] == 30
+        after = api_client.get("/api/config").json()
+        assert after["dense_weight"] == before["dense_weight"]
+        assert after["sparse_weight"] == before["sparse_weight"]
+        assert after["rrf_k"] == before["rrf_k"]
+
     def test_search_api_rerank_param(self, api_client, test_txt_path):
         """``POST /api/search`` with ``rerank=true`` accepts and applies reranking."""
         with open(test_txt_path, "rb") as f:

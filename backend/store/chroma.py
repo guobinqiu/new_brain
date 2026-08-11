@@ -109,8 +109,17 @@ class ChromaStore:
     def search_sparse(self, collection_type: CollectionType, query: str, limit: int, metadata_filter: dict) -> list[dict]:
         return search_sparse(collection_type, query, limit, metadata_filter)
 
-    def search_hybrid(self, collection_type: CollectionType, query: str, limit: int, metadata_filter: dict) -> list[dict]:
-        return search_hybrid(collection_type, query, limit, metadata_filter)
+    def search_hybrid(
+        self,
+        collection_type: CollectionType,
+        query: str,
+        limit: int,
+        metadata_filter: dict,
+        dense_weight: float,
+        sparse_weight: float,
+        rrf_k: int,
+    ) -> list[dict]:
+        return search_hybrid(collection_type, query, limit, metadata_filter, dense_weight, sparse_weight, rrf_k)
 
     def sparse_uses_store(self, sparse: Sparse | None = None) -> bool:
         return _sparse_uses_store(sparse)
@@ -327,12 +336,29 @@ def search_sparse(collection_type: CollectionType, query: str, limit: int, metad
     return _documents_with_scores_to_items(docs, collection_type)
 
 
-def search_hybrid(collection_type: CollectionType, query: str, limit: int, metadata_filter: dict) -> list[dict]:
-    docs = _search_sparse_or_hybrid(collection_type, "hybrid", query, limit, metadata_filter)
+def search_hybrid(
+    collection_type: CollectionType,
+    query: str,
+    limit: int,
+    metadata_filter: dict,
+    dense_weight: float,
+    sparse_weight: float,
+    rrf_k: int,
+) -> list[dict]:
+    docs = _search_sparse_or_hybrid(collection_type, "hybrid", query, limit, metadata_filter, dense_weight, sparse_weight, rrf_k)
     return _documents_with_scores_to_items(docs, collection_type)
 
 
-def _search_sparse_or_hybrid(collection_type: CollectionType, mode: SearchMode, query: str, limit: int, metadata_filter: dict):
+def _search_sparse_or_hybrid(
+    collection_type: CollectionType,
+    mode: SearchMode,
+    query: str,
+    limit: int,
+    metadata_filter: dict,
+    dense_weight: float | None = None,
+    sparse_weight: float | None = None,
+    rrf_k: int | None = None,
+):
     from chromadb import K, Knn, Rrf, Search
 
     if mode == "sparse":
@@ -344,10 +370,10 @@ def _search_sparse_or_hybrid(collection_type: CollectionType, mode: SearchMode, 
                 Knn(query=query, key=SPARSE_VECTOR_KEY, limit=limit, return_rank=True),
             ],
             weights=[
-                float(_search_config_value("dense_weight", 0.5)),
-                float(_search_config_value("sparse_weight", 0.5)),
+                float(dense_weight if dense_weight is not None else _search_config_value("dense_weight", 0.5)),
+                float(sparse_weight if sparse_weight is not None else _search_config_value("sparse_weight", 0.5)),
             ],
-            k=int(_search_config_value("rrf_k", 60)),
+            k=int(rrf_k if rrf_k is not None else _search_config_value("rrf_k", 60)),
         )
     search = Search(where=metadata_filter, rank=rank, limit=limit, select=[K.DOCUMENT, K.SCORE, "metadata"])
     rows = _collection(_store_for(collection_type, mode)).search(search).rows()

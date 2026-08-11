@@ -129,7 +129,16 @@ class QdrantStore:
     def search_sparse(self, collection_type: CollectionType, query: str, limit: int, metadata_filter: models.Filter) -> list[dict]:
         return search_sparse(collection_type, query, limit, metadata_filter)
 
-    def search_hybrid(self, collection_type: CollectionType, query: str, limit: int, metadata_filter: models.Filter) -> list[dict]:
+    def search_hybrid(
+        self,
+        collection_type: CollectionType,
+        query: str,
+        limit: int,
+        metadata_filter: models.Filter,
+        dense_weight: float,
+        sparse_weight: float,
+        rrf_k: int,
+    ) -> list[dict]:
         return search_hybrid(collection_type, query, limit, metadata_filter)
 
     def sparse_uses_store(self, sparse: Sparse | None = None) -> bool:

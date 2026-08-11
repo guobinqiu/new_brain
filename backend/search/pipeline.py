@@ -4,7 +4,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from config import SEARCH_CONFIG
 from langchain_core.callbacks import CallbackManagerForRetrieverRun
 from langchain_core.documents import Document
 from langchain_core.retrievers import BaseRetriever
@@ -94,6 +93,9 @@ class SearchPlan:
     top_k: int = 5
     rerank: bool = False
     fetch_k: int = 100
+    dense_weight: float = 0.5
+    sparse_weight: float = 0.5
+    rrf_k: int = 60
     namespace: str = "default"
     scope_ids: list[str] | None = None
 
@@ -144,6 +146,9 @@ class _SearchExecutor:
                 "top_k": self.plan.top_k,
                 "rerank": self.plan.rerank,
                 "fetch_k": self.plan.fetch_k,
+                "dense_weight": self.plan.dense_weight,
+                "sparse_weight": self.plan.sparse_weight,
+                "rrf_k": self.plan.rrf_k,
                 "namespace": self.plan.namespace,
                 "scope_ids": list(self.plan.scope_ids),
             },
@@ -193,8 +198,6 @@ class _SearchExecutor:
         if self.plan.mode == "sparse":
             return self._retriever(collection_type, "sparse") | RunnableLambda(_documents_to_items, name=f"{collection_type}_items")
         if self.plan.mode == "hybrid":
-            if self.store.sparse_uses_store(self.sparse):
-                return self._retriever(collection_type, "hybrid") | RunnableLambda(_documents_to_items, name=f"{collection_type}_items")
             return (
                 RunnableParallel(
                     dense=self._retriever(collection_type, "dense"),
@@ -217,7 +220,7 @@ class _SearchExecutor:
 
     def _fuse_collection_parts(self, parts: dict[str, list[Document]], collection_type: str) -> list[dict]:
         with self.trace.stage(f"{collection_type}_fusion") as stage:
-            items = _weighted_reciprocal_rank(_documents_to_items(parts["dense"]), _documents_to_items(parts["sparse"]), self._runtime_retrieve_limit)
+            items = _weighted_reciprocal_rank(_documents_to_items(parts["dense"]), _documents_to_items(parts["sparse"]), self._runtime_retrieve_limit, self.plan)
             stage["count"] = len(items)
             return items
 
@@ -225,13 +228,11 @@ class _SearchExecutor:
         if self.plan.mode == "sparse":
             return _retrieve_sparse(self.store, collection_type, metadata_filter, self.plan.query, limit, self.sparse)
         if self.plan.mode == "hybrid":
-            if self.store.sparse_uses_store(self.sparse):
-                return _retrieve_store_hybrid(self.store, collection_type, metadata_filter, self.plan.query, limit)
             dense_items, sparse_items = self.runner.run_dense_and_sparse(
                 lambda: _retrieve_dense(self.store, collection_type, metadata_filter, self.plan.query, limit),
                 lambda: _retrieve_sparse(self.store, collection_type, metadata_filter, self.plan.query, limit, self.sparse),
             )
-            return _weighted_reciprocal_rank(dense_items, sparse_items, limit)
+            return _weighted_reciprocal_rank(dense_items, sparse_items, limit, self.plan)
         return _retrieve_dense(self.store, collection_type, metadata_filter, self.plan.query, limit)
 
     def _retrieve_dense_context(self, context: dict) -> list[dict]:
@@ -241,7 +242,7 @@ class _SearchExecutor:
         return _retrieve_sparse(self.store, context["collection_type"], context["metadata_filter"], self.plan.query, context["retrieve_limit"], self.sparse)
 
     def _retrieve_store_hybrid_context(self, context: dict) -> list[dict]:
-        return _retrieve_store_hybrid(self.store, context["collection_type"], context["metadata_filter"], self.plan.query, context["retrieve_limit"])
+        return _retrieve_store_hybrid(self.store, context["collection_type"], context["metadata_filter"], self.plan.query, context["retrieve_limit"], self.plan)
 
     def _rerank(self, items: list[dict]) -> list[dict]:
         if self.rerank is None:
@@ -309,14 +310,14 @@ def _retrieve_store_sparse(store: Store, collection_type: str, metadata_filter, 
     return store.search_sparse(collection_type, query, limit, metadata_filter)
 
 
-def _retrieve_store_hybrid(store: Store, collection_type: str, metadata_filter, query: str, limit: int) -> list[dict]:
-    return store.search_hybrid(collection_type, query, limit, metadata_filter)
+def _retrieve_store_hybrid(store: Store, collection_type: str, metadata_filter, query: str, limit: int, plan: SearchPlan) -> list[dict]:
+    return store.search_hybrid(collection_type, query, limit, metadata_filter, plan.dense_weight, plan.sparse_weight, plan.rrf_k)
 
 
-def _weighted_reciprocal_rank(dense_items: list[dict], sparse_items: list[dict], limit: int) -> list[dict]:
-    rrf_k = SEARCH_CONFIG.get("rrf_k", 60)
-    dense_weight = SEARCH_CONFIG.get("dense_weight", 0.5)
-    sparse_weight = SEARCH_CONFIG.get("sparse_weight", 0.5)
+def _weighted_reciprocal_rank(dense_items: list[dict], sparse_items: list[dict], limit: int, plan: SearchPlan) -> list[dict]:
+    rrf_k = plan.rrf_k
+    dense_weight = plan.dense_weight
+    sparse_weight = plan.sparse_weight
     by_id: dict[str, dict] = {}
     scores: dict[str, float] = {}
     for weight, items in ((dense_weight, dense_items), (sparse_weight, sparse_items)):

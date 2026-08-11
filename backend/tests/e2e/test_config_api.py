@@ -14,22 +14,10 @@ class TestConfigAPI:
             assert key in cfg
         assert "dense_min_score" not in cfg
 
-    def test_update_config(self, api_client):
-        """``PUT /api/config`` updates search parameters."""
+    def test_put_config_not_available(self, api_client):
+        """``PUT /api/config`` is not part of the production API."""
         resp = api_client.put(
             "/api/config",
             json={"dense_weight": 0.8, "sparse_weight": 0.2},
         )
-        assert resp.status_code == 200
-        cfg = resp.json()
-        assert cfg["dense_weight"] == 0.8
-        assert cfg["sparse_weight"] == 0.2
-
-    def test_update_config_partial(self, api_client):
-        """``PUT /api/config`` with partial keys only changes those keys."""
-        api_client.put("/api/config", json={"dense_weight": 0.5})
-
-        resp = api_client.put("/api/config", json={"rrf_k": 99})
-        cfg = resp.json()
-        assert cfg["rrf_k"] == 99
-        assert cfg["dense_weight"] == 0.5
+        assert resp.status_code == 405

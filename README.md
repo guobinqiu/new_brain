@@ -140,6 +140,9 @@ http://<服务器地址>:28000
 | `top_k` | int | 否 | 配置文件里的 `search.top_k` | 最多返回条数，范围 `1..50` |
 | `rerank` | bool | 否 | 当前配置是否启用 rerank 组件 | 是否启用重排 |
 | `fetch_k` | int | 否 | 配置文件里的 `search.fetch_k` | 重排候选池，必须大于等于 `top_k` |
+| `dense_weight` | number | 否 | 配置文件里的 `search.dense_weight` | 本次 hybrid 查询的 dense 权重 |
+| `sparse_weight` | number | 否 | 配置文件里的 `search.sparse_weight` | 本次 hybrid 查询的 sparse 权重 |
+| `rrf_k` | int | 否 | 配置文件里的 `search.rrf_k` | 本次 hybrid 查询的 RRF 参数 |
 | `namespace` | string | 否 | `default` | 外部系统隔离标识；只搜索同一 `namespace` 下的数据 |
 | `scope_ids` | string[] | 否 | `[]` | 范围标识列表；为空时只查通用知识，非空时同时查通用知识和范围专属知识 |
 
@@ -152,6 +155,9 @@ http://<服务器地址>:28000
   "top_k": 5,
   "rerank": true,
   "fetch_k": 50,
+  "dense_weight": 0.5,
+  "sparse_weight": 0.5,
+  "rrf_k": 60,
   "namespace": "default",
   "scope_ids": []
 }
@@ -165,6 +171,9 @@ http://<服务器地址>:28000
 | `mode` | 本次搜索模式 |
 | `rerank` | 本次是否启用重排 |
 | `fetch_k` | 本次候选池大小 |
+| `dense_weight` | 本次 hybrid 查询的 dense 权重 |
+| `sparse_weight` | 本次 hybrid 查询的 sparse 权重 |
+| `rrf_k` | 本次 hybrid 查询的 RRF 参数 |
 | `elapsed_ms` | 后端搜索耗时，单位毫秒 |
 
 ### 文档列表

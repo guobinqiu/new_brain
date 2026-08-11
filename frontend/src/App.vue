@@ -168,7 +168,6 @@ const uploading = ref(false)
 function onBalanceChange() {
   searchConfig.value.dense_weight = hybridBalance.value
   searchConfig.value.sparse_weight = 1 - hybridBalance.value
-  updateConfig()
 }
 
 async function onDrop(e) {
@@ -233,6 +232,9 @@ async function doSearch() {
       mode: mode.value,
       top_k: topK.value,
       rerank: rerank.value,
+      dense_weight: searchConfig.value.dense_weight,
+      sparse_weight: searchConfig.value.sparse_weight,
+      rrf_k: searchConfig.value.rrf_k,
       namespace: searchNamespace.value || 'default',
       scope_ids: scopeIds,
     }
@@ -278,11 +280,6 @@ async function fetchConfig() {
     topK.value = res.data.top_k ?? topK.value
     fetchK.value = res.data.fetch_k ?? fetchK.value
   } catch (err) { console.error(err) }
-}
-
-async function updateConfig() {
-  try { await axios.put(`${API}/config`, searchConfig.value) }
-  catch (err) { console.error(err) }
 }
 
 async function fetchDocuments() {

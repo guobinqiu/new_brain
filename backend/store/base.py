@@ -59,7 +59,16 @@ class Store(Protocol):
     def search_sparse(self, collection_type: CollectionType, query: str, limit: int, metadata_filter: object) -> list[dict]:
         ...
 
-    def search_hybrid(self, collection_type: CollectionType, query: str, limit: int, metadata_filter: object) -> list[dict]:
+    def search_hybrid(
+        self,
+        collection_type: CollectionType,
+        query: str,
+        limit: int,
+        metadata_filter: object,
+        dense_weight: float,
+        sparse_weight: float,
+        rrf_k: int,
+    ) -> list[dict]:
         ...
 
     def sparse_uses_store(self, sparse: Sparse | None = None) -> bool:

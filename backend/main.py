@@ -23,6 +23,9 @@ class SearchRequest(BaseModel):
     top_k: int = Field(SEARCH_CONFIG["top_k"], ge=1, le=50)
     rerank: bool = SEARCH_CONFIG["rerank"]
     fetch_k: int = Field(SEARCH_CONFIG["fetch_k"], ge=1)
+    dense_weight: float = Field(SEARCH_CONFIG["dense_weight"], ge=0, le=1)
+    sparse_weight: float = Field(SEARCH_CONFIG["sparse_weight"], ge=0, le=1)
+    rrf_k: int = Field(SEARCH_CONFIG["rrf_k"], ge=1)
     namespace: str = Field("default", min_length=1)
     scope_ids: list[str] = Field(default_factory=list)
 
@@ -66,15 +69,6 @@ def health():
 @app.get("/api/config")
 def get_config():
     return dict(SEARCH_CONFIG)
-
-@app.put("/api/config")
-def update_config(config: dict):
-    for key in ("default_mode", "top_k", "rerank", "fetch_k", "dense_weight", "sparse_weight", "rrf_k"):
-        if key in config:
-            SEARCH_CONFIG[key] = config[key]
-    SEARCH_CONFIG["rerank"] = bool(SEARCH_CONFIG["rerank"] and SEARCH_CONFIG["rerank_available"])
-    return dict(SEARCH_CONFIG)
-
 
 def index_chunks(
     path: str,
@@ -151,12 +145,16 @@ def search(req: SearchRequest):
     _require_ready()
     import time
     start = time.perf_counter()
+    effective_rerank = bool(req.rerank and application.rerank is not None)
     plan = SearchPlan(
         req.query,
         mode=req.mode,
         top_k=req.top_k,
-        rerank=req.rerank,
+        rerank=effective_rerank,
         fetch_k=req.fetch_k,
+        dense_weight=req.dense_weight,
+        sparse_weight=req.sparse_weight,
+        rrf_k=req.rrf_k,
         namespace=req.namespace,
         scope_ids=req.scope_ids,
     )
@@ -168,7 +166,16 @@ def search(req: SearchRequest):
         search_trace=application.config.logging.search_trace,
     ).execute()
     elapsed_ms = round((time.perf_counter() - start) * 1000, 1)
-    return {"results": results, "mode": req.mode, "rerank": req.rerank, "fetch_k": req.fetch_k, "elapsed_ms": elapsed_ms}
+    return {
+        "results": results,
+        "mode": req.mode,
+        "rerank": effective_rerank,
+        "fetch_k": req.fetch_k,
+        "dense_weight": req.dense_weight,
+        "sparse_weight": req.sparse_weight,
+        "rrf_k": req.rrf_k,
+        "elapsed_ms": elapsed_ms,
+    }
 
 
 def _require_ready():

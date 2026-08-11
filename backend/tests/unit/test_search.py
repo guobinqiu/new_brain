@@ -127,6 +127,33 @@ def test_dense_and_sparse_retrieval_nodes_are_langchain_retrievers():
     assert isinstance(retrieve_parallel.steps__["sparse"], BaseRetriever)
 
 
+def test_hybrid_rrf_uses_plan_weights_not_global_config(monkeypatch):
+    import search as search_mod
+    from config import SEARCH_CONFIG
+
+    monkeypatch.setitem(SEARCH_CONFIG, "dense_weight", 1.0)
+    monkeypatch.setitem(SEARCH_CONFIG, "sparse_weight", 0.0)
+    monkeypatch.setitem(SEARCH_CONFIG, "rrf_k", 60)
+
+    dense_items = [
+        {"id": "dense_first", "content": "dense", "metadata": {}},
+    ]
+    sparse_items = [
+        {"id": "sparse_first", "content": "sparse", "metadata": {}},
+    ]
+    plan = search_mod.SearchPlan(
+        "query",
+        mode="hybrid",
+        dense_weight=0.0,
+        sparse_weight=1.0,
+        rrf_k=1,
+    )
+
+    results = search_mod._weighted_reciprocal_rank(dense_items, sparse_items, 2, plan)
+
+    assert [item["id"] for item in results] == ["sparse_first", "dense_first"]
+
+
 def test_executor_invokes_runnable_with_langsmith_metadata(monkeypatch):
     import search as search_mod
 
@@ -148,6 +175,9 @@ def test_executor_invokes_runnable_with_langsmith_metadata(monkeypatch):
         top_k=3,
         rerank=True,
         fetch_k=9,
+        dense_weight=0.4,
+        sparse_weight=0.6,
+        rrf_k=30,
         namespace="tenant_a",
         scope_ids=["scope_001"],
     )
@@ -165,6 +195,9 @@ def test_executor_invokes_runnable_with_langsmith_metadata(monkeypatch):
         "top_k": 3,
         "rerank": True,
         "fetch_k": 9,
+        "dense_weight": 0.4,
+        "sparse_weight": 0.6,
+        "rrf_k": 30,
         "namespace": "tenant_a",
         "scope_ids": ["scope_001"],
     }

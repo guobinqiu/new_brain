@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
-from config import QDRANT_COMMON_COLLECTION, QDRANT_SCOPED_COLLECTION, SEARCH_CONFIG
+from config import QDRANT_COMMON_COLLECTION, QDRANT_SCOPED_COLLECTION
 from dense.base import Dense
 from dense.huggingface import HuggingFaceDense
 from langchain_core.documents import Document
@@ -111,8 +111,17 @@ class MilvusStore:
     def search_sparse(self, collection_type: CollectionType, query: str, limit: int, metadata_filter: str) -> list[dict]:
         return search_sparse(collection_type, query, limit, metadata_filter)
 
-    def search_hybrid(self, collection_type: CollectionType, query: str, limit: int, metadata_filter: str) -> list[dict]:
-        return search_hybrid(collection_type, query, limit, metadata_filter)
+    def search_hybrid(
+        self,
+        collection_type: CollectionType,
+        query: str,
+        limit: int,
+        metadata_filter: str,
+        dense_weight: float,
+        sparse_weight: float,
+        rrf_k: int,
+    ) -> list[dict]:
+        return search_hybrid(collection_type, query, limit, metadata_filter, dense_weight, sparse_weight)
 
     def sparse_uses_store(self, sparse: Sparse | None = None) -> bool:
         return _sparse_uses_store(sparse)
@@ -511,8 +520,15 @@ def search_sparse(collection_type: CollectionType, query: str, limit: int, metad
     return _documents_from_milvus_rows(rows, "sparse", collection_type)
 
 
-def search_hybrid(collection_type: CollectionType, query: str, limit: int, metadata_filter: str) -> list[dict]:
-    rows = _hybrid_search(collection_type, query, limit, metadata_filter)
+def search_hybrid(
+    collection_type: CollectionType,
+    query: str,
+    limit: int,
+    metadata_filter: str,
+    dense_weight: float,
+    sparse_weight: float,
+) -> list[dict]:
+    rows = _hybrid_search(collection_type, query, limit, metadata_filter, dense_weight, sparse_weight)
     return _documents_from_milvus_rows(rows, "hybrid", collection_type)
 
 
@@ -530,7 +546,14 @@ def _single_vector_search(collection_type: CollectionType, mode: SearchMode, que
     )
 
 
-def _hybrid_search(collection_type: CollectionType, query: str, limit: int, metadata_filter: str):
+def _hybrid_search(
+    collection_type: CollectionType,
+    query: str,
+    limit: int,
+    metadata_filter: str,
+    dense_weight: float,
+    sparse_weight: float,
+):
     from pymilvus import AnnSearchRequest, WeightedRanker
 
     store = _store_for(collection_type, "hybrid")
@@ -554,8 +577,8 @@ def _hybrid_search(collection_type: CollectionType, query: str, limit: int, meta
         store.collection_name,
         reqs=reqs,
         ranker=WeightedRanker(
-            float(SEARCH_CONFIG.get("dense_weight", 0.5)),
-            float(SEARCH_CONFIG.get("sparse_weight", 0.5)),
+            float(dense_weight),
+            float(sparse_weight),
         ),
         limit=limit,
         output_fields=["*"],
