@@ -52,26 +52,26 @@
 
 ```mermaid
 flowchart LR
-  Client[外部系统 / 前端] --> API[FastAPI API]
-  API --> App[Application]
-  App --> Search[SearchPipeline]
-  App --> Parser[Document Parser]
+  Client["外部系统 / 前端"] --> API["FastAPI API"]
+  API --> App["Application"]
+  App --> Search["SearchPipeline"]
+  App --> Parser["Document Parser"]
 
-  Parser --> OCR[OCR]
-  Parser --> Dense[Dense 模型]
-  Parser --> Sparse[Sparse 组件]
-  Parser --> Store[Store 接口]
+  Parser --> OCR["OCR"]
+  Parser --> Dense["Dense 模型"]
+  Parser --> Sparse["Sparse 组件"]
+  Parser --> Store["Store 接口"]
 
   Search --> Store
   Search --> Sparse
-  Search --> Rerank[Rerank 可选]
+  Search --> Rerank["Rerank 可选"]
 
-  Store --> DB[(向量库)]
-  DB --> Qdrant[Qdrant]
-  DB --> Chroma[Chroma]
-  DB --> Milvus[Milvus]
+  Store --> DB[("向量库")]
+  DB --> Qdrant["Qdrant"]
+  DB --> Chroma["Chroma"]
+  DB --> Milvus["Milvus"]
 
-  Config[yaml 配置] --> App
+  Config["yaml 配置"] --> App
   Config --> Dense
   Config --> Sparse
   Config --> Store
@@ -85,15 +85,15 @@ flowchart LR
 
 ```mermaid
 flowchart TB
-  DB[(向量库)]
-  DB --> Common[common collection]
-  DB --> Scoped[scoped collection]
+  DB[("向量库")]
+  DB --> Common["common collection"]
+  DB --> Scoped["scoped collection"]
 
-  Common --> CommonPayload[metadata: namespace, filename, chunk_index, created_at]
-  Scoped --> ScopedPayload[metadata: namespace, scope_id, filename, chunk_index, created_at]
+  Common --> CommonPayload["metadata: namespace, filename, chunk_index, created_at"]
+  Scoped --> ScopedPayload["metadata: namespace, scope_id, filename, chunk_index, created_at"]
 
-  Common --> CommonVectors[dense vector / 可选 sparse vector]
-  Scoped --> ScopedVectors[dense vector / 可选 sparse vector]
+  Common --> CommonVectors["dense vector / 可选 sparse vector"]
+  Scoped --> ScopedVectors["dense vector / 可选 sparse vector"]
 ```
 
 系统固定使用两个逻辑集合：`common` 存通用知识，`scoped` 存范围专属知识。`namespace` 用来隔离不同外部系统；`scope_id` 只出现在 scoped 集合里，用来限定范围专属知识。
@@ -102,9 +102,9 @@ flowchart TB
 
 ```mermaid
 sequenceDiagram
-  participant Client as 外部系统 / 前端
-  participant API as POST /api/upload
-  participant Parser as Document Parser
+  participant Client as 外部系统或前端
+  participant API as Upload API
+  participant Parser as DocumentParser
   participant Dense as Dense 模型
   participant Sparse as Sparse 组件
   participant Store as Store
@@ -127,23 +127,23 @@ sequenceDiagram
 
 ```mermaid
 flowchart TB
-  Query[POST /api/search] --> Plan[SearchPlan]
-  Plan --> Common[查询 common]
-  Plan --> Scoped{scope_ids 为空?}
-  Scoped -- 否 --> ScopedSearch[查询 scoped]
-  Scoped -- 是 --> SkipScoped[跳过 scoped]
+  Query["POST /api/search"] --> Plan["SearchPlan"]
+  Plan --> Common["查询 common"]
+  Plan --> Scoped{"scope_ids 为空?"}
+  Scoped -->|否| ScopedSearch["查询 scoped"]
+  Scoped -->|是| SkipScoped["跳过 scoped"]
 
-  Common --> RetrieveCommon[Dense / Sparse / Hybrid]
-  ScopedSearch --> RetrieveScoped[Dense / Sparse / Hybrid]
+  Common --> RetrieveCommon["Dense / Sparse / Hybrid"]
+  ScopedSearch --> RetrieveScoped["Dense / Sparse / Hybrid"]
 
-  RetrieveCommon --> Merge[合并结果]
+  RetrieveCommon --> Merge["合并结果"]
   RetrieveScoped --> Merge
   SkipScoped --> Merge
 
-  Merge --> Dedupe[去重]
-  Dedupe --> NeedRerank{rerank=true?}
-  NeedRerank -- 是 --> Rerank[Rerank 重排]
-  NeedRerank -- 否 --> Format[格式化返回]
+  Merge --> Dedupe["去重"]
+  Dedupe --> NeedRerank{"rerank=true?"}
+  NeedRerank -->|是| Rerank["Rerank 重排"]
+  NeedRerank -->|否| Format["格式化返回"]
   Rerank --> Format
 ```
 
