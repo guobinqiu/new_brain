@@ -80,6 +80,9 @@ def _select_enabled_components(raw: dict) -> None:
             for name, config in section.items()
             if isinstance(config, dict) and bool(config.get("enable"))
         ]
+        if section_name == "rerank" and not enabled:
+            raw[section_name] = None
+            continue
         if len(enabled) != 1:
             raise ValueError(f"{section_name} must enable exactly one component")
         selected_name, selected = enabled[0]

@@ -145,6 +145,45 @@ ocr:
     assert config.rerank.model_path == str(PROJECT_ROOT / "models" / "bge-reranker-base")
 
 
+def test_load_app_config_allows_profile_without_rerank(monkeypatch, tmp_path):
+    from loader import load_app_config
+
+    path = tmp_path / "no_rerank.yaml"
+    path.write_text(
+        """
+dense:
+  bge_base:
+    enable: true
+    model_name: bge-base-zh-v1.5
+sparse:
+  bm25:
+    enable: true
+    tokenizer: jieba
+store:
+  qdrant:
+    enable: true
+    url: http://localhost:6333
+    collections:
+      common: common_custom
+      scoped: scoped_custom
+rerank:
+  bge_base:
+    enable: false
+    model_name: bge-reranker-base
+ocr:
+  rapid:
+    enable: true
+    model_name: rapidocr
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CONFIG_FILE", str(path))
+
+    config = load_app_config()
+
+    assert config.rerank is None
+
+
 def test_load_app_config_can_use_config_filename(monkeypatch):
     from loader import load_app_config
 

@@ -213,7 +213,9 @@ def build_search(config: AppConfig, store: Store, sparse: Sparse) -> Search:
     return create_container(config).search(store=store, sparse=sparse)
 
 
-def build_rerank(config: AppConfig) -> Rerank:
+def build_rerank(config: AppConfig) -> Rerank | None:
+    if config.rerank is None:
+        return None
     if config.rerank.import_path:
         return _load_class(config.rerank.import_path)(model_name=config.rerank.model_path)
     return _resolve(create_container(config).rerank, "rerank", config.rerank.name)

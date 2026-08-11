@@ -70,7 +70,7 @@ backend/
 
 后端通过 `CONFIG_FILE` 指定配置文件。`CONFIG_FILE` 可以写配置文件名，也可以写完整路径。只写文件名时，后端会从 `backend/config/` 读取。未设置 `CONFIG_FILE` 时，后端默认使用 `local.yaml`。
 
-每个运行 profile 使用一个 yaml 文件。yaml 内部用 `enable: true` 选择 dense、sparse、store、rerank、ocr 的具体组件。同一类组件只能启用一个。
+每个运行 profile 使用一个 yaml 文件。yaml 内部用 `enable: true` 选择 dense、sparse、store、ocr 的具体组件，这些组件必须各启用一个。rerank 是可选组件，可以不启用；启用时同样只能启用一个。
 
 每个可启用组件都显式写 `import_path`。组件名负责表达“我要哪种能力”，`import_path` 负责表达“这类能力由哪个 Python 类实现”。这样配置文件里能直接看出实现位置，也方便以后把组件迁移成插件。
 
@@ -79,8 +79,8 @@ backend/
 | 文件 | 状态 | 说明 |
 |---|---|---|
 | `local.yaml` | native 默认入口 | 连接 `http://localhost:6333`，collection 固定为 `knowledge_common` / `knowledge_scoped`。 |
-| `docker-cpu.yaml` | Docker CPU 入口 | 连接 Docker Compose 内的 Qdrant 服务名 `qdrant`，默认启用 `bge_base` dense、`bm25` sparse（`tokenizer=jieba`）、`bge_base` rerank。 |
-| `docker-gpu.yaml` | Docker GPU 入口 | 连接 Docker Compose 内的 Qdrant 服务名 `qdrant`，默认启用 `bge_m3` dense、`bge_m3` sparse、`bge_base` rerank。 |
+| `docker-cpu.yaml` | Docker CPU 入口 | 连接 Docker Compose 内的 Qdrant 服务名 `qdrant`，默认启用 `bge_base` dense、`bm25` sparse（`tokenizer=jieba`），不加载 rerank。 |
+| `docker-gpu.yaml` | Docker GPU 入口 | 连接 Docker Compose 内的 Qdrant 服务名 `qdrant`，默认启用 `bge_m3` dense、`bm25` sparse（`tokenizer=jieba`）、`bge_reranker_v2_m3` rerank。 |
 | `qdrant.yaml` | 可运行 | Qdrant profile，collection 使用 `qdrant_` 前缀。默认启用 `bge_base` dense、`bm25` sparse（`tokenizer=jieba`）、`bge_base` rerank；可切换到 `bge_m3` dense 或 `bge_m3` sparse。 |
 | `chroma.yaml` | 可运行 | Chroma profile，collection 使用 `chroma_` 前缀，本地数据目录是 `chroma_data`。当前只启用 `bm25` sparse，不配置 `bge_m3` sparse。 |
 | `milvus.yaml` | 可运行 | Milvus profile，collection 使用 `milvus_` 前缀。默认连接 Standalone；保留 Milvus Lite 配置但默认禁用。可切换到 `bge_m3` sparse 或 `milvus_bm25` sparse。 |

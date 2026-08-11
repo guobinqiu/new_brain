@@ -75,7 +75,7 @@ class AppConfig:
     sparse: SparseConfig
     store: StoreConfig
     search: SearchConfig
-    rerank: RerankConfig
+    rerank: RerankConfig | None
     ocr: OCRConfig
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     name: str = ""
@@ -94,11 +94,12 @@ def parse_app_config(raw: dict[str, Any]) -> AppConfig:
     store_type = _required(store, "type", "store")
     dense_name = _component_name(dense, "dense")
     sparse_name = _sparse_name(sparse)
-    rerank_name = _component_name(rerank, "rerank")
+    rerank_name = _component_name(rerank, "rerank") if rerank is not None else None
     ocr_name = _component_name(ocr, "ocr")
     _validate_supported("dense", dense_name, {"test_dense", "bge_base", "bge_base_zh_v15", "bge_m3", "dense/huggingface"})
     _validate_supported("sparse", sparse_name, {"bm25", "bge_m3", "milvus_bm25", "sparse/bm25", "sparse/qdrant_bge_m3", "sparse/milvus_bge_m3", "sparse/milvus_bm25"})
-    _validate_supported("rerank", rerank_name, {"test_rerank", "bge_base", "bge_large", "bge_m3", "bge_reranker_base", "bge_reranker_large", "bge_reranker_v2_m3", "rerank/cross_encoder"})
+    if rerank_name is not None:
+        _validate_supported("rerank", rerank_name, {"test_rerank", "bge_base", "bge_large", "bge_m3", "bge_reranker_base", "bge_reranker_large", "bge_reranker_v2_m3", "rerank/cross_encoder"})
     _validate_supported("ocr", ocr_name, {"test_ocr", "rapid", "paddle", "rapidocr", "paddleocr", "tesseract", "ocr/rapid", "ocr/paddle", "ocr/tesseract"})
     _validate_supported("store.type", store_type, {"qdrant", "chroma", "milvus", "milvus_lite", "store/qdrant", "store/chroma", "store/milvus"})
     _validate_supported("search.default_mode", search.get("default_mode", "hybrid"), {"dense", "sparse", "hybrid"})
@@ -155,7 +156,7 @@ def parse_app_config(raw: dict[str, Any]) -> AppConfig:
             name=rerank_name,
             model_path=_required(rerank, "model_path", "rerank"),
             import_path=rerank.get("import_path"),
-        ),
+        ) if rerank is not None else None,
         ocr=OCRConfig(
             name=ocr_name,
             model_path=_required(ocr, "model_path", "ocr"),

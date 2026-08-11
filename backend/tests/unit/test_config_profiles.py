@@ -24,17 +24,29 @@ def test_profiles_are_store_level_not_combination_matrix():
     ]
 
 
-def test_profiles_select_exactly_one_component_per_group():
+def test_profiles_select_exactly_one_required_component_per_group():
     for path in CONFIG_DIR.glob("*.yaml"):
         config = _read_config(path.name)
 
-        for section_name in ("dense", "sparse", "store", "rerank", "ocr"):
+        for section_name in ("dense", "sparse", "store", "ocr"):
             enabled = [
                 name
                 for name, component in config[section_name].items()
                 if isinstance(component, dict) and component.get("enable") is True
             ]
             assert len(enabled) == 1, f"{path.name} {section_name} enabled={enabled}"
+
+
+def test_profiles_select_at_most_one_rerank_component():
+    for path in CONFIG_DIR.glob("*.yaml"):
+        config = _read_config(path.name)
+
+        enabled = [
+            name
+            for name, component in config["rerank"].items()
+            if isinstance(component, dict) and component.get("enable") is True
+        ]
+        assert len(enabled) <= 1, f"{path.name} rerank enabled={enabled}"
 
 
 def test_profiles_use_explicit_import_paths_not_legacy_module_paths():
@@ -155,9 +167,9 @@ def test_docker_gpu_profile_uses_benchmark_backed_retrieval_with_stronger_rerank
 
     assert _enabled_component(config, "dense")["model_name"] == "bge-m3"
     assert _enabled_component(config, "dense")["import_path"] == "dense.huggingface.HuggingFaceDense"
-    assert _enabled_component(config, "sparse")["model_name"] == "bge-m3"
-    assert _enabled_component(config, "sparse")["import_path"] == "sparse.qdrant_bge_m3.QdrantBGEM3Sparse"
-    assert _enabled_component(config, "rerank")["model_name"] == "bge-reranker-base"
+    assert _enabled_component(config, "sparse")["tokenizer"] == "jieba"
+    assert _enabled_component(config, "sparse")["import_path"] == "sparse.bm25.BM25Sparse"
+    assert _enabled_component(config, "rerank")["model_name"] == "bge-reranker-v2-m3"
     assert _enabled_component(config, "rerank")["import_path"] == "rerank.cross_encoder.CrossEncoderRerank"
     assert config["search"]["default_mode"] == "hybrid"
 
@@ -169,10 +181,13 @@ def test_docker_cpu_profile_keeps_lightweight_models_with_app_bm25_sparse():
     assert _enabled_component(config, "dense")["import_path"] == "dense.huggingface.HuggingFaceDense"
     assert _enabled_component(config, "sparse")["tokenizer"] == "jieba"
     assert _enabled_component(config, "sparse")["import_path"] == "sparse.bm25.BM25Sparse"
-    assert _enabled_component(config, "rerank")["model_name"] == "bge-reranker-base"
-    assert _enabled_component(config, "rerank")["import_path"] == "rerank.cross_encoder.CrossEncoderRerank"
+    assert _enabled_components(config, "rerank") == []
     assert config["search"]["default_mode"] == "hybrid"
 
 
 def _enabled_component(config: dict, section_name: str) -> dict:
     return next(component for component in config[section_name].values() if component.get("enable") is True)
+
+
+def _enabled_components(config: dict, section_name: str) -> list[dict]:
+    return [component for component in config[section_name].values() if component.get("enable") is True]

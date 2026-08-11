@@ -29,20 +29,22 @@ class Application:
         self.sparse = sparse or self.container.sparse()
         self.store = store or self.container.store(dense=self.dense, sparse=self.sparse)
         self.search = search or self.container.search(store=self.store, sparse=self.sparse)
-        self.rerank = rerank or self.container.rerank()
+        self.rerank = rerank or (self.container.rerank() if self.config.rerank is not None else None)
         self.ocr = ocr or self.container.ocr()
         self.ready = False
 
     def start(self):
         self.store.start()
         self.search.start()
-        self.rerank.start()
+        if self.rerank is not None:
+            self.rerank.start()
         self.ocr.start()
         self.ready = True
 
     def stop(self):
         self.ocr.stop()
-        self.rerank.stop()
+        if self.rerank is not None:
+            self.rerank.stop()
         self.search.stop()
         self.store.stop()
         self.ready = False
