@@ -13,10 +13,10 @@ services:
       - "6334:6334"
     volumes:
       - ../../qdrant_data:/qdrant/storage
-    logging: *json-logging
     restart: unless-stopped
 
   backend:
+    image: rag-backend:cpu
     build:
       context: ../..
       dockerfile: deploy/cpu/Dockerfile
@@ -56,7 +56,6 @@ services:
     volumes:
       - ../../frontend:/app/frontend
       - ../../frontend/.node_modules-docker:/app/frontend/node_modules
-    logging: *json-logging
     restart: unless-stopped
 
   milvus-etcd:
@@ -76,7 +75,6 @@ services:
       --data-dir /etcd
     volumes:
       - ../../milvus_data/standalone/etcd:/etcd
-    logging: *json-logging
     restart: unless-stopped
 
   milvus-minio:
@@ -93,7 +91,6 @@ services:
       - "9001:9001"
     volumes:
       - ../../milvus_data/standalone/minio:/minio_data
-    logging: *json-logging
     restart: unless-stopped
 
   milvus-standalone:
@@ -114,5 +111,4 @@ services:
       # - "9091:9091"
     volumes:
       - ../../milvus_data/standalone/milvus:/var/lib/milvus
-    logging: *json-logging
     restart: unless-stopped

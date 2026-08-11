@@ -15,6 +15,14 @@ def test_deploy_has_separate_cpu_and_gpu_entries():
     assert (ROOT / "deploy/gpu/docker-compose.yml").exists()
 
 
+def test_deploy_backend_images_are_distinct_for_cpu_and_gpu():
+    cpu_compose = (ROOT / "deploy/cpu/docker-compose.yml").read_text(encoding="utf-8")
+    gpu_compose = (ROOT / "deploy/gpu/docker-compose.yml").read_text(encoding="utf-8")
+
+    assert "image: rag-backend:cpu" in cpu_compose
+    assert "image: rag-backend:gpu" in gpu_compose
+
+
 def test_just_deploy_recipes_do_not_echo_commands():
     justfile = (ROOT / "justfile").read_text(encoding="utf-8")
 
@@ -139,3 +147,4 @@ def test_deploy_services_use_bounded_json_file_logs():
         assert 'driver: "json-file"' in compose
         assert 'max-size: "10m"' in compose
         assert 'max-file: "5"' in compose
+        assert compose.count("logging: *json-logging") == 1

@@ -165,6 +165,49 @@ def test_qdrant_client_uses_configured_timeout(monkeypatch):
     assert created[0]["timeout"] == 30
 
 
+def test_init_store_retries_when_qdrant_is_not_ready(monkeypatch):
+    import store
+
+    calls = []
+
+    class FakeDense:
+        ready = True
+
+        def start(self):
+            pass
+
+        def stop(self):
+            pass
+
+        def embed_query(self, text):
+            return [0.1, 0.2, 0.3]
+
+        def embed_documents(self, texts):
+            return [[0.1, 0.2, 0.3] for _ in texts]
+
+    class FakeQdrantStore:
+        def __init__(self, **kwargs):
+            calls.append(("store", kwargs["collection_name"]))
+
+    attempts = {"count": 0}
+
+    def flaky_ensure_collections():
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise RuntimeError("qdrant not ready")
+        calls.append(("ensure", attempts["count"]))
+
+    monkeypatch.setattr(store, "QdrantVectorStore", FakeQdrantStore)
+    monkeypatch.setattr(store, "ensure_collections", flaky_ensure_collections)
+    monkeypatch.setattr(store.time, "sleep", lambda seconds: calls.append(("sleep", seconds)))
+
+    store.init_store(dense=FakeDense())
+
+    assert attempts["count"] == 2
+    assert ("sleep", 1) in calls
+    assert store.is_search_ready() is True
+
+
 def test_store_for_requires_store_prepared_during_initialization(monkeypatch):
     import store
 
