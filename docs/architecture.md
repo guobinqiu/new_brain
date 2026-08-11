@@ -834,7 +834,7 @@ hybrid -> dense + 应用内 Sparse Retriever 并发后应用层融合；store sp
 - hybrid 按加权倒数排名融合排序。
 - rerank 开启时，最终顺序由 rerank 决定。
 
-`top_k` 是最多返回条数。dense 和 hybrid 按检索排序返回，不使用固定相似度阈值。sparse 不返回零命中文本。
+`top_k` 是最多返回条数，不是必须填满。sparse 不补满，查不到就可以返回空；dense 和 hybrid 如果不做额外相关性判断，本质上都是 top_k 排序，在库里有足够文档时可能返回到 `top_k` 条，不保证结果真的相关。
 
 `rrf_k` 是 hybrid 的 RRF 融合参数，当前代码在 `search/pipeline.py` 中使用它计算 dense/sparse 融合分。它不是返回条数，也不是候选池大小。
 
