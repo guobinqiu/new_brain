@@ -563,12 +563,13 @@ class Store:
   -> 应用内 `bm25` sparse 使用 `tokenizer=jieba` 打分
   -> 适用于 sparse.type=bm25
 
-Store Sparse Retriever
+Vector Sparse Retriever
   -> 查询向量库 sparse vector / 内置 sparse 能力
   -> 适用于 sparse.type=bge_m3 或 sparse.type=milvus_bm25
 ```
 
 这两种都属于检索节点，都会放在 SearchPipeline 的 Retriever 位置；区别只是 sparse 分数在哪里计算。
+benchmark 报告中的 `sparse_impl` 使用 `app` 和 `vector` 区分这两条路线。
 
 `bm25` sparse：
 
@@ -603,7 +604,7 @@ dense 检索
   -> 使用 LangChain VectorStore 的 similarity_search_with_score
   -> score 来自向量库
 
-store sparse
+vector sparse
   -> 使用向量库 sparse 查询
   -> score 来自向量库
 
@@ -612,7 +613,7 @@ store sparse
   -> score 来自 BM25 关键词打分
 ```
 
-BGE-M3 store sparse：
+BGE-M3 vector sparse：
 
 ```yaml
 sparse:
@@ -834,7 +835,7 @@ dense 和 sparse 检索节点使用 LangChain `BaseRetriever`。这些节点会�
 
 ```text
 dense  -> Dense Retriever 调用 Store.search_dense()，由具体 store 实现 dense 查询
-sparse -> 应用内 Sparse Retriever 执行 BM25，或 Store Sparse Retriever 调用向量库 sparse 查询
+sparse -> 应用内 Sparse Retriever 执行 BM25，或 Vector Sparse Retriever 调用向量库 sparse 查询
 hybrid -> dense + sparse 并发后应用层 RRF 融合；sparse 可以是应用内 BM25，也可以是向量库 sparse
 ```
 
@@ -913,7 +914,7 @@ rerank -> 可选；CPU 默认不启用
 ```text
 dense  -> bge-m3 dense vector，仍通过 LangChain HuggingFaceEmbeddings 执行
 sparse -> bm25 时走应用内检索；bge_m3 时走向量库 sparse vector
-store  -> Qdrant 或 Milvus 使用 bge_m3 sparse 时会同时保存 sparse vector；Chroma 当前只使用 dense vector + 应用内 bm25
+store  -> Qdrant 或 Milvus 使用 bge_m3 vector sparse 时会同时保存 sparse vector；Chroma 当前只使用 dense vector + 应用内 bm25
 rerank -> bge-reranker-v2-m3
 ```
 
@@ -942,7 +943,7 @@ backend/config/docker-gpu.yaml
 
 - `bge-m3` 和 `bge-base-zh-v1.5` 不能混用同一个已有索引；切换配置后需要重新上传、重建索引，或改用另一组 collection 名。
 - 不在同一个 collection 里混用不同 dense 向量维度。
-- 不在旧 dense-only collection 里直接写入 BGE-M3 store sparse vector。
+- 不在旧 dense-only collection 里直接写入 BGE-M3 vector sparse。
 - 代码不会在启动时阻止使用已有 collection；切换模型、sparse 类型或向量库结构后，由配置和 collection 名约定保证索引不混用。
 - 测试用例使用测试 collection 或临时目录，不复用生产 collection。
 

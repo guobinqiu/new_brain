@@ -209,6 +209,15 @@ def test_benchmark_batches_can_filter_sparse_by_environment(monkeypatch):
     assert {batch.combo.sparse_impl for batch in batches} == {"app"}
 
 
+def test_benchmark_sparse_impl_uses_app_or_vector_names():
+    from tests.benchmark import test_search_benchmark as benchmark
+
+    sparse_impls = {combo.sparse_impl for combo in benchmark.BACKEND_COMBOS}
+
+    assert sparse_impls <= {"app", "vector"}
+    assert "vector" in sparse_impls
+
+
 def test_benchmark_embedded_stores_use_tmp_path(tmp_path):
     from tests.benchmark import test_search_benchmark as benchmark
 

@@ -20,9 +20,9 @@
 | qdrant | bge-m3 | bm25 | app | sparse | none | 20 | - | 2 | 30 | 30 | 147.4 | 165.3 | 171.5 | 149.4 | 135.6 | 172.8 | 0 | True | 2 |
 | qdrant | bge-m3 | bm25 | app | hybrid | none | 5 | - | 2 | 30 | 30 | 183.9 | 253.5 | 260.6 | 192.5 | 169.3 | 261.0 | 0 | False | - |
 | qdrant | bge-m3 | bm25 | app | hybrid | none | 20 | - | 2 | 30 | 30 | 188.7 | 237.2 | 486.4 | 206.2 | 177.4 | 585.8 | 0 | True | 2 |
-| qdrant | bge-m3 | bge-m3 | store | dense | none | 5 | - | 2 | 30 | 30 | 49.9 | 65.1 | 66.9 | 52.2 | 44.2 | 67.6 | 0 | False | - |
-| qdrant | bge-m3 | bge-m3 | store | dense | none | 20 | - | 2 | 30 | 30 | 49.4 | 65.0 | 71.9 | 51.0 | 44.1 | 72.3 | 0 | True | 6 |
-| qdrant | bge-m3 | bge-m3 | store | sparse | none | 5 | - | 2 | 30 | 30 | 98.8 | 113.4 | 123.6 | 98.8 | 71.8 | 127.6 | 0 | True | 3 |
-| qdrant | bge-m3 | bge-m3 | store | sparse | none | 20 | - | 2 | 30 | 30 | 104.4 | 123.9 | 155.1 | 107.5 | 79.7 | 167.5 | 0 | True | 3 |
-| qdrant | bge-m3 | bge-m3 | store | hybrid | none | 5 | - | 2 | 30 | 30 | 147.6 | 180.4 | 212.5 | 152.4 | 120.7 | 223.0 | 0 | True | 5 |
-| qdrant | bge-m3 | bge-m3 | store | hybrid | none | 20 | - | 2 | 30 | 30 | 136.7 | 165.5 | 504.2 | 152.4 | 111.5 | 641.8 | 0 | True | 5 |
+| qdrant | bge-m3 | bge-m3 | vector | dense | none | 5 | - | 2 | 30 | 30 | 49.9 | 65.1 | 66.9 | 52.2 | 44.2 | 67.6 | 0 | False | - |
+| qdrant | bge-m3 | bge-m3 | vector | dense | none | 20 | - | 2 | 30 | 30 | 49.4 | 65.0 | 71.9 | 51.0 | 44.1 | 72.3 | 0 | True | 6 |
+| qdrant | bge-m3 | bge-m3 | vector | sparse | none | 5 | - | 2 | 30 | 30 | 98.8 | 113.4 | 123.6 | 98.8 | 71.8 | 127.6 | 0 | True | 3 |
+| qdrant | bge-m3 | bge-m3 | vector | sparse | none | 20 | - | 2 | 30 | 30 | 104.4 | 123.9 | 155.1 | 107.5 | 79.7 | 167.5 | 0 | True | 3 |
+| qdrant | bge-m3 | bge-m3 | vector | hybrid | none | 5 | - | 2 | 30 | 30 | 147.6 | 180.4 | 212.5 | 152.4 | 120.7 | 223.0 | 0 | True | 5 |
+| qdrant | bge-m3 | bge-m3 | vector | hybrid | none | 20 | - | 2 | 30 | 30 | 136.7 | 165.5 | 504.2 | 152.4 | 111.5 | 641.8 | 0 | True | 5 |

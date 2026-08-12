@@ -50,19 +50,19 @@ class BenchmarkBatch:
 BACKEND_COMBOS = [
     BackendCombo("qdrant", "qdrant", {"url": "http://localhost:6333"}, "bge-base", "bm25", "app", "bm25"),
     BackendCombo("qdrant", "qdrant", {"url": "http://localhost:6333"}, "bge-m3", "bm25", "app", "bm25"),
-    BackendCombo("qdrant", "qdrant", {"url": "http://localhost:6333"}, "bge-m3", "bge-m3", "store", "bge_m3"),
+    BackendCombo("qdrant", "qdrant", {"url": "http://localhost:6333"}, "bge-m3", "bge-m3", "vector", "bge_m3"),
     BackendCombo("chroma", "chroma", {"persist_dir": "chroma_data"}, "bge-base", "bm25", "app", "bm25"),
     BackendCombo("chroma", "chroma", {"persist_dir": "chroma_data"}, "bge-m3", "bm25", "app", "bm25"),
     BackendCombo("milvus-standalone", "milvus", {"uri": "http://localhost:19530"}, "bge-base", "bm25", "app", "bm25"),
     BackendCombo("milvus-standalone", "milvus", {"uri": "http://localhost:19530"}, "bge-m3", "bm25", "app", "bm25"),
-    BackendCombo("milvus-standalone", "milvus", {"uri": "http://localhost:19530"}, "bge-m3", "bge-m3", "store", "bge_m3"),
-    BackendCombo("milvus-standalone", "milvus", {"uri": "http://localhost:19530"}, "bge-base", "bm25", "store", "milvus_bm25"),
-    BackendCombo("milvus-standalone", "milvus", {"uri": "http://localhost:19530"}, "bge-m3", "bm25", "store", "milvus_bm25"),
+    BackendCombo("milvus-standalone", "milvus", {"uri": "http://localhost:19530"}, "bge-m3", "bge-m3", "vector", "bge_m3"),
+    BackendCombo("milvus-standalone", "milvus", {"uri": "http://localhost:19530"}, "bge-base", "bm25", "vector", "milvus_bm25"),
+    BackendCombo("milvus-standalone", "milvus", {"uri": "http://localhost:19530"}, "bge-m3", "bm25", "vector", "milvus_bm25"),
     BackendCombo("milvus-lite", "milvus_lite", {"uri": "milvus_data/lite/lite.db"}, "bge-base", "bm25", "app", "bm25"),
     BackendCombo("milvus-lite", "milvus_lite", {"uri": "milvus_data/lite/lite.db"}, "bge-m3", "bm25", "app", "bm25"),
-    BackendCombo("milvus-lite", "milvus_lite", {"uri": "milvus_data/lite/lite.db"}, "bge-m3", "bge-m3", "store", "bge_m3"),
-    BackendCombo("milvus-lite", "milvus_lite", {"uri": "milvus_data/lite/lite.db"}, "bge-base", "bm25", "store", "milvus_bm25"),
-    BackendCombo("milvus-lite", "milvus_lite", {"uri": "milvus_data/lite/lite.db"}, "bge-m3", "bm25", "store", "milvus_bm25"),
+    BackendCombo("milvus-lite", "milvus_lite", {"uri": "milvus_data/lite/lite.db"}, "bge-m3", "bge-m3", "vector", "bge_m3"),
+    BackendCombo("milvus-lite", "milvus_lite", {"uri": "milvus_data/lite/lite.db"}, "bge-base", "bm25", "vector", "milvus_bm25"),
+    BackendCombo("milvus-lite", "milvus_lite", {"uri": "milvus_data/lite/lite.db"}, "bge-m3", "bm25", "vector", "milvus_bm25"),
 ]
 
 RERANK_MODELS = [value.strip() for value in os.environ.get(
