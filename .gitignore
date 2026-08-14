@@ -15,7 +15,10 @@ models/
 # 数据库本地数据
 chroma_data/
 milvus_data/
+minio_data/
+postgres_data/
 qdrant_data/
+data/
 
 # 日志与测试产物
 logs/

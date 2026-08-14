@@ -18,18 +18,22 @@ from store.base import Store
 
 
 class SearchPipeline:
-    def __init__(self, store: Store, sparse: Sparse):
+    def __init__(self, store: Store, app_sparse: Sparse, vector_sparse: Sparse | None = None):
         self.store = store
-        self.sparse = sparse
+        self.sparse = app_sparse
+        self.app_sparse = app_sparse
+        self.vector_sparse = vector_sparse
         self.ready = False
 
     def start(self) -> None:
         set_default_store(self.store)
-        self.sparse.start()
+        if not self.app_sparse.ready:
+            raise RuntimeError("sparse is not initialized")
+        if self.vector_sparse is not None and not self.vector_sparse.ready:
+            raise RuntimeError("vector sparse is not initialized")
         self.ready = True
 
     def stop(self) -> None:
-        self.sparse.stop()
         self.ready = False
 
 
@@ -41,9 +45,9 @@ def init_search_pipeline():
     init_search()
 
 
-def _clamp_fetch_k(store: Store, fetch_k: int, namespace: str, scope_ids: list[str]) -> int:
+def _clamp_fetch_k(store: Store, fetch_k: int, file_ids: list[str] | None) -> int:
     """把候选池宽度限制到 [1, 当前查询范围总 chunk 数]。"""
-    total = store.get_total_chunks(namespace=namespace, scope_ids=scope_ids)
+    total = store.get_total_chunks(file_ids=file_ids)
     if total <= 0:
         return 1
     return max(1, min(fetch_k, total))
@@ -52,7 +56,6 @@ def _clamp_fetch_k(store: Store, fetch_k: int, namespace: str, scope_ids: list[s
 class _SearchRetriever(BaseRetriever):
     store: Any
     sparse: Any = None
-    collection_type: str
     mode: str
     query: str
     trace: Any = None
@@ -67,7 +70,7 @@ class _SearchRetriever(BaseRetriever):
     ) -> list[Document]:
         if context["skip"]:
             return []
-        stage_name = f"{self.collection_type}_{self.mode}"
+        stage_name = self.mode
         if self.trace is None:
             items = self._retrieve_items(context)
         else:
@@ -78,11 +81,11 @@ class _SearchRetriever(BaseRetriever):
 
     def _retrieve_items(self, context: dict[str, Any]) -> list[dict]:
         if self.mode == "dense":
-            return _retrieve_dense(self.store, self.collection_type, context["metadata_filter"], self.query, context["retrieve_limit"])
+            return _retrieve_dense(self.store, context["metadata_filter"], self.query, context["retrieve_limit"])
         if self.mode == "sparse":
-            return _retrieve_sparse(self.store, self.collection_type, context["metadata_filter"], self.query, context["retrieve_limit"], self.sparse)
+            return _retrieve_sparse(self.store, context["metadata_filter"], self.query, context["retrieve_limit"], self.sparse)
         if self.mode == "hybrid":
-            return _retrieve_store_hybrid(self.store, self.collection_type, context["metadata_filter"], self.query, context["retrieve_limit"])
+            return _retrieve_store_hybrid(self.store, context["metadata_filter"], self.query, context["retrieve_limit"])
         raise ValueError(f"unsupported retriever mode: {self.mode}")
 
 
@@ -96,14 +99,19 @@ class SearchPlan:
     dense_weight: float = 0.5
     sparse_weight: float = 0.5
     rrf_k: int = 60
-    namespace: str = "default"
-    scope_ids: list[str] | None = None
+    file_ids: list[str] | None = None
+    sparse_mode: str = "app"
 
     def __post_init__(self):
         if self.mode not in ("dense", "sparse", "hybrid"):
             raise ValueError(f"unsupported search mode: {self.mode}")
-        if self.scope_ids is None:
-            object.__setattr__(self, "scope_ids", [])
+        if self.sparse_mode not in ("app", "vector"):
+            raise ValueError(f"unsupported sparse_mode: {self.sparse_mode}")
+        if self.file_ids is not None:
+            if len(self.file_ids) == 0:
+                raise ValueError("file_ids cannot be empty")
+            if len(self.file_ids) > 1000:
+                raise ValueError("file_ids exceeds max limit: 1000")
 
 
 class _SearchExecutor:
@@ -112,12 +120,14 @@ class _SearchExecutor:
         plan: SearchPlan,
         rerank: Rerank | None = None,
         sparse: Sparse | None = None,
+        vector_sparse: Sparse | None = None,
         store: Store | None = None,
         search_trace: bool = False,
     ):
         self.plan = plan
         self.rerank = rerank
         self.sparse = sparse
+        self.vector_sparse = vector_sparse
         self.store = store or _active_store()
         self.runner = SearchRunner()
         self._runtime_retrieve_limit = self.plan.top_k
@@ -143,25 +153,22 @@ class _SearchExecutor:
             "metadata": {
                 "query": self.plan.query,
                 "mode": self.plan.mode,
+                "sparse_mode": self.plan.sparse_mode,
                 "top_k": self.plan.top_k,
                 "rerank": self.plan.rerank,
                 "fetch_k": self.plan.fetch_k,
                 "dense_weight": self.plan.dense_weight,
                 "sparse_weight": self.plan.sparse_weight,
                 "rrf_k": self.plan.rrf_k,
-                "namespace": self.plan.namespace,
-                "scope_ids": list(self.plan.scope_ids),
+                "file_ids": list(self.plan.file_ids or []),
             },
         }
 
     def _build_runnable(self):
         return (
             RunnableLambda(self._prepare_plan, name="prepare_plan")
-            | RunnableParallel(
-                common=self._collection_runnable("common"),
-                scoped=self._collection_runnable("scoped"),
-            )
-            | RunnableLambda(self._dedupe_candidates, name="dedupe")
+            | self._retrieve_runnable()
+            | RunnableLambda(self._dedupe_items, name="dedupe")
             | RunnableLambda(self._rerank_if_needed, name="rerank")
             | RunnableLambda(self._format_response, name="format_response")
         )
@@ -169,91 +176,83 @@ class _SearchExecutor:
     def _prepare_plan(self, _):
         with self.trace.stage("prepare_plan"):
             retrieve_limit = (
-                _clamp_fetch_k(self.store, self.plan.fetch_k, self.plan.namespace, self.plan.scope_ids)
+                _clamp_fetch_k(self.store, self.plan.fetch_k, self.plan.file_ids)
                 if self.plan.rerank
                 else self.plan.top_k
             )
             self._runtime_retrieve_limit = retrieve_limit
             return {
                 "retrieve_limit": retrieve_limit,
+                "metadata_filter": self.store.build_file_filter(self.plan.file_ids),
+                "skip": False,
             }
 
-    def _collection_runnable(self, collection_type: str):
-        return (
-            RunnableLambda(lambda context: self._prepare_collection(context, collection_type), name=f"prepare_{collection_type}")
-            | self._retrieve_collection_runnable(collection_type)
-        )
-
-    def _prepare_collection(self, context: dict, collection_type: str) -> dict:
-        if collection_type == "scoped" and not self.plan.scope_ids:
-            return {**context, "collection_type": collection_type, "metadata_filter": None, "skip": True}
-        metadata_filter = (
-            self.store.build_common_filter(self.plan.namespace)
-            if collection_type == "common"
-            else self.store.build_scoped_filter(self.plan.namespace, self.plan.scope_ids)
-        )
-        return {**context, "collection_type": collection_type, "metadata_filter": metadata_filter, "skip": False}
-
-    def _retrieve_collection_runnable(self, collection_type: str):
+    def _retrieve_runnable(self):
         if self.plan.mode == "sparse":
-            return self._retriever(collection_type, "sparse") | RunnableLambda(_documents_to_items, name=f"{collection_type}_items")
+            return self._retriever("sparse") | RunnableLambda(_documents_to_items, name="sparse_items")
         if self.plan.mode == "hybrid":
             return (
                 RunnableParallel(
-                    dense=self._retriever(collection_type, "dense"),
-                    sparse=self._retriever(collection_type, "sparse"),
+                    dense=self._retriever("dense"),
+                    sparse=self._retriever("sparse"),
                 )
-                | RunnableLambda(lambda parts: self._fuse_collection_parts(parts, collection_type), name=f"{collection_type}_fusion")
+                | RunnableLambda(self._fuse_parts, name="fusion")
             )
-        return self._retriever(collection_type, "dense") | RunnableLambda(_documents_to_items, name=f"{collection_type}_items")
+        return self._retriever("dense") | RunnableLambda(_documents_to_items, name="dense_items")
 
-    def _retriever(self, collection_type: str, mode: str) -> _SearchRetriever:
+    def _retriever(self, mode: str) -> _SearchRetriever:
         return _SearchRetriever(
             store=self.store,
-            sparse=self.sparse,
-            collection_type=collection_type,
+            sparse=self._selected_sparse(),
             mode=mode,
             query=self.plan.query,
             trace=self.trace,
-            name=f"{collection_type}_{mode}",
+            name=mode,
         )
 
-    def _fuse_collection_parts(self, parts: dict[str, list[Document]], collection_type: str) -> list[dict]:
-        with self.trace.stage(f"{collection_type}_fusion") as stage:
+    def _fuse_parts(self, parts: dict[str, list[Document]]) -> list[dict]:
+        with self.trace.stage("fusion") as stage:
             items = _weighted_reciprocal_rank(_documents_to_items(parts["dense"]), _documents_to_items(parts["sparse"]), self._runtime_retrieve_limit, self.plan)
             stage["count"] = len(items)
             return items
 
-    def _retrieve_collection(self, collection_type: str, metadata_filter, limit: int) -> list[dict]:
+    def _retrieve_collection(self, metadata_filter, limit: int) -> list[dict]:
         if self.plan.mode == "sparse":
-            return _retrieve_sparse(self.store, collection_type, metadata_filter, self.plan.query, limit, self.sparse)
+            return _retrieve_sparse(self.store, metadata_filter, self.plan.query, limit, self._selected_sparse())
         if self.plan.mode == "hybrid":
             dense_items, sparse_items = self.runner.run_dense_and_sparse(
-                lambda: _retrieve_dense(self.store, collection_type, metadata_filter, self.plan.query, limit),
-                lambda: _retrieve_sparse(self.store, collection_type, metadata_filter, self.plan.query, limit, self.sparse),
+                lambda: _retrieve_dense(self.store, metadata_filter, self.plan.query, limit),
+                lambda: _retrieve_sparse(self.store, metadata_filter, self.plan.query, limit, self._selected_sparse()),
             )
             return _weighted_reciprocal_rank(dense_items, sparse_items, limit, self.plan)
-        return _retrieve_dense(self.store, collection_type, metadata_filter, self.plan.query, limit)
+        return _retrieve_dense(self.store, metadata_filter, self.plan.query, limit)
 
     def _retrieve_dense_context(self, context: dict) -> list[dict]:
-        return _retrieve_dense(self.store, context["collection_type"], context["metadata_filter"], self.plan.query, context["retrieve_limit"])
+        return _retrieve_dense(self.store, context["metadata_filter"], self.plan.query, context["retrieve_limit"])
+
+    def _selected_sparse(self) -> Sparse | None:
+        if self.plan.sparse_mode == "vector":
+            if self.vector_sparse is None:
+                raise ValueError("current profile does not support sparse_mode=vector")
+            return self.vector_sparse
+        return self.sparse
 
     def _retrieve_sparse_context(self, context: dict) -> list[dict]:
-        return _retrieve_sparse(self.store, context["collection_type"], context["metadata_filter"], self.plan.query, context["retrieve_limit"], self.sparse)
+        return _retrieve_sparse(self.store, context["metadata_filter"], self.plan.query, context["retrieve_limit"], self.sparse)
 
     def _retrieve_store_hybrid_context(self, context: dict) -> list[dict]:
-        return _retrieve_store_hybrid(self.store, context["collection_type"], context["metadata_filter"], self.plan.query, context["retrieve_limit"], self.plan)
+        return _retrieve_store_hybrid(self.store, context["metadata_filter"], self.plan.query, context["retrieve_limit"], self.plan)
 
     def _rerank(self, items: list[dict]) -> list[dict]:
         if self.rerank is None:
             raise RuntimeError("rerank is required when rerank is enabled")
         return self.rerank.rerank(self.plan.query, items, self.plan.top_k)
 
-    def _dedupe_candidates(self, candidates: dict[str, list[dict]]) -> list[dict]:
+    def _dedupe_items(self, items: list[dict]) -> list[dict]:
         with self.trace.stage("dedupe") as stage:
-            items = _dedupe(candidates["scoped"] + candidates["common"])
-            stage["count"] = len(items)
-            return items
+            deduped = _dedupe(items)
+            stage["count"] = len(deduped)
+            return deduped
 
     def _rerank_if_needed(self, items: list[dict]) -> list[dict]:
         with self.trace.stage("rerank") as stage:
@@ -284,34 +283,33 @@ class _SearchExecutor:
         return items
 
 
-def _retrieve_dense(store: Store, collection_type: str, metadata_filter, query: str, limit: int) -> list[dict]:
-    return store.search_dense(collection_type, query, limit, metadata_filter)
+def _retrieve_dense(store: Store, metadata_filter, query: str, limit: int) -> list[dict]:
+    return store.search_dense(query, limit, metadata_filter)
 
 
 def _retrieve_sparse(
     store: Store,
-    collection_type: str,
     metadata_filter,
     query: str,
     limit: int,
     sparse: Sparse | None = None,
 ) -> list[dict]:
     if store.sparse_uses_store(sparse):
-        return _retrieve_store_sparse(store, collection_type, metadata_filter, query, limit)
+        return _retrieve_store_sparse(store, metadata_filter, query, limit)
     if sparse is None:
         raise RuntimeError("sparse is not initialized")
-    documents = store.get_search_documents(collection_type, metadata_filter)
+    documents = store.get_search_documents(metadata_filter)
     if not sparse.ready:
         raise RuntimeError("sparse is not initialized")
     return sparse.search(query, documents, limit)
 
 
-def _retrieve_store_sparse(store: Store, collection_type: str, metadata_filter, query: str, limit: int) -> list[dict]:
-    return store.search_sparse(collection_type, query, limit, metadata_filter)
+def _retrieve_store_sparse(store: Store, metadata_filter, query: str, limit: int) -> list[dict]:
+    return store.search_sparse(query, limit, metadata_filter)
 
 
-def _retrieve_store_hybrid(store: Store, collection_type: str, metadata_filter, query: str, limit: int, plan: SearchPlan) -> list[dict]:
-    return store.search_hybrid(collection_type, query, limit, metadata_filter, plan.dense_weight, plan.sparse_weight, plan.rrf_k)
+def _retrieve_store_hybrid(store: Store, metadata_filter, query: str, limit: int, plan: SearchPlan) -> list[dict]:
+    return store.search_hybrid(query, limit, metadata_filter, plan.dense_weight, plan.sparse_weight, plan.rrf_k)
 
 
 def _weighted_reciprocal_rank(dense_items: list[dict], sparse_items: list[dict], limit: int, plan: SearchPlan) -> list[dict]:

@@ -13,73 +13,102 @@ def _read_config(filename: str):
     return yaml.safe_load((CONFIG_DIR / filename).read_text(encoding="utf-8"))
 
 
-def test_profiles_are_store_level_not_combination_matrix():
+def test_profiles_are_fixed_index_profiles():
     assert sorted(path.name for path in CONFIG_DIR.glob("*.yaml")) == [
-        "chroma.yaml",
+        "chroma-bge-base.yaml",
+        "chroma-bge-m3.yaml",
         "docker-cpu.yaml",
         "docker-gpu.yaml",
         "local.yaml",
-        "milvus.yaml",
-        "qdrant.yaml",
+        "milvus-bge-base.yaml",
+        "milvus-bge-m3.yaml",
+        "milvus-builtin-bm25.yaml",
+        "milvus-lite-bge-base.yaml",
+        "milvus-lite-bge-m3.yaml",
+        "milvus-lite-builtin-bm25.yaml",
+        "qdrant-bge-base.yaml",
+        "qdrant-bge-m3.yaml",
     ]
 
 
-def test_profiles_select_exactly_one_required_component_per_group():
+def test_profiles_fix_index_shaping_components():
     for path in CONFIG_DIR.glob("*.yaml"):
         config = _read_config(path.name)
 
-        for section_name in ("dense", "sparse", "store", "ocr"):
-            enabled = [
-                name
-                for name, component in config[section_name].items()
-                if isinstance(component, dict) and component.get("enable") is True
-            ]
-            assert len(enabled) == 1, f"{path.name} {section_name} enabled={enabled}"
+        assert "enable" not in config["dense"]
+        assert "import_path" in config["dense"]
+        assert "enable" not in config["store"]
+        assert "import_path" in config["store"]
+
+
+def test_profiles_define_app_sparse_and_optional_vector_sparse():
+    vector_sparse_profiles = {
+        "docker-gpu.yaml",
+        "qdrant-bge-m3.yaml",
+        "milvus-bge-m3.yaml",
+        "milvus-builtin-bm25.yaml",
+        "milvus-lite-bge-m3.yaml",
+        "milvus-lite-builtin-bm25.yaml",
+    }
+
+    for path in CONFIG_DIR.glob("*.yaml"):
+        sparse = _read_config(path.name)["sparse"]
+
+        assert sparse["app"]["type"] == "bm25"
+        assert sparse["app"]["tokenizer"] == "jieba"
+        assert sparse["app"]["import_path"] == "sparse.bm25.BM25Sparse"
+        if path.name in vector_sparse_profiles:
+            assert set(sparse) == {"app", "vector"}
+        else:
+            assert set(sparse) == {"app"}
+        if "vector" in sparse:
+            assert sparse["vector"]["type"] in ("bge_m3", "milvus_bm25")
+            assert "import_path" in sparse["vector"]
 
 
 def test_profiles_select_at_most_one_rerank_component():
     for path in CONFIG_DIR.glob("*.yaml"):
         config = _read_config(path.name)
 
-        enabled = [
-            name
-            for name, component in config["rerank"].items()
-            if isinstance(component, dict) and component.get("enable") is True
-        ]
-        assert len(enabled) <= 1, f"{path.name} rerank enabled={enabled}"
+        if config["rerank"] is not None and _is_component_group(config["rerank"]):
+            enabled = _enabled_components(config["rerank"])
+            assert len(enabled) <= 1, f"{path.name} rerank enabled={enabled}"
 
 
 def test_profiles_use_explicit_import_paths_not_legacy_module_paths():
     for path in CONFIG_DIR.glob("*.yaml"):
         config = _read_config(path.name)
 
-        for section_name in ("dense", "sparse", "store", "rerank", "ocr"):
-            for component in config[section_name].values():
+        for section_name in ("dense", "store", "ocr"):
+            for component in _components(config[section_name]):
                 assert "module" not in component
                 assert "import_path" in component
                 assert "." in component["import_path"]
+        if config["rerank"] is not None:
+            for component in _components(config["rerank"]):
+                assert "module" not in component
+                assert "import_path" in component
+                assert "." in component["import_path"]
+        for component in config["sparse"].values():
+            assert "module" not in component
+            assert "import_path" in component
+            assert "." in component["import_path"]
 
 
-def test_profiles_define_disabled_paddle_ocr_candidate():
+def test_profiles_keep_runtime_ocr_candidates():
     for path in CONFIG_DIR.glob("*.yaml"):
         ocr = _read_config(path.name)["ocr"]
 
+        assert _enabled_components(ocr)[0]["model_name"] == "rapidocr"
         assert ocr["paddle"]["enable"] is False
-        assert ocr["paddle"]["model_name"] == "paddleocr"
-
-
-def test_profiles_define_disabled_tesseract_ocr_candidate():
-    for path in CONFIG_DIR.glob("*.yaml"):
-        ocr = _read_config(path.name)["ocr"]
-
         assert ocr["tesseract"]["enable"] is False
-        assert ocr["tesseract"]["model_name"] == "tesseract"
 
 
 def test_chroma_profile_does_not_include_unsupported_store_sparse_candidate():
-    config = _read_config("chroma.yaml")
+    for filename in ("chroma-bge-base.yaml", "chroma-bge-m3.yaml"):
+        config = _read_config(filename)
 
-    assert set(config["sparse"]) == {"bm25"}
+        assert set(config["sparse"]) == {"app"}
 
 
 def test_profiles_define_search_result_and_candidate_limits():
@@ -93,101 +122,87 @@ def test_profiles_define_search_result_and_candidate_limits():
 
 def test_profiles_use_index_specific_collection_names():
     expected = {
-        "qdrant.yaml": (
-            ("qdrant",),
-            "qdrant_knowledge_common",
-            "qdrant_knowledge_scoped",
-        ),
-        "chroma.yaml": (
-            ("chroma",),
-            "chroma_knowledge_common",
-            "chroma_knowledge_scoped",
-        ),
-        "milvus.yaml": (
-            ("milvus", "milvus_lite"),
-            "milvus_knowledge_common",
-            "milvus_knowledge_scoped",
-        ),
-        "local.yaml": (
-            ("qdrant",),
-            "knowledge_common",
-            "knowledge_scoped",
-        ),
-        "docker-cpu.yaml": (
-            ("qdrant",),
-            "knowledge_common",
-            "knowledge_scoped",
-        ),
-        "docker-gpu.yaml": (
-            ("qdrant",),
-            "knowledge_common",
-            "knowledge_scoped",
-        ),
+        "qdrant-bge-base.yaml": ("qdrant", "qdrant_bge_base_knowledge_chunks"),
+        "qdrant-bge-m3.yaml": ("qdrant", "qdrant_bge_m3_knowledge_chunks"),
+        "chroma-bge-base.yaml": ("chroma", "chroma_bge_base_knowledge_chunks"),
+        "chroma-bge-m3.yaml": ("chroma", "chroma_bge_m3_knowledge_chunks"),
+        "milvus-bge-base.yaml": ("milvus", "milvus_bge_base_knowledge_chunks"),
+        "milvus-bge-m3.yaml": ("milvus", "milvus_bge_m3_knowledge_chunks"),
+        "milvus-builtin-bm25.yaml": ("milvus", "milvus_builtin_bm25_knowledge_chunks"),
+        "milvus-lite-bge-base.yaml": ("milvus_lite", "milvus_lite_bge_base_knowledge_chunks"),
+        "milvus-lite-bge-m3.yaml": ("milvus_lite", "milvus_lite_bge_m3_knowledge_chunks"),
+        "milvus-lite-builtin-bm25.yaml": ("milvus_lite", "milvus_lite_builtin_bm25_knowledge_chunks"),
+        "local.yaml": ("qdrant", "knowledge_chunks"),
+        "docker-cpu.yaml": ("qdrant", "knowledge_chunks"),
+        "docker-gpu.yaml": ("qdrant", "knowledge_chunks"),
     }
 
-    for filename, (store_names, common, scoped) in expected.items():
-        stores = _read_config(filename)["store"]
+    for filename, (store_name, chunks) in expected.items():
+        store = _read_config(filename)["store"]
 
-        for store_name in store_names:
-            assert stores[store_name]["collections"]["common"] == common
-            assert stores[store_name]["collections"]["scoped"] == scoped
-
-
-def test_milvus_profile_uses_uri_for_runtime_shape_not_filename():
-    config = _read_config("milvus.yaml")
-    store = _enabled_component(config, "store")
-
-    assert "lite" not in "milvus.yaml"
-    assert "standalone" not in "milvus.yaml"
-    assert isinstance(store["uri"], str)
-    assert store["uri"]
+        assert store["type"] == store_name
+        assert store["collections"]["chunks"] == chunks
 
 
-def test_milvus_profile_defines_lite_runtime_without_forcing_default_choice():
-    config = _read_config("milvus.yaml")
+def test_milvus_profiles_split_standalone_and_lite_runtime_shape():
+    for filename in ("milvus-bge-base.yaml", "milvus-bge-m3.yaml", "milvus-builtin-bm25.yaml"):
+        store = _read_config(filename)["store"]
 
-    assert config["store"]["milvus"]["uri"] == "http://localhost:19530"
-    assert config["store"]["milvus_lite"]["uri"] == "milvus_data/lite/lite.db"
-    assert config["store"]["milvus_lite"]["collections"] == config["store"]["milvus"]["collections"]
+        assert "lite" not in filename
+        assert store["type"] == "milvus"
+        assert store["uri"] == "http://localhost:19530"
 
+    for filename in ("milvus-lite-bge-base.yaml", "milvus-lite-bge-m3.yaml", "milvus-lite-builtin-bm25.yaml"):
+        store = _read_config(filename)["store"]
 
-def test_milvus_profile_defines_standalone_and_lite_runtimes():
-    store = _read_config("milvus.yaml")["store"]
-
-    assert set(store) == {"milvus", "milvus_lite"}
-    assert store["milvus"]["collections"] == {
-        "common": "milvus_knowledge_common",
-        "scoped": "milvus_knowledge_scoped",
-    }
-    assert store["milvus_lite"]["collections"] == store["milvus"]["collections"]
+        assert store["type"] == "milvus_lite"
+        assert store["uri"] == f"milvus_data/lite/{Path(filename).stem}.db"
 
 
 def test_docker_gpu_profile_uses_benchmark_backed_retrieval_with_stronger_rerank():
     config = _read_config("docker-gpu.yaml")
 
-    assert _enabled_component(config, "dense")["model_name"] == "bge-m3"
-    assert _enabled_component(config, "dense")["import_path"] == "dense.huggingface.HuggingFaceDense"
-    assert _enabled_component(config, "sparse")["tokenizer"] == "jieba"
-    assert _enabled_component(config, "sparse")["import_path"] == "sparse.bm25.BM25Sparse"
-    assert _enabled_component(config, "rerank")["model_name"] == "bge-reranker-v2-m3"
-    assert _enabled_component(config, "rerank")["import_path"] == "rerank.cross_encoder.CrossEncoderRerank"
+    assert config["dense"]["model_name"] == "bge-m3"
+    assert config["dense"]["import_path"] == "dense.huggingface.HuggingFaceDense"
+    assert config["sparse"]["app"]["tokenizer"] == "jieba"
+    assert config["sparse"]["app"]["import_path"] == "sparse.bm25.BM25Sparse"
+    assert config["sparse"]["vector"]["type"] == "bge_m3"
+    assert config["sparse"]["vector"]["import_path"] == "sparse.qdrant_bge_m3.QdrantBGEM3Sparse"
+    rerank = _enabled_components(config["rerank"])[0]
+    assert rerank["model_name"] == "bge-reranker-v2-m3"
+    assert rerank["import_path"] == "rerank.cross_encoder.CrossEncoderRerank"
     assert config["search"]["default_mode"] == "hybrid"
 
 
 def test_docker_cpu_profile_keeps_lightweight_models_with_app_bm25_sparse():
     config = _read_config("docker-cpu.yaml")
 
-    assert _enabled_component(config, "dense")["model_name"] == "bge-base-zh-v1.5"
-    assert _enabled_component(config, "dense")["import_path"] == "dense.huggingface.HuggingFaceDense"
-    assert _enabled_component(config, "sparse")["tokenizer"] == "jieba"
-    assert _enabled_component(config, "sparse")["import_path"] == "sparse.bm25.BM25Sparse"
-    assert _enabled_components(config, "rerank") == []
+    assert config["dense"]["model_name"] == "bge-base-zh-v1.5"
+    assert config["dense"]["import_path"] == "dense.huggingface.HuggingFaceDense"
+    assert config["sparse"]["app"]["tokenizer"] == "jieba"
+    assert config["sparse"]["app"]["import_path"] == "sparse.bm25.BM25Sparse"
+    assert "vector" not in config["sparse"]
+    assert _enabled_components(config["rerank"]) == []
     assert config["search"]["default_mode"] == "hybrid"
 
 
-def _enabled_component(config: dict, section_name: str) -> dict:
-    return next(component for component in config[section_name].values() if component.get("enable") is True)
+def _is_component_group(section: dict) -> bool:
+    if not isinstance(section, dict):
+        return False
+    if any(key in section for key in ("name", "type", "collections", "app", "vector")):
+        return False
+    return all(isinstance(value, dict) for value in section.values())
 
 
-def _enabled_components(config: dict, section_name: str) -> list[dict]:
-    return [component for component in config[section_name].values() if component.get("enable") is True]
+def _components(section: dict) -> list[dict]:
+    if _is_component_group(section):
+        return list(section.values())
+    return [section]
+
+
+def _enabled_components(section: dict) -> list[dict]:
+    if section is None:
+        return []
+    if _is_component_group(section):
+        return [component for component in section.values() if component.get("enable") is True]
+    return [section]

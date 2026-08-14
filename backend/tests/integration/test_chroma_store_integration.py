@@ -20,6 +20,9 @@ class FakeDense:
     def embed_query(self, text):
         return self._embeddings.embed_query(text)
 
+    def embed_documents(self, texts):
+        return self._embeddings.embed_documents(texts)
+
     def as_langchain_dense(self):
         return self._embeddings
 
@@ -84,42 +87,41 @@ def _chunk(chunk_id, filename, content):
     return {
         "id": chunk_id,
         "content": content,
-        "metadata": {"filename": filename},
+        "metadata": {"filename": filename, "chunk_index": 0},
     }
 
 
-def test_chroma_store_adds_searches_lists_and_deletes_common_documents(tmp_path):
+def test_chroma_store_adds_searches_and_deletes_file_chunks(tmp_path):
     from store import chroma
 
     chroma.close_store()
     try:
+        dense = FakeDense()
+        dense.start()
         chroma.init_store(
-            dense=FakeDense(),
+            dense=dense,
             sparse=None,
             persist_dir=str(tmp_path),
-            common_collection="chroma_common_it",
-            scoped_collection="chroma_scoped_it",
+            chunks_collection="chroma_chunks_it",
         )
 
-        chroma.add_common_documents(
+        chroma.add_file_chunks(
             [_chunk("alpha-1", "alpha.txt", "alpha knowledge")],
-            namespace="tenant_a",
+            file_id="chromafilealpha",
         )
 
-        docs = chroma.list_common_documents(namespace="tenant_a")
-        assert docs[0]["filename"] == "alpha.txt"
-        assert docs[0]["chunks"] == 1
+        docs = chroma.get_search_documents(chroma.build_file_filter(["chromafilealpha"]))
+        assert docs[0]["metadata"]["filename"] == "alpha.txt"
 
         results = chroma.search_dense(
-            "common",
             "alpha",
             1,
-            chroma.build_common_filter("tenant_a"),
+            chroma.build_file_filter(["chromafilealpha"]),
         )
         assert results[0]["content"] == "alpha knowledge"
 
-        assert chroma.delete_common_document("alpha.txt", namespace="tenant_a") == 1
-        assert chroma.list_common_documents(namespace="tenant_a") == []
+        assert chroma.delete_file_chunks("chromafilealpha") == 1
+        assert chroma.get_search_documents(chroma.build_file_filter(["chromafilealpha"])) == []
     finally:
         chroma.close_store()
 
@@ -129,13 +131,16 @@ def test_chroma_local_store_rejects_store_sparse_with_clear_error(tmp_path):
 
     chroma.close_store()
     try:
-        with pytest.raises(RuntimeError, match="本地 Chroma 不支持 store sparse"):
+        dense = FakeDense()
+        dense.start()
+        sparse = FakeChromaSparse()
+        sparse.start()
+        with pytest.raises(RuntimeError, match="本地 Chroma 不支持 vector sparse"):
             chroma.init_store(
-                dense=FakeDense(),
-                sparse=FakeChromaSparse(),
+                dense=dense,
+                sparse=sparse,
                 persist_dir=str(tmp_path),
-                common_collection="chroma_sparse_common_it",
-                scoped_collection="chroma_sparse_scoped_it",
+                chunks_collection="chroma_sparse_chunks_it",
             )
     finally:
         chroma.close_store()

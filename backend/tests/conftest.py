@@ -1,10 +1,10 @@
 import os
+import re
 import sys
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
@@ -25,12 +25,12 @@ def store_test_env(request, tmp_path):
 
     orig_config_file_env = os.environ.get("CONFIG_FILE")
     orig_config = dict(cf.SEARCH_CONFIG)
-    orig_common = cf.QDRANT_COMMON_COLLECTION
-    orig_scoped = cf.QDRANT_SCOPED_COLLECTION
+    orig_chunks = cf.QDRANT_CHUNKS_COLLECTION
     orig_client = st._client
     orig_dense = st._dense
     orig_sparse = st._sparse
-    orig_stores = dict(st._stores)
+    stores = getattr(st, "_stores", None)
+    orig_stores = dict(stores) if stores is not None else None
     orig_dense_vector_size = st._dense_vector_size
     orig_ready = st._ready
     import search as search_module
@@ -38,36 +38,33 @@ def store_test_env(request, tmp_path):
 
     st.close_store()
     search_module._default_store = None
-    common_collection = "test_qdrant_knowledge_common"
-    scoped_collection = "test_qdrant_knowledge_scoped"
-    _drop_qdrant_collection(cf.QDRANT_URL, common_collection)
-    _drop_qdrant_collection(cf.QDRANT_URL, scoped_collection)
+    chunks_collection = f"test_qdrant_{_collection_suffix(request.node.nodeid)}"
+    _drop_qdrant_collection(cf.QDRANT_URL, chunks_collection)
     test_config_path = tmp_path / "qdrant_test.yaml"
     test_config_path.write_text(
         (BACKEND_DIR / "config" / "local.yaml")
         .read_text(encoding="utf-8")
-        .replace("common: knowledge_common", f"common: {common_collection}")
-        .replace("scoped: knowledge_scoped", f"scoped: {scoped_collection}"),
+        .replace("chunks: knowledge_chunks", f"chunks: {chunks_collection}"),
         encoding="utf-8",
     )
     os.environ["CONFIG_FILE"] = str(test_config_path)
-    _set_qdrant_collection_names(cf, st, common_collection, scoped_collection)
+    _set_qdrant_collection_name(cf, st, chunks_collection)
 
     yield
 
-    _drop_qdrant_collection(cf.QDRANT_URL, common_collection)
-    _drop_qdrant_collection(cf.QDRANT_URL, scoped_collection)
+    _drop_qdrant_collection(cf.QDRANT_URL, chunks_collection)
     st.close_store()
     cf.SEARCH_CONFIG.clear()
     cf.SEARCH_CONFIG.update(orig_config)
-    cf.QDRANT_COMMON_COLLECTION = orig_common
-    cf.QDRANT_SCOPED_COLLECTION = orig_scoped
-    _set_qdrant_collection_names(cf, st, orig_common, orig_scoped)
+    cf.QDRANT_CHUNKS_COLLECTION = orig_chunks
+    _set_qdrant_collection_name(cf, st, orig_chunks)
     st._client = orig_client
     st._dense = orig_dense
     st._sparse = orig_sparse
-    st._stores.clear()
-    st._stores.update(orig_stores)
+    stores = getattr(st, "_stores", None)
+    if stores is not None and orig_stores is not None:
+        stores.clear()
+        stores.update(orig_stores)
     st._dense_vector_size = orig_dense_vector_size
     st._ready = orig_ready
     search_module._default_store = orig_default_store
@@ -124,7 +121,7 @@ def uploaded_chunks(initialized_store, test_txt_path):
     from document_parser import parse_file
 
     chunks = parse_file(test_txt_path)
-    initialized_store.add_common_documents(chunks)
+    initialized_store.add_file_chunks(chunks, file_id="testfile")
     return chunks
 
 
@@ -132,9 +129,12 @@ def uploaded_chunks(initialized_store, test_txt_path):
 def initialized_store(store_test_env):
     """Store module after explicit startup initialization."""
     import store
+    from dense.huggingface import HuggingFaceDense
     from search import set_default_store
 
-    store.init_search()
+    dense = HuggingFaceDense()
+    dense.start()
+    store.init_store(dense=dense)
     set_default_store(store)
     return store
 
@@ -198,14 +198,12 @@ def test_img_path(tmp_path):
     return str(path)
 
 
-def _set_qdrant_collection_names(config_module, store_module, common: str, scoped: str) -> None:
-    config_module.QDRANT_COMMON_COLLECTION = common
-    config_module.QDRANT_SCOPED_COLLECTION = scoped
-    store_module.QDRANT_COMMON_COLLECTION = common
-    store_module.QDRANT_SCOPED_COLLECTION = scoped
+def _set_qdrant_collection_name(config_module, store_module, collection_name: str) -> None:
+    config_module.QDRANT_CHUNKS_COLLECTION = collection_name
+    store_module.QDRANT_CHUNKS_COLLECTION = collection_name
     store_module.COLLECTION_BY_TYPE = {
-        "common": common,
-        "scoped": scoped,
+        "common": collection_name,
+        "scoped": collection_name,
     }
 
 
@@ -221,6 +219,11 @@ def _drop_qdrant_collection(url: str, collection_name: str) -> None:
             close()
     except Exception:
         pass
+
+
+def _collection_suffix(nodeid: str) -> str:
+    suffix = re.sub(r"[^a-zA-Z0-9_]+", "_", nodeid).strip("_").lower()
+    return suffix[-48:] or "knowledge_chunks"
 
 
 # ---------------------------------------------------------------------------

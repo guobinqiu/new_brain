@@ -233,8 +233,8 @@ def test_benchmark_embedded_stores_use_tmp_path(tmp_path):
     chroma_config = benchmark._config_for(chroma_batch, tmp_path)
     milvus_lite_config = benchmark._config_for(milvus_lite_batch, tmp_path)
 
-    assert chroma_config["store"]["chroma"]["persist_dir"] == str(tmp_path / "chroma")
-    assert milvus_lite_config["store"]["milvus_lite"]["uri"] == str(tmp_path / "milvus_lite.db")
+    assert chroma_config["store"]["persist_dir"] == str(tmp_path / "chroma")
+    assert milvus_lite_config["store"]["uri"] == str(tmp_path / "milvus_lite.db")
 
 
 def test_accuracy_benchmark_defines_one_report_per_query():
@@ -278,11 +278,11 @@ def test_accuracy_benchmark_reuses_one_index_for_all_queries(monkeypatch, tmp_pa
     from tests.benchmark import test_search_benchmark as benchmark
 
     class FakeStore:
-        def delete_common_document(self, filename, namespace):
-            calls.append(("delete", filename, namespace))
+        def delete_file_chunks(self, file_id):
+            calls.append(("delete", file_id))
 
-        def add_common_documents(self, chunks, namespace):
-            calls.append(("add", len(chunks), namespace))
+        def add_file_chunks(self, chunks, file_id):
+            calls.append(("add", len(chunks), file_id))
 
     class FakeApplication:
         def __init__(self):
@@ -324,7 +324,7 @@ def test_accuracy_benchmark_reuses_one_index_for_all_queries(monkeypatch, tmp_pa
 
     accuracy.test_search_accuracy_matrix(tmp_path)
 
-    assert calls.count(("add", 1, accuracy.NAMESPACE)) == 1
+    assert calls.count(("add", 1, accuracy.FILE_ID)) == 1
     assert calls.count(("start_ocr", False)) == 1
     assert ("report", "qdrant", "q1") in calls
     assert ("report", "qdrant", "q2") in calls

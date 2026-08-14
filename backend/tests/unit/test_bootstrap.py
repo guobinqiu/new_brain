@@ -12,14 +12,20 @@ def test_application_starts_public_components_in_order():
     class FakeComponent:
         def __init__(self, name):
             self.name = name
+            self.ready = False
 
         def start(self):
             calls.append(self.name)
+            self.ready = True
 
         def stop(self):
+            self.ready = False
             pass
 
     application = bootstrap.Application(
+        dense=FakeComponent("dense"),
+        sparse=FakeComponent("sparse"),
+        vector_sparse=FakeComponent("vector_sparse"),
         store=FakeComponent("store"),
         search=FakeComponent("search"),
         rerank=FakeComponent("rerank"),
@@ -27,7 +33,7 @@ def test_application_starts_public_components_in_order():
     )
     application.start()
 
-    assert calls == ["store", "search", "rerank", "ocr"]
+    assert calls == ["dense", "sparse", "vector_sparse", "store", "search", "rerank", "ocr"]
     assert application.ready is True
 
 
@@ -56,7 +62,7 @@ def test_application_selects_configured_dense_and_bm25_sparse():
     from rerank.cross_encoder import CrossEncoderRerank
     from sparse.bm25 import BM25Sparse
 
-    config = load_config_file("config/qdrant.yaml")
+    config = load_config_file("config/qdrant-bge-base.yaml")
     application = bootstrap.Application(config=config)
 
     assert isinstance(application.dense, HuggingFaceDense)
@@ -75,39 +81,37 @@ def test_application_selects_bge_m3_store_sparse(tmp_path):
     path.write_text(
         """
 dense:
-  bge_m3:
-    enable: true
-    model_name: bge-m3
+  name: bge_m3
+  model_name: bge-m3
 sparse:
-  bge_m3:
-    enable: true
+  app:
+    type: bm25
+    tokenizer: jieba
+  vector:
+    type: bge_m3
     model_name: bge-m3
 store:
-  qdrant:
-    enable: true
-    url: http://localhost:6333
-    collections:
-      common: common
-      scoped: scoped
+  type: qdrant
+  url: http://localhost:6333
+  collections:
+    chunks: chunks
 search:
   default_mode: hybrid
 rerank:
-  bge_m3:
-    enable: true
-    model_name: bge-reranker-v2-m3
+  name: bge_m3
+  model_name: bge-reranker-v2-m3
 ocr:
-  rapid:
-    enable: true
-    model_name: rapidocr
+  name: rapid
+  model_name: rapidocr
 """,
         encoding="utf-8",
     )
     config = load_config_file(path)
     application = bootstrap.Application(config=config)
 
-    assert isinstance(application.sparse, QdrantBGEM3Sparse)
-    assert application.sparse.model_name == config.sparse.model_path
-    assert application.store.sparse is application.sparse
+    assert isinstance(application.vector_sparse, QdrantBGEM3Sparse)
+    assert application.vector_sparse.model_name == config.sparse.vector.model_path
+    assert application.store.sparse is application.vector_sparse
 
 
 def test_application_passes_store_config_to_qdrant_store():
@@ -117,29 +121,28 @@ def test_application_passes_store_config_to_qdrant_store():
 
     assert application.store.url == application.config.store.url
     assert application.store.timeout == application.config.store.timeout
-    assert application.store.common_collection == application.config.store.collections.common
-    assert application.store.scoped_collection == application.config.store.collections.scoped
+    assert application.store.chunks_collection == application.config.store.collections.chunks
 
 
 def test_application_reads_config_name_from_explicit_yaml(monkeypatch):
     import bootstrap
 
-    monkeypatch.setenv("CONFIG_FILE", "qdrant.yaml")
+    monkeypatch.setenv("CONFIG_FILE", "qdrant-bge-base.yaml")
 
     application = bootstrap.Application()
 
-    assert application.config_name == "qdrant"
+    assert application.config_name == "qdrant-bge-base"
     assert application.config.dense.name == "bge_base"
 
 
 def test_build_dense_rejects_unsupported_dense_type():
     import container
-    from schema import AppConfig, DenseConfig, OCRConfig, RerankConfig, SearchConfig, SparseConfig, StoreCollectionsConfig, StoreConfig
+    from schema import AppConfig, DenseConfig, OCRConfig, RerankConfig, SearchConfig, SparseBackendConfig, SparseConfig, StoreCollectionsConfig, StoreConfig
 
     config = AppConfig(
         dense=DenseConfig(name="unknown", model_path="/models/dense"),
-        sparse=SparseConfig(name="bm25", tokenizer="jieba"),
-        store=StoreConfig(type="qdrant", url="http://localhost:6333", collections=StoreCollectionsConfig(common="common", scoped="scoped")),
+        sparse=SparseConfig(app=SparseBackendConfig(name="bm25", tokenizer="jieba")),
+        store=StoreConfig(type="qdrant", url="http://localhost:6333", collections=StoreCollectionsConfig(chunks="chunks")),
         search=SearchConfig(),
         rerank=RerankConfig(name="bge_reranker_base", model_path="/models/rerank"),
         ocr=OCRConfig(name="rapidocr", model_path="/models/ocr"),
@@ -151,6 +154,13 @@ def test_build_dense_rejects_unsupported_dense_type():
 
 def test_application_does_not_become_ready_when_start_fails(monkeypatch):
     import bootstrap
+
+    class ReadyComponent:
+        def start(self):
+            pass
+
+        def stop(self):
+            pass
 
     class FailingComponent:
         def start(self):
@@ -167,6 +177,58 @@ def test_application_does_not_become_ready_when_start_fails(monkeypatch):
     assert application.ready is False
 
 
+def test_application_records_component_error_when_start_fails():
+    import bootstrap
+
+    class ReadyComponent:
+        def start(self):
+            pass
+
+        def stop(self):
+            pass
+
+    class FailingComponent:
+        def start(self):
+            raise RuntimeError("boom")
+
+        def stop(self):
+            pass
+
+    application = bootstrap.Application(files=ReadyComponent(), dense=FailingComponent())
+
+    with pytest.raises(RuntimeError, match="boom"):
+        application.start()
+
+    assert application.component_errors["dense"] == "boom"
+
+
+def test_application_clears_component_error_after_successful_start():
+    import bootstrap
+
+    class FakeComponent:
+        def __init__(self):
+            self.ready = False
+
+        def start(self):
+            self.ready = True
+
+        def stop(self):
+            self.ready = False
+
+    application = bootstrap.Application(
+        files=FakeComponent(),
+        dense=FakeComponent(),
+        sparse=FakeComponent(),
+        store=FakeComponent(),
+        search=FakeComponent(),
+        ocr=FakeComponent(),
+    )
+    application.component_errors["dense"] = "old error"
+    application.start()
+
+    assert "dense" not in application.component_errors
+
+
 def test_application_stops_public_components(monkeypatch):
     import bootstrap
 
@@ -175,14 +237,19 @@ def test_application_stops_public_components(monkeypatch):
     class FakeComponent:
         def __init__(self, name):
             self.name = name
+            self.ready = True
 
         def start(self):
             pass
 
         def stop(self):
             calls.append(self.name)
+            self.ready = False
 
     application = bootstrap.Application(
+        dense=FakeComponent("dense"),
+        sparse=FakeComponent("sparse"),
+        vector_sparse=FakeComponent("vector_sparse"),
         store=FakeComponent("store"),
         search=FakeComponent("search"),
         rerank=FakeComponent("rerank"),
@@ -191,5 +258,5 @@ def test_application_stops_public_components(monkeypatch):
     application.ready = True
     application.stop()
 
-    assert calls == ["ocr", "rerank", "search", "store"]
+    assert calls == ["ocr", "rerank", "search", "store", "vector_sparse", "sparse", "dense"]
     assert application.ready is False

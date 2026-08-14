@@ -25,10 +25,12 @@ def load_config_file(path: str | Path) -> AppConfig:
     config_path = _resolve_config_path(str(path))
     with config_path.open("r", encoding="utf-8") as f:
         raw = yaml.safe_load(f) or {}
+    available_components = _available_components(raw)
     _select_enabled_components(raw)
     _resolve_model_paths(raw)
     config = parse_app_config(raw)
     object.__setattr__(config, "name", config_path.stem)
+    object.__setattr__(config, "available_components", available_components)
     return config
 
 
@@ -48,7 +50,7 @@ def _resolve_model_paths(raw: dict) -> None:
         "bge_base_zh_v15": "bge-base-zh-v1.5",
         "bge_m3": "bge-m3",
     })
-    _resolve_component(raw, "sparse", {
+    _resolve_sparse_components(raw, {
         "bge_m3": "bge-m3",
     })
     _resolve_component(raw, "rerank", {
@@ -95,12 +97,79 @@ def _select_enabled_components(raw: dict) -> None:
         raw[section_name] = selected
 
 
+def _available_components(raw: dict) -> dict[str, list[dict[str, object]]]:
+    return {
+        "store": _component_options(raw.get("store")),
+        "dense": _component_options(raw.get("dense")),
+        "sparse_app": _sparse_backend_options(raw.get("sparse"), "app"),
+        "sparse_vector": _sparse_backend_options(raw.get("sparse"), "vector"),
+        "rerank": _component_options(raw.get("rerank")),
+        "ocr": _component_options(raw.get("ocr")),
+    }
+
+
+def _component_options(section) -> list[dict[str, object]]:
+    if not isinstance(section, dict):
+        return []
+    if _is_component_group(section):
+        return _component_group_options(section)
+    return [{
+        "name": section.get("name") or section.get("type") or section.get("module"),
+        "model_name": section.get("model_name"),
+        "active": True,
+    }]
+
+
+def _component_group_options(section) -> list[dict[str, object]]:
+    options = []
+    for name, config in section.items():
+        if not isinstance(config, dict):
+            continue
+        options.append({
+            "name": config.get("name") or config.get("type") or config.get("module") or name,
+            "model_name": config.get("model_name"),
+            "active": bool(config.get("enable")),
+        })
+    return options
+
+
+def _sparse_backend_options(section, backend_name: str) -> list[dict[str, object]]:
+    if not isinstance(section, dict):
+        return []
+    backend = section.get(backend_name)
+    if not isinstance(backend, dict):
+        return []
+    return [{
+        "name": backend.get("name") or backend.get("type") or backend.get("module") or backend_name,
+        "model_name": backend.get("model_name"),
+        "active": True,
+    }]
+
+
 def _is_component_group(section) -> bool:
     if not isinstance(section, dict):
+        return False
+    if any(key in section for key in ("app", "vector")):
         return False
     if any(key in section for key in ("name", "type", "module", "collections")):
         return False
     return all(isinstance(value, dict) for value in section.values())
+
+
+def _resolve_sparse_components(raw: dict, model_by_name: dict[str, str]) -> None:
+    section = raw.get("sparse")
+    if not isinstance(section, dict):
+        return
+    if "app" in section or "vector" in section:
+        for backend_name in ("app", "vector"):
+            backend = section.get(backend_name)
+            if isinstance(backend, dict):
+                sparse_type = backend.get("type") or backend.get("name")
+                model_name = backend.get("model_name") or model_by_name.get(sparse_type)
+                if model_name:
+                    backend["model_path"] = str(MODELS_DIR / model_name)
+        return
+    _resolve_component(raw, "sparse", model_by_name)
 
 
 def _resolve_component(raw: dict, section_name: str, model_by_name: dict[str, str]) -> None:

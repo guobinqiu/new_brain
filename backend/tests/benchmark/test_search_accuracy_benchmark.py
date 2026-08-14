@@ -15,7 +15,7 @@ pytestmark = pytest.mark.benchmark
 
 DOCUMENT_PATH = benchmark.DOCUMENT_PATH
 RESULTS_DIR = benchmark.RESULTS_DIR
-NAMESPACE = "accuracy_benchmark"
+FILE_ID = "accuracybenchmark"
 TOP_K_VALUES = [5, 20]
 
 
@@ -80,8 +80,8 @@ def _parse_document_chunks() -> list[dict]:
 
 
 def _rebuild_index(application, chunks: list[dict]) -> None:
-    application.store.delete_common_document(DOCUMENT_PATH.name, namespace=NAMESPACE)
-    application.store.add_common_documents(chunks, namespace=NAMESPACE)
+    application.store.delete_file_chunks(FILE_ID)
+    application.store.add_file_chunks(chunks, file_id=FILE_ID)
 
 
 def _run_accuracy_scenario(application, batch: benchmark.BenchmarkBatch, query_case: BenchmarkQuery, mode: str, top_k: int) -> dict[str, Any]:
@@ -95,8 +95,6 @@ def _run_accuracy_scenario(application, batch: benchmark.BenchmarkBatch, query_c
         top_k=top_k,
         rerank=rerank,
         fetch_k=benchmark.FETCH_K,
-        namespace=NAMESPACE,
-        scope_ids=[],
     )
     results = _SearchExecutor(plan, rerank=application.rerank, sparse=application.sparse, store=application.store).execute()
     return {

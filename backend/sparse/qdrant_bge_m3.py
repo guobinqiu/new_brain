@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from langchain_qdrant.sparse_embeddings import SparseEmbeddings, SparseVector
+from qdrant_client.http.models import SparseVector
 
 from sparse.bge_m3_common import BGEM3LexicalEncoder
 
 
-class QdrantBGEM3Sparse(SparseEmbeddings):
+class QdrantBGEM3Sparse:
     def __init__(self, model_name: str):
         self.model_name = model_name
         self._encoder = BGEM3LexicalEncoder(model_name)

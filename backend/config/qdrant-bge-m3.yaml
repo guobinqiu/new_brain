@@ -1,0 +1,58 @@
+logging:
+  level: INFO
+  max_bytes: 10485760
+  backup_count: 5
+  search_trace: true
+store:
+  type: qdrant
+  url: http://localhost:6333
+  timeout: 30
+  collections:
+    chunks: qdrant_bge_m3_knowledge_chunks
+  import_path: store.qdrant.QdrantStore
+dense:
+  name: bge_m3
+  model_name: bge-m3
+  import_path: dense.huggingface.HuggingFaceDense
+sparse:
+  app:
+    type: bm25
+    tokenizer: jieba
+    import_path: sparse.bm25.BM25Sparse
+  vector:
+    type: bge_m3
+    model_name: bge-m3
+    import_path: sparse.qdrant_bge_m3.QdrantBGEM3Sparse
+search:
+  default_mode: hybrid
+  top_k: 20
+  fetch_k: 50
+  dense_weight: 0.5
+  sparse_weight: 0.5
+  rrf_k: 60
+rerank:
+  bge_base:
+    enable: true
+    model_name: bge-reranker-base
+    import_path: rerank.cross_encoder.CrossEncoderRerank
+  bge_large:
+    enable: false
+    model_name: bge-reranker-large
+    import_path: rerank.cross_encoder.CrossEncoderRerank
+  bge_m3:
+    enable: false
+    model_name: bge-reranker-v2-m3
+    import_path: rerank.cross_encoder.CrossEncoderRerank
+ocr:
+  rapid:
+    enable: true
+    model_name: rapidocr
+    import_path: ocr.rapid.RapidOCR
+  paddle:
+    enable: false
+    model_name: paddleocr
+    import_path: ocr.paddle.PaddleOCR
+  tesseract:
+    enable: false
+    model_name: tesseract
+    import_path: ocr.tesseract.TesseractOCR

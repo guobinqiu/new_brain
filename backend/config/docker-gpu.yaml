@@ -4,30 +4,23 @@ logging:
   backup_count: 5
   search_trace: true
 store:
-  qdrant:
-    enable: true
-    url: http://qdrant:6333
-    timeout: 30
-    collections:
-      common: knowledge_common
-      scoped: knowledge_scoped
-    import_path: store.qdrant.QdrantStore
+  type: qdrant
+  url: http://qdrant:6333
+  timeout: 30
+  collections:
+    chunks: knowledge_chunks
+  import_path: store.qdrant.QdrantStore
 dense:
-  bge_base:
-    enable: false
-    model_name: bge-base-zh-v1.5
-    import_path: dense.huggingface.HuggingFaceDense
-  bge_m3:
-    enable: true
-    model_name: bge-m3
-    import_path: dense.huggingface.HuggingFaceDense
+  name: bge_m3
+  model_name: bge-m3
+  import_path: dense.huggingface.HuggingFaceDense
 sparse:
-  bm25:
-    enable: true
+  app:
+    type: bm25
     tokenizer: jieba
     import_path: sparse.bm25.BM25Sparse
-  bge_m3:
-    enable: false
+  vector:
+    type: bge_m3
     model_name: bge-m3
     import_path: sparse.qdrant_bge_m3.QdrantBGEM3Sparse
 search:

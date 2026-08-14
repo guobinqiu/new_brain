@@ -1,124 +1,106 @@
 import pytest
-from langchain_qdrant.sparse_embeddings import SparseEmbeddings, SparseVector
+from qdrant_client.http.models import SparseVector
 
 
 pytestmark = pytest.mark.unit
 
 
-def test_add_common_documents_deletes_then_inserts_with_namespace(monkeypatch):
+def test_add_file_chunks_writes_file_metadata(monkeypatch):
     import store
 
     calls = []
 
-    class FakeStore:
-        def add_documents(self, documents, ids):
-            calls.append(("add", documents, ids))
+    class FakeDense:
+        def embed_documents(self, texts):
+            calls.append(("embed", texts))
+            return [[0.1, 0.2, 0.3] for _ in texts]
+
+    class FakeClient:
+        def upsert(self, **kwargs):
+            calls.append(("upsert", kwargs["collection_name"], kwargs["points"]))
 
     monkeypatch.setattr(store, "_require_search_ready", lambda: calls.append(("ready",)))
-    monkeypatch.setattr(store, "delete_common_document", lambda filename, namespace="default": calls.append(("delete", filename, namespace)) or 2)
-    monkeypatch.setattr(store, "_common_store", lambda mode="hybrid": FakeStore())
+    monkeypatch.setattr(store, "delete_file_chunks", lambda file_id: calls.append(("delete", file_id)) or 2)
+    monkeypatch.setattr(store, "_get_dense", lambda: FakeDense())
+    monkeypatch.setattr(store, "get_qdrant_client", lambda: FakeClient())
+
+    chunks = [
+        {"id": "chunk-1", "content": "华为给我们一万六千张卡", "metadata": {"filename": "liang.pdf", "chunk_index": 0}},
+    ]
+
+    assert store.add_file_chunks(chunks, file_id="550e8400e29b41d4a716446655440000") == 1
+    assert calls[0] == ("ready",)
+    assert calls[1] == ("delete", "550e8400e29b41d4a716446655440000")
+
+    _, collection_name, points = calls[3]
+    assert collection_name == store.QDRANT_CHUNKS_COLLECTION
+    assert points[0].id == store._point_id("chunk-1")
+    assert points[0].payload["content"] == "华为给我们一万六千张卡"
+    assert points[0].payload["metadata"]["file_id"] == "550e8400e29b41d4a716446655440000"
+    assert points[0].payload["metadata"]["chunk_index"] == 0
+    assert points[0].payload["metadata"]["filename"] == "liang.pdf"
+
+
+def test_ensure_payload_indexes_only_creates_file_id_index(monkeypatch):
+    import store
+
+    calls = []
+
+    class FakeClient:
+        def create_payload_index(self, **kwargs):
+            calls.append((kwargs["collection_name"], kwargs["field_name"]))
+
+    monkeypatch.setattr(store, "get_qdrant_client", lambda: FakeClient())
+
+    store.ensure_payload_indexes()
+
+    assert calls == [(store.QDRANT_CHUNKS_COLLECTION, "metadata.file_id")]
+
+
+def test_add_file_chunks_writes_sparse_vector_when_sparse_vectors_are_stored(monkeypatch):
+    import store
+    from sparse.qdrant_bge_m3 import QdrantBGEM3Sparse
+
+    calls = []
+
+    class FakeDense:
+        def embed_documents(self, texts):
+            return [[0.1, 0.2, 0.3] for _ in texts]
+
+    class FakeSparse(QdrantBGEM3Sparse):
+        def __init__(self):
+            pass
+
+        def embed_documents(self, texts):
+            return [SparseVector(indices=[1], values=[1.0]) for _ in texts]
+
+    class FakeClient:
+        def upsert(self, **kwargs):
+            calls.append(("upsert", kwargs["points"]))
+
+    monkeypatch.setattr(store, "_require_search_ready", lambda: None)
+    monkeypatch.setattr(store, "_sparse_uses_store", lambda: True)
+    monkeypatch.setattr(store, "delete_file_chunks", lambda file_id: None)
+    monkeypatch.setattr(store, "_get_dense", lambda: FakeDense())
+    monkeypatch.setattr(store, "_get_sparse", lambda: FakeSparse())
+    monkeypatch.setattr(store, "get_qdrant_client", lambda: FakeClient())
 
     chunks = [
         {"id": "chunk-1", "content": "通用知识", "metadata": {"filename": "faq.pdf", "chunk_index": 0}},
     ]
 
-    assert store.add_common_documents(chunks, namespace="tenant_a") == 1
-    assert calls[0] == ("ready",)
-    assert calls[1] == ("delete", "faq.pdf", "tenant_a")
-
-    _, documents, ids = calls[2]
-    assert ids == [store._point_id("chunk-1")]
-    assert documents[0].page_content == "通用知识"
-    assert documents[0].metadata["namespace"] == "tenant_a"
-    assert documents[0].metadata["filename"] == "faq.pdf"
-    assert documents[0].metadata["source_id"] == "chunk-1"
+    assert store.add_file_chunks(chunks, file_id="file_a") == 1
+    point = calls[0][1][0]
+    assert "dense" in point.vector
+    assert "sparse" in point.vector
+    assert point.vector["sparse"].indices == [1]
 
 
-def test_add_common_documents_uses_hybrid_store_when_sparse_vectors_are_stored(monkeypatch):
+def test_add_file_chunks_requires_file_id():
     import store
 
-    calls = []
-
-    class FakeStore:
-        def add_documents(self, documents, ids):
-            calls.append(("add", documents, ids))
-
-    monkeypatch.setattr(store, "_require_search_ready", lambda: None)
-    monkeypatch.setattr(store, "_sparse_uses_store", lambda: True)
-    monkeypatch.setattr(store, "delete_common_document", lambda filename, namespace="default": None)
-    monkeypatch.setattr(store, "_common_store", lambda mode="hybrid": calls.append(("store", mode)) or FakeStore())
-
-    chunks = [
-        {"id": "chunk-1", "content": "通用知识", "metadata": {"filename": "faq.pdf", "chunk_index": 0}},
-    ]
-
-    assert store.add_common_documents(chunks, namespace="tenant_a") == 1
-    assert ("store", "hybrid") in calls
-
-
-def test_add_scoped_documents_deletes_then_inserts_with_scope(monkeypatch):
-    import store
-
-    calls = []
-
-    class FakeStore:
-        def add_documents(self, documents, ids):
-            calls.append(("add", documents, ids))
-
-    monkeypatch.setattr(store, "_require_search_ready", lambda: calls.append(("ready",)))
-    monkeypatch.setattr(store, "delete_scoped_document", lambda filename, namespace="default", scope_id=None: calls.append(("delete", filename, namespace, scope_id)) or 2)
-    monkeypatch.setattr(store, "_scoped_store", lambda mode="hybrid": FakeStore())
-
-    chunks = [
-        {"id": "chunk-1", "content": "范围知识", "metadata": {"filename": "faq.pdf", "chunk_index": 0}},
-    ]
-
-    assert store.add_scoped_documents(chunks, namespace="tenant_a", scope_id="scope_001") == 1
-    assert calls[0] == ("ready",)
-    assert calls[1] == ("delete", "faq.pdf", "tenant_a", "scope_001")
-
-    _, documents, ids = calls[2]
-    assert ids == [store._point_id("chunk-1")]
-    assert documents[0].metadata["namespace"] == "tenant_a"
-    assert documents[0].metadata["scope_id"] == "scope_001"
-    assert documents[0].metadata["filename"] == "faq.pdf"
-    assert documents[0].metadata["source_id"] == "chunk-1"
-
-
-def test_add_scoped_documents_uses_hybrid_store_when_sparse_vectors_are_stored(monkeypatch):
-    import store
-
-    calls = []
-
-    class FakeStore:
-        def add_documents(self, documents, ids):
-            calls.append(("add", documents, ids))
-
-    monkeypatch.setattr(store, "_require_search_ready", lambda: None)
-    monkeypatch.setattr(store, "_sparse_uses_store", lambda: True)
-    monkeypatch.setattr(store, "delete_scoped_document", lambda filename, namespace="default", scope_id=None: None)
-    monkeypatch.setattr(store, "_scoped_store", lambda mode="hybrid": calls.append(("store", mode)) or FakeStore())
-
-    chunks = [
-        {"id": "chunk-1", "content": "范围知识", "metadata": {"filename": "faq.pdf", "chunk_index": 0}},
-    ]
-
-    assert store.add_scoped_documents(chunks, namespace="tenant_a", scope_id="scope_001") == 1
-    assert ("store", "hybrid") in calls
-
-
-def test_add_scoped_documents_requires_scope_id():
-    import store
-
-    with pytest.raises(ValueError, match="scope_id"):
-        store.add_scoped_documents([], namespace="tenant_a", scope_id="")
-
-
-def test_document_key_distinguishes_common_and_scoped_documents():
-    import store
-
-    assert store._document_key("common", "tenant_a", None, "faq.pdf") == "common:tenant_a::faq.pdf"
-    assert store._document_key("scoped", "tenant_a", "scope_001", "faq.pdf") == "scoped:tenant_a:scope_001:faq.pdf"
+    with pytest.raises(ValueError, match="file_id"):
+        store.add_file_chunks([{"id": "chunk-1", "content": "x", "metadata": {"filename": "x.txt", "chunk_index": 0}}], file_id="")
 
 
 def test_point_id_maps_arbitrary_chunk_id_to_uuid():
@@ -185,10 +167,6 @@ def test_init_store_retries_when_qdrant_is_not_ready(monkeypatch):
         def embed_documents(self, texts):
             return [[0.1, 0.2, 0.3] for _ in texts]
 
-    class FakeQdrantStore:
-        def __init__(self, **kwargs):
-            calls.append(("store", kwargs["collection_name"]))
-
     attempts = {"count": 0}
 
     def flaky_ensure_collections():
@@ -197,7 +175,6 @@ def test_init_store_retries_when_qdrant_is_not_ready(monkeypatch):
             raise RuntimeError("qdrant not ready")
         calls.append(("ensure", attempts["count"]))
 
-    monkeypatch.setattr(store, "QdrantVectorStore", FakeQdrantStore)
     monkeypatch.setattr(store, "ensure_collections", flaky_ensure_collections)
     monkeypatch.setattr("store.startup.time.sleep", lambda seconds: calls.append(("sleep", seconds)))
 
@@ -208,27 +185,16 @@ def test_init_store_retries_when_qdrant_is_not_ready(monkeypatch):
     assert store.is_search_ready() is True
 
 
-def test_store_for_requires_store_prepared_during_initialization(monkeypatch):
-    import store
-
-    monkeypatch.setattr(store, "_ready", True)
-    store._stores.clear()
-
-    with pytest.raises(RuntimeError, match="store is not initialized"):
-        store._store_for("common", "dense")
-
-
-def test_init_store_loads_model_probes_size_and_prepares_stores(monkeypatch):
+def test_init_store_loads_model_probes_size_and_ensures_collection(monkeypatch):
     import store
 
     calls = []
 
     class FakeDense:
-        ready = False
+        ready = True
 
         def start(self):
-            calls.append(("load", store.DENSE_MODEL_DIR))
-            self.ready = True
+            raise AssertionError("store must not start dense")
 
         def stop(self):
             self.ready = False
@@ -240,10 +206,6 @@ def test_init_store_loads_model_probes_size_and_prepares_stores(monkeypatch):
         def embed_documents(self, texts):
             return [[0.1, 0.2, 0.3] for _ in texts]
 
-    class FakeQdrantStore:
-        def __init__(self, **kwargs):
-            calls.append(("store", kwargs["collection_name"], kwargs["retrieval_mode"]))
-
     class FakeClient:
         def collection_exists(self, collection_name):
             calls.append(("exists", collection_name))
@@ -252,20 +214,19 @@ def test_init_store_loads_model_probes_size_and_prepares_stores(monkeypatch):
         def create_payload_index(self, **kwargs):
             calls.append(("payload_index", kwargs["collection_name"], kwargs["field_name"]))
 
-    monkeypatch.setattr(store, "QdrantVectorStore", FakeQdrantStore)
     monkeypatch.setattr(store, "get_qdrant_client", lambda: FakeClient())
 
     store.init_store(dense=FakeDense())
 
     assert store.is_search_ready() is True
-    assert calls.count(("load", store.DENSE_MODEL_DIR)) == 1
     assert calls.count(("probe", "dimension probe")) == 1
-    assert ("store", store.QDRANT_COMMON_COLLECTION, store.RetrievalMode.DENSE) in calls
-    assert ("store", store.QDRANT_SCOPED_COLLECTION, store.RetrievalMode.DENSE) in calls
+    assert ("exists", store.QDRANT_CHUNKS_COLLECTION) in calls
+    assert ("payload_index", store.QDRANT_CHUNKS_COLLECTION, "metadata.file_id") in calls
 
 
-def test_init_store_prepares_sparse_and_hybrid_stores_when_sparse_uses_store(monkeypatch):
+def test_init_store_creates_sparse_vector_config_when_sparse_uses_store(monkeypatch):
     import store
+    from sparse.qdrant_bge_m3 import QdrantBGEM3Sparse
 
     calls = []
 
@@ -284,8 +245,11 @@ def test_init_store_prepares_sparse_and_hybrid_stores_when_sparse_uses_store(mon
         def embed_documents(self, texts):
             return [[0.1, 0.2, 0.3] for _ in texts]
 
-    class FakeSparse(SparseEmbeddings):
+    class FakeSparse(QdrantBGEM3Sparse):
         ready = True
+
+        def __init__(self):
+            pass
 
         def start(self):
             pass
@@ -299,10 +263,6 @@ def test_init_store_prepares_sparse_and_hybrid_stores_when_sparse_uses_store(mon
         def embed_documents(self, texts):
             return [SparseVector(indices=[1], values=[1.0]) for _ in texts]
 
-    class FakeQdrantStore:
-        def __init__(self, **kwargs):
-            calls.append(("store", kwargs["collection_name"], kwargs["retrieval_mode"], kwargs.get("sparse_embedding"), kwargs.get("sparse_vector_name")))
-
     class FakeClient:
         def collection_exists(self, collection_name):
             return False
@@ -310,15 +270,15 @@ def test_init_store_prepares_sparse_and_hybrid_stores_when_sparse_uses_store(mon
         def create_collection(self, **kwargs):
             calls.append(("create", kwargs["collection_name"], kwargs.get("sparse_vectors_config")))
 
+        def get_collection(self, collection_name):
+            return object()
+
         def create_payload_index(self, **kwargs):
             pass
 
     sparse = FakeSparse()
-    monkeypatch.setattr(store, "QdrantVectorStore", FakeQdrantStore)
     monkeypatch.setattr(store, "get_qdrant_client", lambda: FakeClient())
 
     store.init_store(dense=FakeDense(), sparse=sparse)
 
-    assert ("store", store.QDRANT_COMMON_COLLECTION, store.RetrievalMode.SPARSE, sparse, "sparse") in calls
-    assert ("store", store.QDRANT_COMMON_COLLECTION, store.RetrievalMode.HYBRID, sparse, "sparse") in calls
     assert any(call[0] == "create" and "sparse" in call[2] for call in calls)

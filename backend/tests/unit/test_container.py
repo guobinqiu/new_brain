@@ -7,51 +7,44 @@ pytestmark = pytest.mark.unit
 def _config_file(tmp_path, store_key: str = "qdrant", sparse_key: str = "bm25", sparse_extra: str = "    tokenizer: jieba\n", ocr_key: str = "rapid", ocr_model_name: str = "rapidocr"):
     store_settings = {
         "qdrant": """
-    url: http://localhost:6333
-    collections:
-      common: common
-      scoped: scoped
+  url: http://localhost:6333
+  collections:
+    chunks: chunks
 """,
         "chroma": """
-    persist_dir: ./chroma_data
-    collections:
-      common: common
-      scoped: scoped
+  persist_dir: ./chroma_data
+  collections:
+    chunks: chunks
 """,
         "milvus": """
-    uri: http://localhost:19530
-    collections:
-      common: common
-      scoped: scoped
+  uri: http://localhost:19530
+  collections:
+    chunks: chunks
 """,
     }[store_key]
     path = tmp_path / "profile.yaml"
     path.write_text(
         f"""
 dense:
-  bge_base:
-    enable: true
-    model_name: bge-base-zh-v1.5
+  name: bge_base
+  model_name: bge-base-zh-v1.5
 sparse:
-  {sparse_key}:
-    enable: true
+  app:
+    type: {sparse_key}
 {sparse_extra.rstrip()}
 store:
-  {store_key}:
-    enable: true
+  type: {store_key}
 {store_settings.rstrip()}
 search:
   default_mode: hybrid
   top_k: 20
   fetch_k: 50
 rerank:
-  bge_base:
-    enable: true
-    model_name: bge-reranker-base
+  name: bge_base
+  model_name: bge-reranker-base
 ocr:
-  {ocr_key}:
-    enable: true
-    model_name: {ocr_model_name}
+  name: {ocr_key}
+  model_name: {ocr_model_name}
 """,
         encoding="utf-8",
     )
@@ -86,7 +79,7 @@ def test_container_selects_chroma_store(tmp_path):
 
     assert isinstance(store, ChromaStore)
     assert store.persist_dir == config.store.persist_dir
-    assert store.common_collection == config.store.collections.common
+    assert store.chunks_collection == config.store.collections.chunks
 
 
 def test_container_selects_milvus_store(tmp_path):
@@ -101,7 +94,7 @@ def test_container_selects_milvus_store(tmp_path):
 
     assert isinstance(store, MilvusStore)
     assert store.uri == config.store.uri
-    assert store.common_collection == config.store.collections.common
+    assert store.chunks_collection == config.store.collections.chunks
 
 
 def test_container_selects_qdrant_bge_m3_sparse_adapter(tmp_path):

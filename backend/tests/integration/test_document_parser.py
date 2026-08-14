@@ -65,7 +65,6 @@ class TestDocumentParser:
             assert "id" in c
             assert c["metadata"].get("filename") == "test_ai.txt"
             assert "chunk_index" in c["metadata"]
-            assert "created_at" in c["metadata"]
             # Each chunk should be at most the default chunk size.
             assert len(c["content"]) <= 250
 

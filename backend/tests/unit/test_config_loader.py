@@ -19,7 +19,9 @@ def test_load_app_config_loads_local_config(monkeypatch):
     assert config.name == "local"
     assert config.store.type == "qdrant"
     assert config.store.url == "http://localhost:6333"
-    assert config.store.collections.common == "knowledge_common"
+    assert config.store.collections.chunks == "knowledge_chunks"
+    assert not hasattr(config.store.collections, "common")
+    assert not hasattr(config.store.collections, "scoped")
     assert config.logging.level == "INFO"
     assert config.logging.file is None
     assert config.logging.max_bytes == 10485760
@@ -47,8 +49,7 @@ store:
   url: http://localhost:6333
   timeout: 42
   collections:
-    common: common_custom
-    scoped: scoped_custom
+    chunks: chunks_custom
 search:
   default_mode: hybrid
   top_k: 12
@@ -78,7 +79,7 @@ ocr: test_ocr
     assert config.rerank.model_path == str(PROJECT_ROOT / "models" / "rerank")
     assert config.ocr.model_path == str(PROJECT_ROOT / "models" / "ocr")
     assert config.store.timeout == 42
-    assert config.store.collections.common == "common_custom"
+    assert config.store.collections.chunks == "chunks_custom"
     assert config.search.top_k == 12
     assert config.search.fetch_k == 48
     assert config.search.dense_weight == 0.7
@@ -89,30 +90,88 @@ ocr: test_ocr
     assert config.logging.search_trace is False
 
 
-def test_load_app_config_selects_enabled_components_by_key(monkeypatch, tmp_path):
+def test_load_app_config_supports_sparse_app_and_optional_vector(monkeypatch, tmp_path):
+    from loader import load_app_config
+
+    path = tmp_path / "sparse_vector.yaml"
+    path.write_text(
+        """
+dense: bge_m3
+sparse:
+  app:
+    type: bm25
+    tokenizer: jieba
+  vector:
+    type: bge_m3
+store:
+  type: qdrant
+  url: http://localhost:6333
+  collections:
+    chunks: chunks_custom
+search:
+  default_mode: hybrid
+rerank: test_rerank
+ocr: test_ocr
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CONFIG_FILE", str(path))
+
+    config = load_app_config()
+
+    assert config.sparse.app.name == "bm25"
+    assert config.sparse.app.tokenizer == "jieba"
+    assert config.sparse.vector is not None
+    assert config.sparse.vector.name == "bge_m3"
+    assert config.sparse.vector.model_path == str(PROJECT_ROOT / "models" / "bge-m3")
+
+
+def test_load_app_config_requires_sparse_app(monkeypatch, tmp_path):
+    from loader import load_app_config
+
+    path = tmp_path / "missing_app_sparse.yaml"
+    path.write_text(
+        """
+dense: bge_m3
+sparse:
+  vector:
+    type: bge_m3
+store:
+  type: qdrant
+  url: http://localhost:6333
+  collections:
+    chunks: chunks_custom
+search:
+  default_mode: hybrid
+rerank: test_rerank
+ocr: test_ocr
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CONFIG_FILE", str(path))
+
+    with pytest.raises(ValueError, match="sparse.app is required"):
+        load_app_config()
+
+
+def test_load_app_config_selects_named_components(monkeypatch, tmp_path):
     from loader import load_app_config
 
     path = tmp_path / "key_config.yaml"
     path.write_text(
         """
 dense:
-  bge_base:
-    enable: false
-    model_name: bge-base-zh-v1.5
-  bge_m3:
-    enable: true
-    model_name: bge-m3
+  name: bge_m3
+  model_name: bge-m3
 sparse:
-  bm25:
-    enable: true
+  app:
+    type: bm25
     tokenizer: jieba
 store:
-  qdrant:
-    enable: true
-    url: http://localhost:6333
-    collections:
-      common: common_custom
-      scoped: scoped_custom
+  type: qdrant
+  url: http://localhost:6333
+  collections:
+    chunks: chunks_custom
 search:
   default_mode: hybrid
   top_k: 12
@@ -121,13 +180,11 @@ search:
   sparse_weight: 0.3
   rrf_k: 80
 rerank:
-  bge_base:
-    enable: true
-    model_name: bge-reranker-base
+  name: bge_base
+  model_name: bge-reranker-base
 ocr:
-  rapid:
-    enable: true
-    model_name: rapidocr
+  name: rapid
+  model_name: rapidocr
 """,
         encoding="utf-8",
     )
@@ -152,28 +209,21 @@ def test_load_app_config_allows_profile_without_rerank(monkeypatch, tmp_path):
     path.write_text(
         """
 dense:
-  bge_base:
-    enable: true
-    model_name: bge-base-zh-v1.5
+  name: bge_base
+  model_name: bge-base-zh-v1.5
 sparse:
-  bm25:
-    enable: true
+  app:
+    type: bm25
     tokenizer: jieba
 store:
-  qdrant:
-    enable: true
-    url: http://localhost:6333
-    collections:
-      common: common_custom
-      scoped: scoped_custom
-rerank:
-  bge_base:
-    enable: false
-    model_name: bge-reranker-base
+  type: qdrant
+  url: http://localhost:6333
+  collections:
+    chunks: chunks_custom
+rerank: null
 ocr:
-  rapid:
-    enable: true
-    model_name: rapidocr
+  name: rapid
+  model_name: rapidocr
 """,
         encoding="utf-8",
     )
@@ -195,32 +245,32 @@ def test_load_app_config_can_use_config_filename(monkeypatch):
     assert config.dense.model_path == str(PROJECT_ROOT / "models" / "bge-base-zh-v1.5")
     assert config.store.type == "qdrant"
     assert config.store.url == "http://localhost:6333"
-    assert config.store.collections.common == "knowledge_common"
+    assert config.store.collections.chunks == "knowledge_chunks"
 
 
 def test_load_app_config_supports_qdrant_profile(monkeypatch):
     from loader import load_app_config
 
-    monkeypatch.setenv("CONFIG_FILE", "qdrant.yaml")
+    monkeypatch.setenv("CONFIG_FILE", "qdrant-bge-base.yaml")
 
     config = load_app_config()
 
-    assert config.name == "qdrant"
+    assert config.name == "qdrant-bge-base"
     assert config.store.type == "qdrant"
-    assert config.store.collections.common == "qdrant_knowledge_common"
+    assert config.store.collections.chunks == "qdrant_bge_base_knowledge_chunks"
 
 
 def test_load_app_config_supports_chroma_store(monkeypatch):
     from loader import load_app_config
 
-    monkeypatch.setenv("CONFIG_FILE", "chroma.yaml")
+    monkeypatch.setenv("CONFIG_FILE", "chroma-bge-base.yaml")
 
     config = load_app_config()
 
-    assert config.name == "chroma"
+    assert config.name == "chroma-bge-base"
     assert config.store.type == "chroma"
     assert config.store.persist_dir == "chroma_data"
-    assert config.store.collections.common == "chroma_knowledge_common"
+    assert config.store.collections.chunks == "chroma_bge_base_knowledge_chunks"
 
 
 def test_load_app_config_rejects_chroma_bge_m3_sparse(tmp_path):
@@ -230,35 +280,34 @@ def test_load_app_config_rejects_chroma_bge_m3_sparse(tmp_path):
     path.write_text(
         """
 dense:
-  bge_base:
-    enable: true
-    model_name: bge-base-zh-v1.5
-    import_path: dense.huggingface.HuggingFaceDense
+  name: bge_base
+  model_name: bge-base-zh-v1.5
+  import_path: dense.huggingface.HuggingFaceDense
 sparse:
-  bge_m3:
-    enable: true
+  app:
+    type: bm25
+    tokenizer: jieba
+    import_path: sparse.bm25.BM25Sparse
+  vector:
+    type: bge_m3
     model_name: bge-m3
     import_path: sparse.qdrant_bge_m3.QdrantBGEM3Sparse
 store:
-  chroma:
-    enable: true
-    persist_dir: chroma_data
-    collections:
-      common: chroma_knowledge_common
-      scoped: chroma_knowledge_scoped
-    import_path: store.chroma.ChromaStore
+  type: chroma
+  persist_dir: chroma_data
+  collections:
+    chunks: chroma_bge_base_knowledge_chunks
+  import_path: store.chroma.ChromaStore
 search:
   default_mode: hybrid
 rerank:
-  bge_base:
-    enable: true
-    model_name: bge-reranker-base
-    import_path: rerank.cross_encoder.CrossEncoderRerank
+  name: bge_base
+  model_name: bge-reranker-base
+  import_path: rerank.cross_encoder.CrossEncoderRerank
 ocr:
-  rapid:
-    enable: true
-    model_name: rapidocr
-    import_path: ocr.rapid.RapidOCR
+  name: rapid
+  model_name: rapidocr
+  import_path: ocr.rapid.RapidOCR
 """,
         encoding="utf-8",
     )
@@ -270,16 +319,14 @@ ocr:
 def test_load_app_config_supports_milvus_store(monkeypatch):
     from loader import load_app_config
 
-    monkeypatch.setenv("CONFIG_FILE", "milvus.yaml")
+    monkeypatch.setenv("CONFIG_FILE", "milvus-bge-base.yaml")
 
     config = load_app_config()
-    raw = yaml.safe_load((PROJECT_ROOT / "backend" / "config" / "milvus.yaml").read_text(encoding="utf-8"))
-    enabled_store = next(store for store in raw["store"].values() if store.get("enable") is True)
 
-    assert config.name == "milvus"
+    assert config.name == "milvus-bge-base"
     assert config.store.type == "milvus"
-    assert config.store.uri == enabled_store["uri"]
-    assert config.store.collections.common == enabled_store["collections"]["common"]
+    assert config.store.uri == "http://localhost:19530"
+    assert config.store.collections.chunks == "milvus_bge_base_knowledge_chunks"
 
 
 def test_load_app_config_keeps_bge_m3_sparse_model_path_independent(monkeypatch):
@@ -296,13 +343,15 @@ def test_load_app_config_keeps_bge_m3_sparse_model_path_independent(monkeypatch)
 def test_load_app_config_supports_milvus_builtin_bm25_sparse(monkeypatch):
     from loader import load_app_config
 
-    monkeypatch.setenv("CONFIG_FILE", "milvus.yaml")
+    monkeypatch.setenv("CONFIG_FILE", "milvus-builtin-bm25.yaml")
 
     config = load_app_config()
 
     assert config.store.type == "milvus"
     assert config.sparse.name == "bm25"
     assert config.sparse.tokenizer == "jieba"
+    assert config.sparse.vector is not None
+    assert config.sparse.vector.name == "milvus_bm25"
 
 
 def test_load_app_config_supports_paddle_ocr(monkeypatch, tmp_path):
@@ -312,30 +361,25 @@ def test_load_app_config_supports_paddle_ocr(monkeypatch, tmp_path):
     path.write_text(
         """
 dense:
-  bge_base:
-    enable: true
-    model_name: bge-base-zh-v1.5
+  name: bge_base
+  model_name: bge-base-zh-v1.5
 sparse:
-  bm25:
-    enable: true
+  app:
+    type: bm25
     tokenizer: jieba
 store:
-  qdrant:
-    enable: true
-    url: http://localhost:6333
-    collections:
-      common: common
-      scoped: scoped
+  type: qdrant
+  url: http://localhost:6333
+  collections:
+    chunks: chunks
 search:
   default_mode: hybrid
 rerank:
-  bge_base:
-    enable: true
-    model_name: bge-reranker-base
+  name: bge_base
+  model_name: bge-reranker-base
 ocr:
-  paddle:
-    enable: true
-    model_name: paddleocr
+  name: paddle
+  model_name: paddleocr
 """,
         encoding="utf-8",
     )
@@ -354,30 +398,25 @@ def test_load_app_config_supports_tesseract_ocr(monkeypatch, tmp_path):
     path.write_text(
         """
 dense:
-  bge_base:
-    enable: true
-    model_name: bge-base-zh-v1.5
+  name: bge_base
+  model_name: bge-base-zh-v1.5
 sparse:
-  bm25:
-    enable: true
+  app:
+    type: bm25
     tokenizer: jieba
 store:
-  qdrant:
-    enable: true
-    url: http://localhost:6333
-    collections:
-      common: common
-      scoped: scoped
+  type: qdrant
+  url: http://localhost:6333
+  collections:
+    chunks: chunks
 search:
   default_mode: hybrid
 rerank:
-  bge_base:
-    enable: true
-    model_name: bge-reranker-base
+  name: bge_base
+  model_name: bge-reranker-base
 ocr:
-  tesseract:
-    enable: true
-    model_name: tesseract
+  name: tesseract
+  model_name: tesseract
 """,
         encoding="utf-8",
     )
@@ -402,8 +441,7 @@ sparse:
 store:
   type: unknown
   collections:
-    common: common
-    scoped: scoped
+    chunks: chunks
 search:
   default_mode: hybrid
 rerank: test_rerank

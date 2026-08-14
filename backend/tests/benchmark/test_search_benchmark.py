@@ -23,7 +23,7 @@ RESULTS_DIR = Path(__file__).resolve().parent / "results"
 
 QUERY = "有多少华为卡"
 TARGET_TEXT = "一万六千张卡"
-NAMESPACE = "benchmark"
+FILE_ID = "benchmarkfile"
 TOP_K_VALUES = [5, 20]
 FETCH_K = 50
 WARMUP_RUNS = int(os.environ.get("BENCHMARK_WARMUP_RUNS", "2"))
@@ -142,9 +142,9 @@ def _start_application(batch: BenchmarkBatch, tmp_path: Path, start_ocr: bool = 
 def _rebuild_index(application) -> None:
     from document_parser import parse_file
 
-    application.store.delete_common_document(DOCUMENT_PATH.name, namespace=NAMESPACE)
+    application.store.delete_file_chunks(FILE_ID)
     chunks = parse_file(str(DOCUMENT_PATH), original_filename=DOCUMENT_PATH.name, ocr=None)
-    application.store.add_common_documents(chunks, namespace=NAMESPACE)
+    application.store.add_file_chunks(chunks, file_id=FILE_ID)
 
 
 def _run_scenario(application, batch: BenchmarkBatch, mode: str, top_k: int) -> dict[str, Any]:
@@ -158,8 +158,6 @@ def _run_scenario(application, batch: BenchmarkBatch, mode: str, top_k: int) -> 
         top_k=top_k,
         rerank=rerank,
         fetch_k=FETCH_K,
-        namespace=NAMESPACE,
-        scope_ids=[],
     )
 
     for _ in range(WARMUP_RUNS):
@@ -212,27 +210,31 @@ def _config_for(batch: BenchmarkBatch, tmp_path: Path) -> dict[str, Any]:
     if combo.store_key == "milvus_lite":
         store_config["uri"] = str(tmp_path / "milvus_lite.db")
     store = {
-        combo.store_key: {
-            "enable": True,
-            "import_path": _store_import_path(combo.store_key),
-            "collections": {
-                "common": f"benchmark_{collection_suffix}_common",
-                "scoped": f"benchmark_{collection_suffix}_scoped",
-            },
-            **store_config,
-        }
+        "type": combo.store_key,
+        "import_path": _store_import_path(combo.store_key),
+        "collections": {
+            "chunks": f"benchmark_{collection_suffix}_chunks",
+        },
+        **store_config,
     }
     dense_model = "bge-m3" if combo.dense == "bge-m3" else "bge-base-zh-v1.5"
-    sparse = {
-        combo.sparse_key: {
-            "enable": True,
-            "import_path": _sparse_import_path(combo.store_key, combo.sparse_key),
-        }
+    sparse_backend = {
+        "type": combo.sparse_key,
+        "import_path": _sparse_import_path(combo.store_key, combo.sparse_key),
     }
     if combo.sparse == "bm25":
-        sparse[combo.sparse_key]["tokenizer"] = "jieba"
+        sparse_backend["tokenizer"] = "jieba"
     elif combo.sparse == "bge-m3":
-        sparse[combo.sparse_key]["model_name"] = "bge-m3"
+        sparse_backend["model_name"] = "bge-m3"
+    sparse = {
+        "app": {
+            "type": "bm25",
+            "tokenizer": "jieba",
+            "import_path": "sparse.bm25.BM25Sparse",
+        }
+    }
+    if combo.sparse_impl == "vector":
+        sparse["vector"] = sparse_backend
     rerank_model = "bge-reranker-base" if batch.rerank == "none" else batch.rerank
 
     return {
@@ -244,11 +246,9 @@ def _config_for(batch: BenchmarkBatch, tmp_path: Path) -> dict[str, Any]:
         },
         "store": store,
         "dense": {
-            "bge_m3" if combo.dense == "bge-m3" else "bge_base": {
-                "enable": True,
-                "model_name": dense_model,
-                "import_path": "dense.huggingface.HuggingFaceDense",
-            }
+            "name": "bge_m3" if combo.dense == "bge-m3" else "bge_base",
+            "model_name": dense_model,
+            "import_path": "dense.huggingface.HuggingFaceDense",
         },
         "sparse": sparse,
         "search": {
@@ -260,18 +260,14 @@ def _config_for(batch: BenchmarkBatch, tmp_path: Path) -> dict[str, Any]:
             "rrf_k": 60,
         },
         "rerank": {
-            _rerank_key(rerank_model): {
-                "enable": True,
-                "model_name": rerank_model,
-                "import_path": "rerank.cross_encoder.CrossEncoderRerank",
-            }
+            "name": _rerank_key(rerank_model),
+            "model_name": rerank_model,
+            "import_path": "rerank.cross_encoder.CrossEncoderRerank",
         },
         "ocr": {
-            "rapid": {
-                "enable": True,
-                "model_name": "rapidocr",
-                "import_path": "ocr.rapid.RapidOCR",
-            }
+            "name": "rapid",
+            "model_name": "rapidocr",
+            "import_path": "ocr.rapid.RapidOCR",
         },
     }
 

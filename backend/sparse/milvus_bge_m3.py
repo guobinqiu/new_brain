@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-from langchain_milvus.utils.sparse import BaseSparseEmbedding
-
 from sparse.bge_m3_common import BGEM3LexicalEncoder
 
 
-class MilvusBGEM3Sparse(BaseSparseEmbedding):
+class MilvusBGEM3Sparse:
     def __init__(self, model_name: str):
         self.model_name = model_name
         self._encoder = BGEM3LexicalEncoder(model_name)

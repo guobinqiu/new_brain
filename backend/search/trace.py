@@ -16,6 +16,7 @@ class SearchTrace:
         self._stages: list[dict[str, Any]] = []
         self._lock = threading.Lock()
         self._logger = logging.getLogger("rag.trace")
+        self.result: dict[str, Any] | None = None
 
     @contextmanager
     def stage(self, name: str, **fields: Any) -> Iterator[dict[str, Any]]:
@@ -32,18 +33,17 @@ class SearchTrace:
                 self._stages.append(stage)
 
     def finish(self, plan, result_count: int, status: str = "ok", error: str | None = None) -> None:
-        if not self.enabled:
-            return
         extra = {
             "event": "search_trace",
             "trace_id": self.trace_id,
+            "name": "search",
             "query": plan.query,
             "mode": plan.mode,
+            "sparse_mode": plan.sparse_mode,
             "top_k": plan.top_k,
             "rerank": plan.rerank,
             "fetch_k": plan.fetch_k,
-            "namespace": plan.namespace,
-            "scope_ids": list(plan.scope_ids),
+            "file_ids": list(plan.file_ids or []),
             "elapsed_ms": round((time.perf_counter() - self._started_at) * 1000, 1),
             "result_count": result_count,
             "status": status,
@@ -51,4 +51,8 @@ class SearchTrace:
         }
         if error:
             extra["error"] = error
-        self._logger.info("search trace", extra=extra)
+        self.result = {key: value for key, value in extra.items() if key != "event"}
+        if self.enabled:
+            log_extra = dict(extra)
+            log_extra["trace_name"] = log_extra.pop("name")
+            self._logger.info("search trace", extra=log_extra)

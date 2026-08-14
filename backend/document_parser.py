@@ -1,9 +1,8 @@
 import re
 import os
-import uuid
 import tempfile
 import unicodedata
-from datetime import datetime
+import uuid
 
 from langchain_community.document_loaders import TextLoader, Docx2txtLoader, UnstructuredMarkdownLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -91,7 +90,6 @@ def parse_file(filepath: str, original_filename: str | None = None, ocr: OCR | N
 
     chunks = _splitter.split_text(text)
 
-    now = datetime.now().isoformat()
     results = []
     for i, chunk_text in enumerate(chunks):
         chunk_text = chunk_text.strip()
@@ -102,7 +100,6 @@ def parse_file(filepath: str, original_filename: str | None = None, ocr: OCR | N
             "metadata": {
                 "filename": filename,
                 "chunk_index": i,
-                "created_at": now,
             },
             "id": f"{filename}_{i}_{uuid.uuid4().hex[:8]}",
         })
@@ -119,7 +116,6 @@ def chunk_text(text: str, filename: str, chunk_size: int = 250, overlap: int = 5
     )
     text = _clean_cjk_spaces(text)
     chunks = splitter.split_text(text)
-    now = datetime.now().isoformat()
     results = []
     for i, ct in enumerate(chunks):
         ct = ct.strip()
@@ -130,7 +126,6 @@ def chunk_text(text: str, filename: str, chunk_size: int = 250, overlap: int = 5
             "metadata": {
                 "filename": filename,
                 "chunk_index": i,
-                "created_at": now,
             },
             "id": f"{filename}_{i}_{uuid.uuid4().hex[:8]}",
         })
