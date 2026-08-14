@@ -1,0 +1,84 @@
+{
+  "app": {
+    "title": "RAG Search",
+    "desc": "上传文档后按文件范围检索，在 Dense（语义）、Sparse（关键词）、Hybrid（融合）三种模式间切换"
+  },
+  "theme": {
+    "light": "Light",
+    "dark": "Dark"
+  },
+  "nav": {
+    "upload": "上传",
+    "database": "数据库",
+    "search": "搜索",
+    "monitor": "监控",
+    "config": "配置"
+  },
+  "common": {
+    "all": "全部",
+    "refresh": "刷新",
+    "loading": "加载中",
+    "loadMore": "加载更多",
+    "delete": "删除",
+    "deleting": "删除中"
+  },
+  "search": {
+    "sparse": "sparse",
+    "topK": "返回条数",
+    "rerank": "重排",
+    "fetchK": "候选池",
+    "fetchKTitle": "送入检索/重排的候选条数",
+    "placeholder": "输入搜索内容...",
+    "fileIdsPlaceholder": "多个 file_id 用英文逗号分隔；留空为全量搜索",
+    "submit": "搜索",
+    "searching": "搜索中",
+    "resultCount": "{count} 条结果",
+    "mode": "模式",
+    "files": "文件",
+    "balance": "平衡",
+    "elapsed": "耗时",
+    "noResults": "未找到匹配结果",
+    "noResultsHint": "试试其他搜索模式或调整 Sparse / Dense 平衡"
+  },
+  "upload": {
+    "choose": "选择文档",
+    "hint": "拖拽文件到这里 · PDF / TXT / MD / DOCX / PNG / JPG / JPEG / WEBP / BMP",
+    "submit": "上传",
+    "uploading": "上传中",
+    "files": "上传文件",
+    "empty": "暂无上传文件",
+    "uploadingFile": "正在上传 {name}...",
+    "presigningFile": "正在生成下载签名 {name}...",
+    "indexingFile": "正在索引 {name}...",
+    "indexedFile": "{name} 已索引，file_id: {fileId}",
+    "indexedDone": "索引完成：{fileIds}",
+    "deletingFile": "正在删除 {name}...",
+    "deletedFile": "{name} 已删除，删除 {count} 个分块"
+  },
+  "monitor": {
+    "title": "运行状态",
+    "components": "组件",
+    "traces": "查询日志",
+    "empty": "暂无查询"
+  },
+  "status": {
+    "ready": "就绪",
+    "loading": "加载",
+    "disabled": "停用",
+    "error": "错误"
+  },
+  "database": {
+    "title": "数据库",
+    "stats": "统计",
+    "storage": "存储",
+    "location": "地址/路径",
+    "sparseModes": "sparse 模式",
+    "chunks": "向量数据",
+    "empty": "暂无向量数据"
+  },
+  "config": {
+    "title": "配置",
+    "searchDefaults": "搜索默认值",
+    "components": "组件配置"
+  }
+}

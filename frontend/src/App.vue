@@ -1,18 +1,30 @@
 <template>
-  <div class="app">
+  <div :class="['app', `theme-${theme}`]">
     <header class="app-header">
       <div class="header-top">
-        <h1>RAG Search</h1>
+        <div>
+          <h1>{{ t('app.title') }}</h1>
+          <p class="header-desc">{{ t('app.desc') }}</p>
+        </div>
+        <div class="header-actions">
+          <div class="switch-group">
+            <button :class="['switch-btn', { active: lang === 'zh' }]" @click="setLang('zh')">中</button>
+            <button :class="['switch-btn', { active: lang === 'en' }]" @click="setLang('en')">EN</button>
+          </div>
+          <div class="switch-group">
+            <button :class="['switch-btn', { active: theme === 'light' }]" @click="setTheme('light')">{{ t('theme.light') }}</button>
+            <button :class="['switch-btn', { active: theme === 'dark' }]" @click="setTheme('dark')">{{ t('theme.dark') }}</button>
+          </div>
+        </div>
       </div>
-      <p class="header-desc">上传文档后按文件范围检索，在 Dense（语义）、Sparse（关键词）、Hybrid（融合）三种模式间切换</p>
     </header>
 
     <nav class="view-tabs">
-      <button :class="['view-tab', { active: activeView === 'search' }]" @click="activeView = 'search'">搜索</button>
-      <button :class="['view-tab', { active: activeView === 'upload' }]" @click="activeView = 'upload'; refreshFiles()">上传</button>
-      <button :class="['view-tab', { active: activeView === 'monitor' }]" @click="activeView = 'monitor'; fetchMonitor()">监控</button>
-      <button :class="['view-tab', { active: activeView === 'database' }]" @click="activeView = 'database'; fetchMonitor(); refreshChunks()">数据库</button>
-      <button :class="['view-tab', { active: activeView === 'config' }]" @click="activeView = 'config'; fetchConfig()">配置</button>
+      <button :class="['view-tab', { active: activeView === 'upload' }]" @click="activeView = 'upload'; refreshFiles()">{{ t('nav.upload') }}</button>
+      <button :class="['view-tab', { active: activeView === 'database' }]" @click="activeView = 'database'; fetchMonitor(); refreshChunks()">{{ t('nav.database') }}</button>
+      <button :class="['view-tab', { active: activeView === 'search' }]" @click="activeView = 'search'">{{ t('nav.search') }}</button>
+      <button :class="['view-tab', { active: activeView === 'monitor' }]" @click="activeView = 'monitor'; fetchMonitor()">{{ t('nav.monitor') }}</button>
+      <button :class="['view-tab', { active: activeView === 'config' }]" @click="activeView = 'config'; fetchConfig()">{{ t('nav.config') }}</button>
     </nav>
 
     <main v-if="activeView === 'search'" class="search-view">
@@ -27,7 +39,7 @@
       </div>
       <div v-if="showSparseMode" class="search-row-3">
         <div class="scope-controls">
-          <span class="scope-title">sparse</span>
+          <span class="scope-title">{{ t('search.sparse') }}</span>
           <select v-model="sparseMode" class="field-select compact">
             <option v-for="item in sparseModes" :key="item" :value="item">{{ sparseModeLabel(item) }}</option>
           </select>
@@ -36,7 +48,7 @@
       <div class="search-row-3">
         <div class="scope-controls">
           <span class="scope-title">file_ids</span>
-          <input v-model.trim="fileIdsText" class="field-input scopes" placeholder="多个 file_id 用英文逗号分隔；留空为全量搜索" />
+          <input v-model.trim="fileIdsText" class="field-input scopes" :placeholder="t('search.fileIdsPlaceholder')" />
         </div>
       </div>
       <div v-if="mode === 'hybrid'" class="search-row-3">
@@ -49,7 +61,7 @@
       </div>
       <div class="search-row-3">
         <div class="topk-control">
-          <span class="topk-label">返回条数</span>
+          <span class="topk-label">{{ t('search.topK') }}</span>
           <select v-model.number="topK" class="topk-select">
             <option :value="3">3</option>
             <option :value="5">5</option>
@@ -61,17 +73,17 @@
       <div class="search-row-3">
         <label v-if="rerankAvailable" class="rerank-control">
           <input type="checkbox" v-model="rerank" class="rerank-checkbox" />
-          <span>重排</span>
+          <span>{{ t('search.rerank') }}</span>
         </label>
         <div v-if="rerank" class="fetchk-control">
-          <span class="cand-label" title="送入检索/重排的候选条数">候选池</span>
-          <input type="number" v-model.number="fetchK" :min="topK" class="cand-input" title="送入检索/重排的候选条数" />
+          <span class="cand-label" :title="t('search.fetchKTitle')">{{ t('search.fetchK') }}</span>
+          <input type="number" v-model.number="fetchK" :min="topK" class="cand-input" :title="t('search.fetchKTitle')" />
         </div>
       </div>
       <div class="search-row-2">
         <div class="search-input-wrap">
-          <input v-model="query" type="text" placeholder="输入搜索内容..." @keyup.enter="doSearch" class="search-input" />
-          <button @click="doSearch" :disabled="!query.trim() || searching" class="search-btn">{{ searching ? '搜索中' : '搜索' }}</button>
+          <input v-model="query" type="text" :placeholder="t('search.placeholder')" @keyup.enter="doSearch" class="search-input" />
+          <button @click="doSearch" :disabled="!query.trim() || searching" class="search-btn">{{ searching ? t('search.searching') : t('search.submit') }}</button>
         </div>
       </div>
     </div>
@@ -79,12 +91,12 @@
     <!-- Results -->
     <div v-if="searchResults.length > 0" class="results-section">
       <div class="results-bar">
-        <span class="results-count">{{ searchResults.length }} 条结果</span>
-        <span class="results-mode">模式: {{ lastSearch?.mode }}</span>
+        <span class="results-count">{{ t('search.resultCount', { count: searchResults.length }) }}</span>
+        <span class="results-mode">{{ t('search.mode') }}: {{ lastSearch?.mode }}</span>
         <span v-if="lastSearch?.mode !== 'dense'" class="results-mode">sparse: {{ sparseModeLabel(lastSearch?.sparseMode) }}</span>
-        <span class="results-mode">文件: {{ lastSearch?.fileIds?.length ? lastSearch.fileIds.length : '全部' }}</span>
-        <span v-if="lastSearch?.mode === 'hybrid'" class="results-balance">平衡: {{ lastSearch.balance.toFixed(2) }} Dense</span>
-        <span v-if="searchTime !== null" class="results-elapsed">耗时: {{ searchTime }}ms</span>
+        <span class="results-mode">{{ t('search.files') }}: {{ lastSearch?.fileIds?.length ? lastSearch.fileIds.length : t('common.all') }}</span>
+        <span v-if="lastSearch?.mode === 'hybrid'" class="results-balance">{{ t('search.balance') }}: {{ lastSearch.balance.toFixed(2) }} Dense</span>
+        <span v-if="searchTime !== null" class="results-elapsed">{{ t('search.elapsed') }}: {{ searchTime }}ms</span>
       </div>
       <div v-for="(r, i) in searchResults" :key="i" class="result-card">
         <div class="result-head">
@@ -97,8 +109,8 @@
       </div>
     </div>
     <div v-if="noResults" class="no-results">
-      <p>未找到匹配结果</p>
-      <p class="no-results-hint">试试其他搜索模式或调整 Sparse / Dense 平衡</p>
+      <p>{{ t('search.noResults') }}</p>
+      <p class="no-results-hint">{{ t('search.noResultsHint') }}</p>
     </div>
     </main>
 
@@ -109,12 +121,12 @@
           <div class="upload-icon">
             <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
           </div>
-          <p class="upload-title">{{ selectedFiles.length ? selectedFiles.map(file => file.name).join('、') : '选择文档' }}</p>
-          <p class="upload-hint">拖拽文件到这里 · PDF / TXT / MD / DOCX / PNG / JPG / JPEG / WEBP / BMP</p>
+          <p class="upload-title">{{ selectedFiles.length ? selectedFiles.map(file => file.name).join('、') : t('upload.choose') }}</p>
+          <p class="upload-hint">{{ t('upload.hint') }}</p>
         </label>
         <div class="upload-options">
           <div class="upload-actions">
-            <button class="primary-btn" :disabled="selectedFiles.length === 0 || uploading" @click="uploadSelectedFiles">{{ uploading ? '上传中' : '上传' }}</button>
+            <button class="primary-btn" :disabled="selectedFiles.length === 0 || uploading" @click="uploadSelectedFiles">{{ uploading ? t('upload.uploading') : t('upload.submit') }}</button>
           </div>
         </div>
         <div v-if="uploadMsg" :class="['upload-feedback', uploadMsg.type]">{{ uploadMsg.text }}</div>
@@ -122,10 +134,10 @@
 
       <div class="files-card">
         <div class="docs-head">
-          <h2>上传文件</h2>
+          <h2>{{ t('upload.files') }}</h2>
           <span class="docs-count">{{ files.length }}{{ filesHasMore ? '+' : '' }}</span>
         </div>
-        <div v-if="files.length === 0 && !filesLoading" class="docs-empty">暂无上传文件</div>
+        <div v-if="files.length === 0 && !filesLoading" class="docs-empty">{{ t('upload.empty') }}</div>
         <div v-else class="files-scroll" @scroll="onFilesScroll">
           <div class="files-table">
             <div class="files-head">
@@ -138,11 +150,11 @@
               <span class="chunk-id" :title="file.id">{{ file.id }}</span>
               <span class="chunk-name" :title="file.filename">{{ file.filename }}</span>
               <span>{{ file.chunk_count }}</span>
-              <button class="file-delete" :disabled="deletingFileId === file.id" @click="deleteFile(file)">{{ deletingFileId === file.id ? '删除中' : '删除' }}</button>
+              <button class="file-delete" :disabled="deletingFileId === file.id" @click="deleteFile(file)">{{ deletingFileId === file.id ? t('common.deleting') : t('common.delete') }}</button>
             </div>
           </div>
-          <div v-if="filesLoading" class="docs-loading">加载中</div>
-          <button v-else-if="filesHasMore" class="docs-more" @click="loadMoreFiles">加载更多</button>
+          <div v-if="filesLoading" class="docs-loading">{{ t('common.loading') }}</div>
+          <button v-else-if="filesHasMore" class="docs-more" @click="loadMoreFiles">{{ t('common.loadMore') }}</button>
         </div>
       </div>
     </main>
@@ -152,22 +164,22 @@
       <div class="monitor-section">
         <div class="monitor-head">
           <div>
-            <h2>运行状态</h2>
+            <h2>{{ t('monitor.title') }}</h2>
             <p>{{ monitorState?.profile?.config_name || '-' }} · {{ monitorState?.profile?.store?.type || '-' }}</p>
           </div>
           <div class="monitor-actions">
-            <button class="ghost-btn" @click="fetchMonitor">刷新</button>
+            <button class="ghost-btn" @click="fetchMonitor">{{ t('common.refresh') }}</button>
           </div>
         </div>
         <div class="monitor-grid">
           <div class="monitor-block">
             <div class="block-title component-title">
-              <span>组件</span>
+              <span>{{ t('monitor.components') }}</span>
               <span class="status-legend">
-                <span><i class="status-dot ready"></i>就绪</span>
-                <span><i class="status-dot loading"></i>加载</span>
-                <span><i class="status-dot disabled"></i>停用</span>
-                <span><i class="status-dot error"></i>错误</span>
+                <span><i class="status-dot ready"></i>{{ t('status.ready') }}</span>
+                <span><i class="status-dot loading"></i>{{ t('status.loading') }}</span>
+                <span><i class="status-dot disabled"></i>{{ t('status.disabled') }}</span>
+                <span><i class="status-dot error"></i>{{ t('status.error') }}</span>
               </span>
             </div>
             <div class="component-list">
@@ -179,7 +191,7 @@
             </div>
           </div>
           <div class="monitor-block trace-block">
-            <div class="block-title">查询日志</div>
+            <div class="block-title">{{ t('monitor.traces') }}</div>
             <div v-if="searchTraces.length" class="trace-table-wrap">
               <div class="trace-table">
                 <div class="trace-table-head">
@@ -210,7 +222,7 @@
                 </div>
               </div>
             </div>
-            <div v-else class="trace-empty">暂无查询</div>
+            <div v-else class="trace-empty">{{ t('monitor.empty') }}</div>
           </div>
         </div>
       </div>
@@ -220,16 +232,16 @@
       <div class="monitor-section">
         <div class="monitor-head">
           <div>
-            <h2>数据库</h2>
+            <h2>{{ t('database.title') }}</h2>
             <p>{{ monitorState?.profile?.store?.type || '-' }} · {{ monitorState?.profile?.store?.collections?.chunks || '-' }}</p>
           </div>
           <div class="monitor-actions">
-            <button class="ghost-btn" @click="fetchMonitor(); refreshChunks()">刷新</button>
+            <button class="ghost-btn" @click="fetchMonitor(); refreshChunks()">{{ t('common.refresh') }}</button>
           </div>
         </div>
         <div class="database-grid">
           <div class="monitor-block">
-            <div class="block-title">统计</div>
+            <div class="block-title">{{ t('database.stats') }}</div>
             <div class="metric-row">
               <div><strong>{{ monitorData?.files ?? 0 }}</strong><span>files</span></div>
               <div><strong>{{ monitorData?.total_chunks ?? 0 }}</strong><span>chunks</span></div>
@@ -237,11 +249,11 @@
             </div>
           </div>
           <div class="monitor-block">
-            <div class="block-title">存储</div>
+            <div class="block-title">{{ t('database.storage') }}</div>
             <div class="kv-list">
-              <div><span>地址/路径</span><strong>{{ storeLocation }}</strong></div>
+              <div><span>{{ t('database.location') }}</span><strong>{{ storeLocation }}</strong></div>
               <div><span>collection</span><strong>{{ monitorState?.profile?.store?.collections?.chunks || '-' }}</strong></div>
-              <div><span>sparse 模式</span><strong>{{ sparseModes.map(sparseModeLabel).join(' / ') }}</strong></div>
+              <div><span>{{ t('database.sparseModes') }}</span><strong>{{ sparseModes.map(sparseModeLabel).join(' / ') }}</strong></div>
             </div>
           </div>
         </div>
@@ -249,10 +261,10 @@
 
       <div class="chunks-card">
         <div class="docs-head">
-          <h2>向量数据</h2>
+          <h2>{{ t('database.chunks') }}</h2>
           <span class="docs-count">{{ chunks.length }}{{ chunksHasMore ? '+' : '' }}</span>
         </div>
-        <div v-if="chunks.length === 0 && !chunksLoading" class="docs-empty">暂无向量数据</div>
+        <div v-if="chunks.length === 0 && !chunksLoading" class="docs-empty">{{ t('database.empty') }}</div>
         <div v-else class="chunks-scroll" @scroll="onChunksScroll">
           <div class="chunks-table">
             <div class="chunks-head">
@@ -272,8 +284,8 @@
               <span class="chunk-content" :title="chunk.content">{{ chunk.content }}</span>
             </div>
           </div>
-          <div v-if="chunksLoading" class="docs-loading">加载中</div>
-          <button v-else-if="chunksHasMore" class="docs-more" @click="loadMoreChunks">加载更多</button>
+          <div v-if="chunksLoading" class="docs-loading">{{ t('common.loading') }}</div>
+          <button v-else-if="chunksHasMore" class="docs-more" @click="loadMoreChunks">{{ t('common.loadMore') }}</button>
         </div>
       </div>
 
@@ -283,13 +295,13 @@
       <div class="monitor-section">
         <div class="monitor-head">
           <div>
-            <h2>配置</h2>
+            <h2>{{ t('config.title') }}</h2>
             <p>{{ configView?.config_name || '-' }}</p>
           </div>
         </div>
         <div class="config-grid">
           <div class="monitor-block">
-            <div class="block-title">搜索默认值</div>
+            <div class="block-title">{{ t('config.searchDefaults') }}</div>
             <div class="kv-list">
               <div><span>mode</span><strong>{{ configView?.default_mode || '-' }}</strong></div>
               <div><span>top_k</span><strong>{{ configView?.top_k ?? '-' }}</strong></div>
@@ -300,7 +312,7 @@
             </div>
           </div>
           <div class="monitor-block">
-            <div class="block-title">组件配置</div>
+            <div class="block-title">{{ t('config.components') }}</div>
             <div class="kv-list">
               <div><span>dense</span><strong>{{ configComponentModel(configView?.dense) }}</strong></div>
               <div><span>sparse app</span><strong>{{ configComponentModel(configView?.sparse?.app) }}</strong></div>
@@ -318,10 +330,13 @@
 
 <script setup>
 import { computed, ref, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import axios from 'axios'
 
 const API = '/api'
-const activeView = ref('search')
+const { t, locale } = useI18n()
+const theme = ref(localStorage.getItem('rag_theme') || 'light')
+const activeView = ref('upload')
 const selectedFiles = ref([])
 const query = ref('')
 const mode = ref('hybrid')
@@ -360,6 +375,17 @@ const storeLocation = computed(() => {
   const store = monitorState.value?.profile?.store
   return store?.url || store?.uri || store?.persist_dir || '-'
 })
+const lang = computed(() => locale.value)
+
+function setLang(value) {
+  locale.value = value
+  localStorage.setItem('rag_lang', value)
+}
+
+function setTheme(value) {
+  theme.value = value
+  localStorage.setItem('rag_theme', value)
+}
 
 function onBalanceChange() {
   searchConfig.value.dense_weight = hybridBalance.value
@@ -392,20 +418,20 @@ async function uploadFiles(files) {
   let uploaded = true
   const fileIds = []
   for (const file of files) {
-    uploadMsg.value = { type: 'info', text: `正在上传 ${file.name}...` }
+    uploadMsg.value = { type: 'info', text: t('upload.uploadingFile', { name: file.name }) }
     const form = new FormData()
     form.append('file', file)
     try {
       const uploadRes = await axios.post(`${API}/upload`, form)
-      uploadMsg.value = { type: 'info', text: `正在生成下载签名 ${file.name}...` }
+      uploadMsg.value = { type: 'info', text: t('upload.presigningFile', { name: file.name }) }
       const presignRes = await axios.post(`${API}/presign`, { s3_url: uploadRes.data.s3_url })
-      uploadMsg.value = { type: 'info', text: `正在索引 ${file.name}...` }
+      uploadMsg.value = { type: 'info', text: t('upload.indexingFile', { name: file.name }) }
       const indexRes = await axios.post(`${API}/index`, {
         presigned_url: presignRes.data.presigned_url,
         s3_url: uploadRes.data.s3_url,
       })
       fileIds.push(indexRes.data.file_id)
-      uploadMsg.value = { type: 'success', text: `${file.name} 已索引，file_id: ${indexRes.data.file_id}` }
+      uploadMsg.value = { type: 'success', text: t('upload.indexedFile', { name: file.name, fileId: indexRes.data.file_id }) }
     } catch (err) {
       uploaded = false
       uploadMsg.value = { type: 'error', text: `${file.name}: ${err.response?.data?.detail || err.message}` }
@@ -413,7 +439,7 @@ async function uploadFiles(files) {
   }
   await refreshFiles()
   await refreshChunks()
-  if (uploaded) uploadMsg.value = { type: 'success', text: `索引完成：${fileIds.join(', ')}` }
+  if (uploaded) uploadMsg.value = { type: 'success', text: t('upload.indexedDone', { fileIds: fileIds.join(', ') }) }
   return uploaded
 }
 
@@ -506,10 +532,10 @@ async function loadMoreFiles() {
 async function deleteFile(file) {
   if (!file?.id || deletingFileId.value) return
   deletingFileId.value = file.id
-  uploadMsg.value = { type: 'info', text: `正在删除 ${file.filename}...` }
+  uploadMsg.value = { type: 'info', text: t('upload.deletingFile', { name: file.filename }) }
   try {
     const res = await axios.delete(`${API}/files/${encodeURIComponent(file.id)}`)
-    uploadMsg.value = { type: 'success', text: `${file.filename} 已删除，删除 ${res.data.deleted_chunks} 个分块` }
+    uploadMsg.value = { type: 'success', text: t('upload.deletedFile', { name: file.filename, count: res.data.deleted_chunks }) }
     await refreshFiles()
     await refreshChunks()
     fetchMonitor()
@@ -599,18 +625,71 @@ function escapeHtml(text) {
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif; background: #f5f6fa; color: #1d1d1f; -webkit-font-smoothing: antialiased; }
 
-.app { max-width: 1100px; margin: 0 auto; padding: 36px 32px; }
+.app {
+  --bg: #f4f6fb;
+  --surface: #ffffff;
+  --surface-2: #f8fafc;
+  --surface-3: #eef3f8;
+  --text: #172033;
+  --muted: #667085;
+  --soft: #98a2b3;
+  --border: #dce4ee;
+  --border-strong: #b9c7d8;
+  --accent: #0f7cff;
+  --accent-2: #18a0b5;
+  --accent-soft: #e8f2ff;
+  --success: #16a071;
+  --warning: #d99513;
+  --danger: #e65f2b;
+  --shadow: 0 18px 55px rgba(40, 56, 85, .10);
+  min-height: 100vh;
+  max-width: none;
+  margin: 0;
+  padding: 34px max(32px, calc((100vw - 1180px) / 2));
+  background:
+    linear-gradient(180deg, rgba(255,255,255,.88), rgba(255,255,255,0) 240px),
+    var(--bg);
+  color: var(--text);
+}
+
+.app.theme-dark {
+  --bg: #080c14;
+  --surface: #101824;
+  --surface-2: #151f2e;
+  --surface-3: #1b293b;
+  --text: #ecf2ff;
+  --muted: #9ba8bd;
+  --soft: #748297;
+  --border: #26364a;
+  --border-strong: #3a506b;
+  --accent: #4aa3ff;
+  --accent-2: #41d6c3;
+  --accent-soft: rgba(74, 163, 255, .14);
+  --success: #33c293;
+  --warning: #f0b849;
+  --danger: #ff7a45;
+  --shadow: 0 22px 70px rgba(0, 0, 0, .34);
+  background:
+    linear-gradient(180deg, rgba(20,31,46,.92), rgba(8,12,20,0) 250px),
+    var(--bg);
+}
 
 /* Header */
-.app-header { margin-bottom: 28px; }
-.header-top { display: flex; align-items: center; gap: 12px; }
-.header-top h1 { font-size: 24px; font-weight: 700; letter-spacing: -0.02em; color: #1d1d1f; }
-.header-desc { font-size: 14px; color: #8e8e93; margin-top: 6px; }
+.app-header { margin-bottom: 24px; }
+.header-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
+.header-top h1 { font-size: 25px; font-weight: 750; letter-spacing: 0; color: var(--text); }
+.header-desc { font-size: 14px; color: var(--muted); margin-top: 7px; max-width: 720px; }
+.header-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.switch-group { display: flex; gap: 3px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 3px; box-shadow: 0 8px 26px rgba(16, 36, 62, .06); }
+.switch-btn { min-width: 38px; height: 28px; padding: 0 9px; border: none; border-radius: 7px; background: transparent; color: var(--muted); font-size: 12px; font-weight: 600; cursor: pointer; }
+.switch-btn.active { background: var(--accent); color: #fff; }
+.switch-btn:hover:not(.active) { background: var(--surface-3); color: var(--text); }
 
-.view-tabs { display: flex; gap: 4px; background: #fff; border-radius: 12px; padding: 4px; margin-bottom: 20px; box-shadow: 0 1px 4px rgba(0,0,0,.04); width: fit-content; }
-.view-tab { min-width: 76px; height: 32px; border: none; border-radius: 9px; background: transparent; color: #8e8e93; font-size: 13px; font-weight: 500; cursor: pointer; }
-.view-tab.active { background: #1d1d1f; color: #fff; }
-.view-tab:hover:not(.active) { background: #f5f5f7; color: #1d1d1f; }
+.view-tabs { display: flex; gap: 5px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 5px; margin-bottom: 22px; box-shadow: var(--shadow); width: fit-content; }
+.view-tab { min-width: 82px; height: 34px; border: none; border-radius: 10px; background: transparent; color: var(--muted); font-size: 13px; font-weight: 650; cursor: pointer; }
+.view-tab.active { background: var(--text); color: var(--surface); }
+.app.theme-dark .view-tab.active { background: var(--accent); color: #05111f; }
+.view-tab:hover:not(.active) { background: var(--surface-3); color: var(--text); }
 
 /* Upload */
 .upload-card, .files-card { background: #fff; border-radius: 14px; padding: 20px 24px; margin-bottom: 20px; box-shadow: 0 1px 4px rgba(0,0,0,.04); }
@@ -758,4 +837,151 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helv
 .no-results { text-align: center; padding: 48px 24px; }
 .no-results p { font-size: 14px; color: #8e8e93; }
 .no-results-hint { font-size: 12px; color: #aeaeb2; margin-top: 6px; }
+
+.upload-card,
+.files-card,
+.chunks-card,
+.monitor-section,
+.search-section,
+.results-section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+}
+
+.upload-zone {
+  background: var(--surface-2);
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+.upload-zone:hover { border-color: var(--accent); background: var(--accent-soft); }
+.upload-icon { color: var(--accent); }
+.upload-title,
+.docs-head h2,
+.monitor-head h2,
+.results-count,
+.trace-query,
+.chunk-content,
+.header-top h1,
+.component-row strong,
+.kv-list strong,
+.metric-row strong {
+  color: var(--text);
+}
+.upload-hint,
+.docs-count,
+.docs-empty,
+.docs-loading,
+.results-mode,
+.results-balance,
+.results-elapsed,
+.monitor-head p,
+.block-title,
+.component-row,
+.component-name,
+.kv-list div,
+.metric-row span,
+.scope-title,
+.topk-label,
+.cand-label,
+.rerank-control,
+.bal-label,
+.no-results p,
+.no-results-hint,
+.trace-empty {
+  color: var(--muted);
+}
+
+.primary-btn,
+.search-btn {
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 10px 22px rgba(15, 124, 255, .22);
+}
+.primary-btn:hover:not(:disabled),
+.search-btn:hover:not(:disabled) { background: #0869dc; }
+.primary-btn:disabled,
+.search-btn:disabled { background: var(--border-strong); box-shadow: none; }
+.app.theme-dark .primary-btn:hover:not(:disabled),
+.app.theme-dark .search-btn:hover:not(:disabled) { background: #66b4ff; color: #06111d; }
+
+.monitor-block,
+.metric-row div,
+.files-head,
+.file-row,
+.chunks-head,
+.chunk-row,
+.trace-table-head,
+.trace-table-row,
+.mode-tabs,
+.field-input,
+.field-select,
+.search-input,
+.topk-select,
+.cand-input,
+.ghost-btn,
+.docs-more {
+  background: var(--surface-2);
+  border-color: var(--border);
+  color: var(--text);
+}
+.files-head,
+.chunks-head,
+.trace-table-head {
+  color: var(--muted);
+}
+.file-row,
+.chunk-row,
+.trace-table-row {
+  background: var(--surface);
+  color: var(--muted);
+}
+.field-input::placeholder,
+.search-input::placeholder { color: var(--soft); }
+.field-input:focus,
+.field-select:focus,
+.search-input:focus,
+.cand-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.mode-tab { color: var(--muted); }
+.mode-tab.active { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+.mode-tab:hover:not(.active) { color: var(--text); }
+.bal-slider,
+.rerank-checkbox { accent-color: var(--accent); }
+.bal-value,
+.trace-table-row strong { color: var(--accent); }
+.results-bar,
+.result-card,
+.files-head,
+.chunks-head,
+.trace-table-head { border-color: var(--border); }
+.result-body { color: var(--text); }
+.result-file { color: var(--muted); }
+.result-file svg { stroke: var(--muted); }
+.upload-feedback.info { color: var(--accent); background: var(--accent-soft); }
+.upload-feedback.success { color: var(--success); background: rgba(34,166,126,.12); }
+.upload-feedback.error { color: var(--danger); background: rgba(245,106,0,.12); }
+.file-delete { border-color: rgba(245,106,0,.32); background: rgba(245,106,0,.08); color: var(--danger); }
+.file-delete:hover:not(:disabled) { border-color: var(--danger); background: rgba(245,106,0,.14); }
+.file-delete:disabled { color: var(--soft); border-color: var(--border); background: var(--surface-3); }
+.docs-more:hover,
+.ghost-btn:hover { border-color: var(--accent); color: var(--accent); }
+.docs-count { background: var(--surface-3); }
+.status-dot.ready { background: var(--success); }
+.status-dot.loading { background: var(--warning); }
+.status-dot.disabled { background: var(--soft); }
+.status-dot.error { background: var(--danger); }
+
+@media (max-width: 760px) {
+  .app { padding: 24px 16px; }
+  .header-top { flex-direction: column; }
+  .header-actions { justify-content: flex-start; }
+  .view-tabs { width: 100%; overflow-x: auto; }
+  .view-tab { min-width: 76px; }
+  .monitor-grid,
+  .database-grid,
+  .config-grid { grid-template-columns: 1fr; }
+  .search-input-wrap { flex-direction: column; }
+  .search-btn { height: 38px; }
+  .results-bar { flex-wrap: wrap; gap: 8px 12px; }
+}
 </style>
