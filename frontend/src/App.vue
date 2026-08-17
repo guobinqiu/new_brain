@@ -1,6 +1,17 @@
 <template>
   <div :class="['app', `theme-${theme}`]">
-    <header class="app-header">
+    <div v-if="!authToken" class="login-tools">
+      <div class="switch-group">
+        <button :class="['switch-btn', { active: lang === 'zh' }]" @click="setLang('zh')">中</button>
+        <button :class="['switch-btn', { active: lang === 'en' }]" @click="setLang('en')">EN</button>
+      </div>
+      <div class="switch-group">
+        <button :class="['switch-btn', { active: theme === 'light' }]" @click="setTheme('light')">{{ t('theme.light') }}</button>
+        <button :class="['switch-btn', { active: theme === 'dark' }]" @click="setTheme('dark')">{{ t('theme.dark') }}</button>
+      </div>
+    </div>
+
+    <header v-if="authToken" class="app-header">
       <div class="header-top">
         <div>
           <h1>{{ t('app.title') }}</h1>
@@ -15,15 +26,37 @@
             <button :class="['switch-btn', { active: theme === 'light' }]" @click="setTheme('light')">{{ t('theme.light') }}</button>
             <button :class="['switch-btn', { active: theme === 'dark' }]" @click="setTheme('dark')">{{ t('theme.dark') }}</button>
           </div>
+          <button v-if="authToken" class="header-logout" @click="logout">{{ t('auth.logout') }}</button>
         </div>
       </div>
     </header>
 
+    <main v-if="!authToken" class="login-view">
+      <form class="login-card" @submit.prevent="login">
+        <div>
+          <h2>{{ t('auth.title') }}</h2>
+          <p>{{ t('auth.desc') }}</p>
+        </div>
+        <label>
+          <span>{{ t('auth.username') }}</span>
+          <input v-model.trim="loginForm.username" autocomplete="username" class="field-input" />
+        </label>
+        <label>
+          <span>{{ t('auth.password') }}</span>
+          <input v-model="loginForm.password" type="password" autocomplete="current-password" class="field-input" />
+        </label>
+        <button class="primary-btn login-submit">{{ t('auth.login') }}</button>
+        <div v-if="loginError" class="upload-feedback error">{{ loginError }}</div>
+      </form>
+    </main>
+
+    <template v-else>
     <nav class="view-tabs">
-      <button :class="['view-tab', { active: activeView === 'upload' }]" @click="activeView = 'upload'; refreshFiles()">{{ t('nav.upload') }}</button>
-      <button :class="['view-tab', { active: activeView === 'database' }]" @click="activeView = 'database'; fetchMonitor(); refreshChunks()">{{ t('nav.database') }}</button>
+      <button :class="['view-tab', { active: activeView === 'upload' }]" @click="activeView = 'upload'; fetchFiles()">{{ t('nav.upload') }}</button>
+      <button :class="['view-tab', { active: activeView === 'database' }]" @click="activeView = 'database'; fetchChunks()">{{ t('nav.database') }}</button>
       <button :class="['view-tab', { active: activeView === 'search' }]" @click="activeView = 'search'">{{ t('nav.search') }}</button>
-      <button :class="['view-tab', { active: activeView === 'monitor' }]" @click="activeView = 'monitor'; fetchMonitor()">{{ t('nav.monitor') }}</button>
+      <button :class="['view-tab', { active: activeView === 'monitor' }]" @click="activeView = 'monitor'">{{ t('nav.monitor') }}</button>
+      <button :class="['view-tab', { active: activeView === 'logs' }]" @click="activeView = 'logs'; startLogStream()">{{ t('nav.logs') }}</button>
       <button :class="['view-tab', { active: activeView === 'config' }]" @click="activeView = 'config'; fetchConfig()">{{ t('nav.config') }}</button>
     </nav>
 
@@ -37,17 +70,9 @@
           <button :class="['mode-tab', { active: mode === 'sparse' }]" @click="mode = 'sparse'">Sparse</button>
         </div>
       </div>
-      <div v-if="showSparseMode" class="search-row-3">
-        <div class="scope-controls">
-          <span class="scope-title">{{ t('search.sparse') }}</span>
-          <select v-model="sparseMode" class="field-select compact">
-            <option v-for="item in sparseModes" :key="item" :value="item">{{ sparseModeLabel(item) }}</option>
-          </select>
-        </div>
-      </div>
       <div class="search-row-3">
         <div class="scope-controls">
-          <span class="scope-title">file_ids</span>
+          <span class="scope-title">File IDs</span>
           <input v-model.trim="fileIdsText" class="field-input scopes" :placeholder="t('search.fileIdsPlaceholder')" />
         </div>
       </div>
@@ -93,7 +118,6 @@
       <div class="results-bar">
         <span class="results-count">{{ t('search.resultCount', { count: searchResults.length }) }}</span>
         <span class="results-mode">{{ t('search.mode') }}: {{ lastSearch?.mode }}</span>
-        <span v-if="lastSearch?.mode !== 'dense'" class="results-mode">sparse: {{ sparseModeLabel(lastSearch?.sparseMode) }}</span>
         <span class="results-mode">{{ t('search.files') }}: {{ lastSearch?.fileIds?.length ? lastSearch.fileIds.length : t('common.all') }}</span>
         <span v-if="lastSearch?.mode === 'hybrid'" class="results-balance">{{ t('search.balance') }}: {{ lastSearch.balance.toFixed(2) }} Dense</span>
         <span v-if="searchTime !== null" class="results-elapsed">{{ t('search.elapsed') }}: {{ searchTime }}ms</span>
@@ -143,18 +167,20 @@
             <div class="files-head">
               <span>file_id</span>
               <span>filename</span>
+              <span>created_at</span>
               <span>chunks</span>
               <span></span>
             </div>
             <div v-for="file in files" :key="file.id" class="file-row">
               <span class="chunk-id" :title="file.id">{{ file.id }}</span>
               <span class="chunk-name" :title="file.filename">{{ file.filename }}</span>
+              <span>{{ shortTime(file.created_at) }}</span>
               <span>{{ file.chunk_count }}</span>
               <button class="file-delete" :disabled="deletingFileId === file.id" @click="deleteFile(file)">{{ deletingFileId === file.id ? t('common.deleting') : t('common.delete') }}</button>
             </div>
           </div>
           <div v-if="filesLoading" class="docs-loading">{{ t('common.loading') }}</div>
-          <button v-else-if="filesHasMore" class="docs-more" @click="loadMoreFiles">{{ t('common.loadMore') }}</button>
+          <button v-else-if="filesHasMore" class="docs-more" @click="fetchNextFiles">{{ t('common.loadMore') }}</button>
         </div>
       </div>
     </main>
@@ -166,9 +192,6 @@
           <div>
             <h2>{{ t('monitor.title') }}</h2>
             <p>{{ monitorState?.profile?.config_name || '-' }} · {{ monitorState?.profile?.store?.type || '-' }}</p>
-          </div>
-          <div class="monitor-actions">
-            <button class="ghost-btn" @click="fetchMonitor">{{ t('common.refresh') }}</button>
           </div>
         </div>
         <div class="monitor-grid">
@@ -190,79 +213,115 @@
               </div>
             </div>
           </div>
-          <div class="monitor-block trace-block">
-            <div class="block-title">{{ t('monitor.traces') }}</div>
-            <div v-if="searchTraces.length" class="trace-table-wrap">
-              <div class="trace-table">
-                <div class="trace-table-head">
-                  <span>query</span>
-                  <span>mode</span>
-                  <span>top_k</span>
-                  <span>elapsed</span>
-                  <span>prepare</span>
-                  <span>dense</span>
-                  <span>sparse</span>
-                  <span>fusion</span>
-                  <span>dedupe</span>
-                  <span>rerank</span>
-                  <span>format</span>
-                </div>
-                <div v-for="trace in searchTraces" :key="trace.trace_id" class="trace-table-row">
-                  <span class="trace-query" :title="trace.query">{{ trace.query }}</span>
-                  <span>{{ trace.mode }}<template v-if="trace.mode !== 'dense'">/{{ trace.sparse_mode }}</template></span>
-                  <span>{{ trace.top_k }}</span>
-                  <strong>{{ ms(trace.elapsed_ms) }}</strong>
-                  <span>{{ stageMs(trace, 'prepare_plan') }}</span>
-                  <span>{{ stageMs(trace, 'dense') }}</span>
-                  <span>{{ stageMs(trace, 'sparse') }}</span>
-                  <span>{{ stageMs(trace, 'fusion') }}</span>
-                  <span>{{ stageMs(trace, 'dedupe') }}</span>
-                  <span>{{ stageMs(trace, 'rerank') }}</span>
-                  <span>{{ stageMs(trace, 'format_response') }}</span>
-                </div>
+        </div>
+        <div class="monitor-block trace-block">
+          <div class="block-title job-title">
+            <span>{{ t('monitor.indexJobs') }}</span>
+            <div class="job-filters">
+              <button v-for="filter in jobFilters" :key="filter" :class="['job-filter', { active: indexJobFilter === filter }]" @click="indexJobFilter = filter">{{ t(`monitor.jobFilter.${filter}`) }}</button>
+              <button class="ghost-btn mini" @click="fetchIndexJobs">{{ t('common.refresh') }}</button>
+            </div>
+          </div>
+          <div v-if="filteredIndexJobs.length" class="trace-table-wrap job-table-wrap" @scroll="onIndexJobsScroll">
+            <div class="job-table">
+              <div class="job-table-head">
+                <span>status</span>
+                <span>job_id</span>
+                <span>filename</span>
+                <span>file_id</span>
+                <span>chunks</span>
+                <span>error</span>
+                <span>created</span>
+                <span>ended</span>
+              </div>
+              <div v-for="job in filteredIndexJobs" :key="job.job_id" class="job-table-row">
+                <span :class="['job-status', jobStatusClass(job.status)]">{{ jobStatusText(job.status) }}</span>
+                <span class="chunk-id" :title="job.job_id">{{ job.job_id }}</span>
+                <span class="chunk-name" :title="job.filename">{{ job.filename || '-' }}</span>
+                <span class="chunk-id" :title="job.file_id">{{ job.file_id || '-' }}</span>
+                <span>{{ job.chunk_count ?? '-' }}</span>
+                <span class="job-error" :title="job.error">{{ job.error || '-' }}</span>
+                <span>{{ shortTime(job.created_at || job.enqueued_at) }}</span>
+                <span>{{ shortTime(job.ended_at) }}</span>
               </div>
             </div>
-            <div v-else class="trace-empty">{{ t('monitor.empty') }}</div>
+            <div v-if="indexJobsLoading" class="docs-loading">{{ t('common.loading') }}</div>
+            <button v-else-if="indexJobsHasMore" class="docs-more" @click="fetchNextIndexJobs">{{ t('common.loadMore') }}</button>
           </div>
+          <div v-else-if="indexJobsError" class="trace-empty error-text">{{ indexJobsError }}</div>
+          <div v-else class="trace-empty">{{ t('monitor.noIndexJobs') }}</div>
+        </div>
+        <div class="monitor-block trace-block">
+          <div class="block-title job-title">
+            <span>{{ t('monitor.traces') }}</span>
+            <button class="ghost-btn mini" @click="fetchTraces">{{ t('common.refresh') }}</button>
+          </div>
+          <div v-if="traces.length" class="trace-table-wrap trace-list-wrap" @scroll="onTracesScroll">
+            <div class="trace-table">
+              <div class="trace-table-head">
+                <span>{{ t('trace.columns.time') }}</span>
+                <span>{{ t('trace.columns.query') }}</span>
+                <span>{{ t('trace.columns.mode') }}</span>
+                <span>{{ t('trace.columns.topK') }}</span>
+                <span>{{ t('trace.columns.elapsed') }}</span>
+                <span>{{ t('trace.columns.prepare') }}</span>
+                <span>{{ t('trace.columns.dense') }}</span>
+                <span>{{ t('trace.columns.sparse') }}</span>
+                <span>{{ t('trace.columns.fusion') }}</span>
+                <span>{{ t('trace.columns.dedupe') }}</span>
+                <span>{{ t('trace.columns.rerank') }}</span>
+                <span>{{ t('trace.columns.format') }}</span>
+              </div>
+              <div v-for="trace in traces" :key="trace.trace_id" class="trace-table-row">
+                <span>{{ shortTime(trace.created_at) }}</span>
+                <span class="trace-query" :title="trace.query">{{ trace.query }}</span>
+                <span>{{ trace.mode }}</span>
+                <span>{{ trace.top_k }}</span>
+                <strong>{{ ms(trace.elapsed_ms) }}</strong>
+                <span>{{ stageMs(trace, 'prepare_plan') }}</span>
+                <span>{{ stageMs(trace, 'dense') }}</span>
+                <span>{{ stageMs(trace, 'sparse') }}</span>
+                <span>{{ stageMs(trace, 'fusion') }}</span>
+                <span>{{ stageMs(trace, 'dedupe') }}</span>
+                <span>{{ stageMs(trace, 'rerank') }}</span>
+                <span>{{ stageMs(trace, 'format_response') }}</span>
+              </div>
+            </div>
+            <div v-if="tracesLoading" class="docs-loading">{{ t('common.loading') }}</div>
+            <button v-else-if="tracesHasMore" class="docs-more" @click="fetchNextTraces">{{ t('common.loadMore') }}</button>
+          </div>
+          <div v-else class="trace-empty">{{ t('monitor.noTraces') }}</div>
+        </div>
+      </div>
+    </main>
+
+    <main v-if="activeView === 'logs'" class="logs-view">
+      <div class="monitor-section">
+        <div class="monitor-head">
+          <div>
+            <h2>{{ t('logs.title') }}</h2>
+            <p>{{ t('logs.desc') }}</p>
+          </div>
+        </div>
+        <div class="monitor-block trace-block">
+          <pre v-if="logs.length" ref="logsBox" class="logs-box">{{ logs.map(formatLogLine).join('\n') }}</pre>
+          <div v-else class="trace-empty">{{ t('logs.empty') }}</div>
         </div>
       </div>
     </main>
 
     <main v-if="activeView === 'database'" class="database-view">
-      <div class="monitor-section">
-        <div class="monitor-head">
-          <div>
-            <h2>{{ t('database.title') }}</h2>
-            <p>{{ monitorState?.profile?.store?.type || '-' }} · {{ monitorState?.profile?.store?.collections?.chunks || '-' }}</p>
-          </div>
-          <div class="monitor-actions">
-            <button class="ghost-btn" @click="fetchMonitor(); refreshChunks()">{{ t('common.refresh') }}</button>
-          </div>
-        </div>
-        <div class="database-grid">
-          <div class="monitor-block">
-            <div class="block-title">{{ t('database.stats') }}</div>
-            <div class="metric-row">
-              <div><strong>{{ monitorData?.files ?? 0 }}</strong><span>files</span></div>
-              <div><strong>{{ monitorData?.total_chunks ?? 0 }}</strong><span>chunks</span></div>
-              <div><strong>{{ chunks.length }}</strong><span>listed</span></div>
-            </div>
-          </div>
-          <div class="monitor-block">
-            <div class="block-title">{{ t('database.storage') }}</div>
-            <div class="kv-list">
-              <div><span>{{ t('database.location') }}</span><strong>{{ storeLocation }}</strong></div>
-              <div><span>collection</span><strong>{{ monitorState?.profile?.store?.collections?.chunks || '-' }}</strong></div>
-              <div><span>{{ t('database.sparseModes') }}</span><strong>{{ sparseModes.map(sparseModeLabel).join(' / ') }}</strong></div>
-            </div>
-          </div>
-        </div>
-      </div>
-
       <div class="chunks-card">
         <div class="docs-head">
-          <h2>{{ t('database.chunks') }}</h2>
-          <span class="docs-count">{{ chunks.length }}{{ chunksHasMore ? '+' : '' }}</span>
+          <div class="docs-title">
+            <h2>{{ t('database.chunks') }}</h2>
+            <span class="docs-count">{{ chunks.length }}{{ chunksHasMore ? '+' : '' }}</span>
+          </div>
+        </div>
+        <div class="chunk-filter">
+          <span>File IDs</span>
+          <input v-model.trim="databaseFileIdsText" class="field-input" :placeholder="t('database.fileIdsPlaceholder')" @keyup.enter="fetchChunks" />
+          <button class="ghost-btn" @click="fetchChunks">{{ t('database.query') }}</button>
         </div>
         <div v-if="chunks.length === 0 && !chunksLoading" class="docs-empty">{{ t('database.empty') }}</div>
         <div v-else class="chunks-scroll" @scroll="onChunksScroll">
@@ -272,20 +331,31 @@
               <span>file_id</span>
               <span>s3_url</span>
               <span>filename</span>
-              <span>index</span>
+              <span>created_at</span>
+              <span>chunk_index</span>
               <span>content</span>
             </div>
             <div v-for="chunk in chunks" :key="chunk.id" class="chunk-row">
               <span class="chunk-id" :title="chunk.id">{{ chunk.id }}</span>
-              <span class="chunk-id" :title="chunk.file_id">{{ chunk.file_id }}</span>
-              <span class="chunk-id" :title="chunk.s3_url">{{ chunk.s3_url }}</span>
+              <span class="copy-cell">
+                <span class="chunk-id" :title="chunk.file_id">{{ chunk.file_id }}</span>
+                <button class="copy-btn" @click="copyText(chunk.file_id)">{{ t('common.copy') }}</button>
+              </span>
+              <span class="copy-cell">
+                <span class="chunk-id" :title="chunk.s3_url">{{ chunk.s3_url }}</span>
+                <button class="copy-btn" @click="copyText(chunk.s3_url)">{{ t('common.copy') }}</button>
+              </span>
               <span class="chunk-name" :title="chunk.filename">{{ chunk.filename }}</span>
+              <span>{{ shortTime(chunk.created_at) }}</span>
               <span>{{ chunk.chunk_index }}</span>
-              <span class="chunk-content" :title="chunk.content">{{ chunk.content }}</span>
+              <span class="copy-cell">
+                <span class="chunk-content" :title="chunk.content">{{ chunk.content }}</span>
+                <button class="copy-btn" @click="copyText(chunk.content)">{{ t('common.copy') }}</button>
+              </span>
             </div>
           </div>
           <div v-if="chunksLoading" class="docs-loading">{{ t('common.loading') }}</div>
-          <button v-else-if="chunksHasMore" class="docs-more" @click="loadMoreChunks">{{ t('common.loadMore') }}</button>
+          <button v-else-if="chunksHasMore" class="docs-more" @click="fetchNextChunks">{{ t('common.loadMore') }}</button>
         </div>
       </div>
 
@@ -315,27 +385,38 @@
             <div class="block-title">{{ t('config.components') }}</div>
             <div class="kv-list">
               <div><span>dense</span><strong>{{ configComponentModel(configView?.dense) }}</strong></div>
-              <div><span>sparse app</span><strong>{{ configComponentModel(configView?.sparse?.app) }}</strong></div>
-              <div><span>sparse vector</span><strong>{{ configComponentModel(configView?.sparse?.vector) }}</strong></div>
+              <div><span>sparse</span><strong>{{ configComponentModel(configView?.sparse) }}</strong></div>
               <div><span>rerank</span><strong>{{ configComponentModel(configView?.rerank) }}</strong></div>
               <div><span>ocr</span><strong>{{ configComponentModel(configView?.ocr) }}</strong></div>
+            </div>
+          </div>
+          <div class="monitor-block">
+            <div class="block-title">{{ t('config.storage') }}</div>
+            <div class="kv-list">
+              <div><span>store</span><strong>{{ configView?.store?.type || '-' }}</strong></div>
+              <div><span>{{ t('database.location') }}</span><strong>{{ configStoreLocation }}</strong></div>
+              <div><span>collection</span><strong>{{ configView?.store?.collections?.chunks || '-' }}</strong></div>
             </div>
           </div>
         </div>
       </div>
     </main>
+    </template>
   </div>
 
 </template>
 
 <script setup>
-import { computed, ref, onMounted } from 'vue'
+import { computed, ref, nextTick, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import axios from 'axios'
 
 const API = '/api'
 const { t, locale } = useI18n()
 const theme = ref(localStorage.getItem('rag_theme') || 'light')
+const authToken = ref(localStorage.getItem('rag_token') || '')
+const loginForm = ref({ username: 'admin', password: '' })
+const loginError = ref('')
 const activeView = ref('upload')
 const selectedFiles = ref([])
 const query = ref('')
@@ -344,13 +425,21 @@ const topK = ref(20)
 const fetchK = ref(50)
 const rerank = ref(false)
 const rerankAvailable = ref(false)
-const sparseMode = ref('app')
-const sparseModes = ref(['app'])
 const fileIdsText = ref('')
+const databaseFileIdsText = ref('')
+const databaseAppliedFileIdsText = ref('')
 const searchConfig = ref({ dense_weight: 0.5, sparse_weight: 0.5, rrf_k: 60 })
 const configView = ref(null)
 const hybridBalance = ref(0.5)
 const monitorState = ref(null)
+const traces = ref([])
+const tracesCursor = ref(null)
+const tracesHasMore = ref(false)
+const tracesLoading = ref(false)
+const logs = ref([])
+const logsBox = ref(null)
+let logStreamController = null
+let monitorPollTimer = null
 const files = ref([])
 const filesCursor = ref(null)
 const filesHasMore = ref(false)
@@ -360,6 +449,13 @@ const chunks = ref([])
 const chunksCursor = ref(null)
 const chunksHasMore = ref(false)
 const chunksLoading = ref(false)
+const indexJobs = ref([])
+const indexJobsCursor = ref(null)
+const indexJobsHasMore = ref(false)
+const indexJobsLoading = ref(false)
+const indexJobsError = ref('')
+const indexJobFilter = ref('all')
+const jobFilters = ['all', 'processing', 'finished', 'failed']
 const searchResults = ref([])
 const searchTime = ref(null)
 const lastSearch = ref(null)
@@ -367,15 +463,26 @@ const searching = ref(false)
 const noResults = ref(false)
 const uploadMsg = ref(null)
 const uploading = ref(false)
-const showSparseMode = computed(() => sparseModes.value.length > 1 && mode.value !== 'dense')
-const monitorData = computed(() => monitorState.value?.data || null)
-const searchTraces = computed(() => monitorState.value?.search_traces || [])
 const components = computed(() => monitorState.value?.components || [])
-const storeLocation = computed(() => {
-  const store = monitorState.value?.profile?.store
+const filteredIndexJobs = computed(() => {
+  if (indexJobFilter.value === 'all') return indexJobs.value
+  return indexJobs.value.filter(job => jobStatusClass(job.status) === indexJobFilter.value)
+})
+const configStoreLocation = computed(() => {
+  const store = configView.value?.store
   return store?.url || store?.uri || store?.persist_dir || '-'
 })
 const lang = computed(() => locale.value)
+
+applyAuthHeader()
+
+axios.interceptors.response.use(
+  response => response,
+  error => {
+    if (error.response?.status === 401) clearAuth()
+    return Promise.reject(error)
+  },
+)
 
 function setLang(value) {
   locale.value = value
@@ -385,6 +492,41 @@ function setLang(value) {
 function setTheme(value) {
   theme.value = value
   localStorage.setItem('rag_theme', value)
+}
+
+async function login() {
+  loginError.value = ''
+  try {
+    const res = await axios.post(`${API}/auth/token`, {
+      grant_type: 'password',
+      username: loginForm.value.username,
+      password: loginForm.value.password,
+    })
+    authToken.value = res.data.access_token
+    localStorage.setItem('rag_token', authToken.value)
+    applyAuthHeader()
+    await fetchConfig()
+    await fetchMonitor()
+    await fetchFiles()
+    await fetchChunks()
+  } catch (err) {
+    loginError.value = err.response?.data?.detail || err.message
+  }
+}
+
+function logout() {
+  clearAuth()
+}
+
+function clearAuth() {
+  stopLogStream()
+  authToken.value = ''
+  localStorage.removeItem('rag_token')
+  delete axios.defaults.headers.common.Authorization
+}
+
+function applyAuthHeader() {
+  if (authToken.value) axios.defaults.headers.common.Authorization = `Bearer ${authToken.value}`
 }
 
 function onBalanceChange() {
@@ -426,21 +568,42 @@ async function uploadFiles(files) {
       uploadMsg.value = { type: 'info', text: t('upload.presigningFile', { name: file.name }) }
       const presignRes = await axios.post(`${API}/presign`, { s3_url: uploadRes.data.s3_url })
       uploadMsg.value = { type: 'info', text: t('upload.indexingFile', { name: file.name }) }
-      const indexRes = await axios.post(`${API}/index`, {
+      const indexRes = await axios.post(`${API}/index/jobs`, {
         presigned_url: presignRes.data.presigned_url,
         s3_url: uploadRes.data.s3_url,
       })
-      fileIds.push(indexRes.data.file_id)
-      uploadMsg.value = { type: 'success', text: t('upload.indexedFile', { name: file.name, fileId: indexRes.data.file_id }) }
+      uploadMsg.value = { type: 'success', text: t('upload.indexedFile', { name: file.name, jobId: indexRes.data.job_id }) }
+      const job = await waitForIndexJob(indexRes.data.job_id)
+      if (job.status === 'finished') {
+        fileIds.push(job.file_id)
+        uploadMsg.value = { type: 'success', text: t('upload.indexFinished', { name: file.name, fileId: job.file_id }) }
+      } else {
+        uploaded = false
+        uploadMsg.value = { type: 'error', text: t('upload.indexFailed', { name: file.name, error: job.error || job.status }) }
+      }
     } catch (err) {
       uploaded = false
       uploadMsg.value = { type: 'error', text: `${file.name}: ${err.response?.data?.detail || err.message}` }
     }
   }
-  await refreshFiles()
-  await refreshChunks()
+  await fetchFiles()
+  await fetchChunks()
   if (uploaded) uploadMsg.value = { type: 'success', text: t('upload.indexedDone', { fileIds: fileIds.join(', ') }) }
   return uploaded
+}
+
+async function waitForIndexJob(jobId) {
+  for (let i = 0; i < 90; i++) {
+    const res = await axios.get(`${API}/index/jobs/${encodeURIComponent(jobId)}`)
+    if (['finished', 'failed'].includes(res.data.status)) return res.data
+    uploadMsg.value = { type: 'info', text: t('upload.indexWaiting', { jobId, status: res.data.status }) }
+    await sleep(2000)
+  }
+  return { job_id: jobId, status: 'timeout' }
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms))
 }
 
 async function doSearch() {
@@ -455,7 +618,6 @@ async function doSearch() {
     const body = {
       query: query.value,
       mode: mode.value,
-      sparse_mode: sparseMode.value,
       top_k: topK.value,
       rerank: rerank.value,
       dense_weight: searchConfig.value.dense_weight,
@@ -475,10 +637,9 @@ async function doSearch() {
       rerank: rerank.value,
       fetchK: rerank.value ? fetchK.value : null,
       fileIds,
-      sparseMode: res.data.sparse_mode || sparseMode.value,
     }
     noResults.value = searchResults.value.length === 0
-    fetchMonitor()
+    fetchTraces()
   } catch (err) { console.error(err) }
   searching.value = false
 }
@@ -491,30 +652,36 @@ async function fetchConfig() {
     mode.value = res.data.default_mode ?? mode.value
     rerankAvailable.value = Boolean(res.data.rerank_available)
     rerank.value = Boolean(res.data.rerank && res.data.rerank_available)
-    sparseModes.value = res.data.sparse?.available_modes || ['app']
-    sparseMode.value = res.data.sparse?.default_mode || 'app'
-    if (!sparseModes.value.includes(sparseMode.value)) sparseMode.value = sparseModes.value[0] || 'app'
     hybridBalance.value = res.data.dense_weight
     topK.value = res.data.top_k ?? topK.value
     fetchK.value = res.data.fetch_k ?? fetchK.value
   } catch (err) { console.error(err) }
 }
 
-async function refreshChunks() {
+async function fetchChunks() {
+  databaseAppliedFileIdsText.value = databaseFileIdsText.value
   chunks.value = []
   chunksCursor.value = null
   chunksHasMore.value = false
-  await loadMoreChunks()
+  await fetchNextChunks()
 }
 
-async function refreshFiles() {
+async function fetchFiles() {
   files.value = []
   filesCursor.value = null
   filesHasMore.value = false
-  await loadMoreFiles()
+  await fetchNextFiles()
 }
 
-async function loadMoreFiles() {
+async function fetchIndexJobs() {
+  indexJobs.value = []
+  indexJobsCursor.value = null
+  indexJobsHasMore.value = false
+  indexJobsError.value = ''
+  await fetchNextIndexJobs()
+}
+
+async function fetchNextFiles() {
   if (filesLoading.value) return
   filesLoading.value = true
   try {
@@ -529,6 +696,24 @@ async function loadMoreFiles() {
   finally { filesLoading.value = false }
 }
 
+async function fetchNextIndexJobs() {
+  if (indexJobsLoading.value) return
+  indexJobsLoading.value = true
+  try {
+    const params = { limit: 50 }
+    if (indexJobsCursor.value) params.cursor = indexJobsCursor.value
+    const res = await axios.get(`${API}/index/jobs`, { params })
+    indexJobs.value = indexJobs.value.concat(res.data.jobs || [])
+    indexJobsCursor.value = res.data.next_cursor || null
+    indexJobsHasMore.value = Boolean(res.data.has_more)
+    indexJobsError.value = ''
+  }
+  catch (err) {
+    indexJobsError.value = err.response?.status === 503 ? t('monitor.indexQueueUnavailable') : (err.response?.data?.detail || err.message)
+  }
+  finally { indexJobsLoading.value = false }
+}
+
 async function deleteFile(file) {
   if (!file?.id || deletingFileId.value) return
   deletingFileId.value = file.id
@@ -536,9 +721,8 @@ async function deleteFile(file) {
   try {
     const res = await axios.delete(`${API}/files/${encodeURIComponent(file.id)}`)
     uploadMsg.value = { type: 'success', text: t('upload.deletedFile', { name: file.filename, count: res.data.deleted_chunks }) }
-    await refreshFiles()
-    await refreshChunks()
-    fetchMonitor()
+    await fetchFiles()
+    await fetchChunks()
   } catch (err) {
     uploadMsg.value = { type: 'error', text: `${file.filename}: ${err.response?.data?.detail || err.message}` }
   } finally {
@@ -546,12 +730,14 @@ async function deleteFile(file) {
   }
 }
 
-async function loadMoreChunks() {
+async function fetchNextChunks() {
   if (chunksLoading.value) return
   chunksLoading.value = true
   try {
     const params = { limit: 50 }
     if (chunksCursor.value) params.cursor = chunksCursor.value
+    const fileIds = parseFileIds(databaseAppliedFileIdsText.value)
+    if (fileIds.length) params.file_ids = fileIds.join(',')
     const res = await axios.get(`${API}/chunks`, { params })
     chunks.value = chunks.value.concat(res.data.chunks || [])
     chunksCursor.value = res.data.next_cursor || null
@@ -564,14 +750,28 @@ async function loadMoreChunks() {
 function onChunksScroll(event) {
   const el = event.target
   if (el.scrollTop + el.clientHeight >= el.scrollHeight - 24 && chunksHasMore.value) {
-    loadMoreChunks()
+    fetchNextChunks()
   }
 }
 
 function onFilesScroll(event) {
   const el = event.target
   if (el.scrollTop + el.clientHeight >= el.scrollHeight - 24 && filesHasMore.value) {
-    loadMoreFiles()
+    fetchNextFiles()
+  }
+}
+
+function onIndexJobsScroll(event) {
+  const el = event.target
+  if (el.scrollTop + el.clientHeight >= el.scrollHeight - 24 && indexJobsHasMore.value) {
+    fetchNextIndexJobs()
+  }
+}
+
+function onTracesScroll(event) {
+  const el = event.target
+  if (el.scrollTop + el.clientHeight >= el.scrollHeight - 24 && tracesHasMore.value) {
+    fetchNextTraces()
   }
 }
 
@@ -582,8 +782,118 @@ async function fetchMonitor() {
   } catch (err) { console.error(err) }
 }
 
+async function fetchTraces() {
+  traces.value = []
+  tracesCursor.value = null
+  tracesHasMore.value = false
+  await fetchNextTraces()
+}
+
+async function fetchNextTraces() {
+  if (tracesLoading.value) return
+  tracesLoading.value = true
+  try {
+    const params = { limit: 50 }
+    if (tracesCursor.value) params.cursor = tracesCursor.value
+    const res = await axios.get(`${API}/traces`, { params })
+    traces.value = traces.value.concat(res.data.traces || [])
+    tracesCursor.value = res.data.next_cursor || null
+    tracesHasMore.value = Boolean(res.data.has_more)
+  } catch (err) { console.error(err) }
+  finally { tracesLoading.value = false }
+}
+
+async function pollMonitor() {
+  await fetchMonitor()
+}
+
+function startMonitorPolling() {
+  stopMonitorPolling()
+  pollMonitor()
+  monitorPollTimer = window.setInterval(pollMonitor, 1000)
+}
+
+function stopMonitorPolling() {
+  if (monitorPollTimer) {
+    window.clearInterval(monitorPollTimer)
+    monitorPollTimer = null
+  }
+}
+
+async function startLogStream() {
+  stopLogStream()
+  logs.value = []
+  logStreamController = new AbortController()
+  try {
+    const response = await fetch(`${API}/logs`, {
+      headers: { Authorization: `Bearer ${authToken.value}` },
+      signal: logStreamController.signal,
+    })
+    if (!response.ok || !response.body) return
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const parts = buffer.split('\n\n')
+      buffer = parts.pop() || ''
+      for (const part of parts) appendLogEvent(part)
+    }
+  } catch (err) {
+    if (err.name !== 'AbortError') console.error(err)
+  }
+}
+
+function stopLogStream() {
+  if (logStreamController) {
+    logStreamController.abort()
+    logStreamController = null
+  }
+}
+
+function appendLogEvent(eventText) {
+  const line = eventText.split('\n').find(item => item.startsWith('data: '))
+  if (!line) return
+  const row = JSON.parse(line.slice(6))
+  if (logs.value.some(item => item.seq === row.seq)) return
+  logs.value = logs.value.concat(row).slice(-300)
+  scrollLogsToBottom()
+}
+
+function scrollLogsToBottom() {
+  nextTick(() => {
+    if (logsBox.value) logsBox.value.scrollTop = logsBox.value.scrollHeight
+  })
+}
+
+function formatLogLine(row) {
+  return JSON.stringify(row)
+}
+
+async function copyText(value) {
+  if (!value) return
+  try {
+    await navigator.clipboard.writeText(value)
+  } catch {
+    const textarea = document.createElement('textarea')
+    textarea.value = value
+    textarea.style.position = 'fixed'
+    textarea.style.opacity = '0'
+    document.body.appendChild(textarea)
+    textarea.select()
+    document.execCommand('copy')
+    document.body.removeChild(textarea)
+  }
+}
+
 function searchFileIds() {
-  return Array.from(new Set(fileIdsText.value.split(',').map(item => item.trim()).filter(Boolean)))
+  return parseFileIds(fileIdsText.value)
+}
+
+function parseFileIds(value) {
+  return Array.from(new Set(value.split(',').map(item => item.trim()).filter(Boolean)))
 }
 
 function componentModelText(item) {
@@ -596,11 +906,6 @@ function configComponentModel(item) {
   return item.model_name || item.name || item.type || '-'
 }
 
-function sparseModeLabel(value) {
-  if (value === 'vector') return 'Vector'
-  return 'App BM25'
-}
-
 function stageMs(trace, name) {
   const stage = (trace.stages || []).find(item => item.name === name)
   return stage ? ms(stage.elapsed_ms) : '-'
@@ -611,7 +916,52 @@ function ms(value) {
   return `${Number(value).toFixed(1)}`
 }
 
-onMounted(() => { refreshFiles(); refreshChunks(); fetchConfig(); fetchMonitor() })
+function jobStatusClass(status) {
+  if (status === 'finished') return 'finished'
+  if (status === 'failed') return 'failed'
+  if (status === 'not_found') return 'missing'
+  return 'processing'
+}
+
+function jobStatusText(status) {
+  return t(`monitor.jobStatus.${jobStatusClass(status)}`)
+}
+
+function shortTime(value) {
+  if (!value) return '-'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '-'
+  return date.toLocaleString('zh-CN', { hour12: false })
+}
+
+onMounted(() => {
+  if (!authToken.value) return
+  fetchFiles()
+  fetchChunks()
+  fetchConfig()
+  fetchMonitor()
+  if (activeView.value === 'monitor') {
+    fetchIndexJobs()
+    fetchTraces()
+    startMonitorPolling()
+  }
+})
+
+watch(activeView, value => {
+  if (!authToken.value) return
+  if (value === 'monitor') {
+    fetchIndexJobs()
+    fetchTraces()
+    startMonitorPolling()
+  } else {
+    stopMonitorPolling()
+  }
+})
+
+onUnmounted(() => {
+  stopMonitorPolling()
+  stopLogStream()
+})
 
 function escapeHtml(text) {
   const el = document.createElement('div')
@@ -676,6 +1026,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helv
 
 /* Header */
 .app-header { margin-bottom: 24px; }
+.login-tools { display: flex; justify-content: flex-end; gap: 8px; margin-bottom: 28px; }
 .header-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
 .header-top h1 { font-size: 25px; font-weight: 750; letter-spacing: 0; color: var(--text); }
 .header-desc { font-size: 14px; color: var(--muted); margin-top: 7px; max-width: 720px; }
@@ -684,12 +1035,23 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helv
 .switch-btn { min-width: 38px; height: 28px; padding: 0 9px; border: none; border-radius: 7px; background: transparent; color: var(--muted); font-size: 12px; font-weight: 600; cursor: pointer; }
 .switch-btn.active { background: var(--accent); color: #fff; }
 .switch-btn:hover:not(.active) { background: var(--surface-3); color: var(--text); }
+.header-logout { height: 36px; padding: 0 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--muted); font-size: 12px; font-weight: 650; cursor: pointer; }
+.header-logout:hover { border-color: var(--accent); color: var(--accent); }
 
 .view-tabs { display: flex; gap: 5px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 5px; margin-bottom: 22px; box-shadow: var(--shadow); width: fit-content; }
 .view-tab { min-width: 82px; height: 34px; border: none; border-radius: 10px; background: transparent; color: var(--muted); font-size: 13px; font-weight: 650; cursor: pointer; }
 .view-tab.active { background: var(--text); color: var(--surface); }
 .app.theme-dark .view-tab.active { background: var(--accent); color: #05111f; }
 .view-tab:hover:not(.active) { background: var(--surface-3); color: var(--text); }
+
+/* Login */
+.login-view { min-height: 56vh; display: grid; place-items: center; }
+.login-card { width: min(420px, 100%); display: grid; gap: 14px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 26px; box-shadow: var(--shadow); }
+.login-card h2 { font-size: 20px; color: var(--text); margin-bottom: 6px; }
+.login-card p { font-size: 13px; color: var(--muted); }
+.login-card label { display: grid; gap: 6px; font-size: 12px; color: var(--muted); }
+.login-card .field-input { width: 100%; height: 38px; }
+.login-submit { height: 38px; }
 
 /* Upload */
 .upload-card, .files-card { background: #fff; border-radius: 14px; padding: 20px 24px; margin-bottom: 20px; box-shadow: 0 1px 4px rgba(0,0,0,.04); }
@@ -711,7 +1073,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helv
 .upload-feedback.error { color: #f56a00; background: #fff2e8; }
 .files-scroll { max-height: 360px; overflow: auto; }
 .files-table { min-width: 840px; display: grid; gap: 4px; }
-.files-head, .file-row { display: grid; grid-template-columns: minmax(240px, 1.3fr) minmax(260px, 1.4fr) 72px 72px; align-items: center; gap: 8px; font-size: 12px; }
+.files-head, .file-row { display: grid; grid-template-columns: minmax(220px, 1.2fr) minmax(220px, 1.2fr) minmax(160px, .9fr) 64px 72px; align-items: center; gap: 8px; font-size: 12px; }
 .files-head { color: #8e8e93; font-weight: 600; padding: 0 8px 6px; border-bottom: 1px solid #f0f1f4; }
 .file-row { min-height: 34px; color: #6c7680; padding: 6px 8px; border-radius: 8px; background: #fff; border: 1px solid #f0f1f4; }
 .file-delete { height: 26px; border: 1px solid #ffd6c2; border-radius: 7px; background: #fff7f2; color: #f56a00; font-size: 12px; cursor: pointer; }
@@ -721,15 +1083,20 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helv
 /* Chunks */
 .chunks-card { background: #fff; border-radius: 14px; padding: 20px 24px; margin-bottom: 20px; box-shadow: 0 1px 4px rgba(0,0,0,.04); }
 .docs-head { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+.docs-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .docs-head h2 { font-size: 14px; font-weight: 600; color: #1d1d1f; }
 .docs-count { font-size: 12px; font-weight: 500; color: #8e8e93; background: #f2f2f5; padding: 0 8px; min-width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; border-radius: 10px; }
 .docs-empty { font-size: 13px; color: #aeaeb2; text-align: center; padding: 28px 0; }
+.chunk-filter { display: grid; grid-template-columns: 64px minmax(0, 1fr) 64px; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 12px; color: #8e8e93; }
 .chunks-scroll { max-height: 420px; overflow: auto; }
-.chunks-table { min-width: 1220px; display: grid; gap: 4px; }
-.chunks-head, .chunk-row { display: grid; grid-template-columns: minmax(150px, .9fr) minmax(190px, 1fr) minmax(260px, 1.3fr) minmax(130px, .8fr) 54px minmax(280px, 1.6fr); align-items: center; gap: 8px; font-size: 12px; }
+.chunks-table { min-width: 1400px; display: grid; gap: 4px; }
+.chunks-head, .chunk-row { display: grid; grid-template-columns: minmax(140px, .8fr) minmax(170px, .9fr) minmax(240px, 1.2fr) minmax(120px, .7fr) minmax(150px, .8fr) 92px minmax(260px, 1.5fr); align-items: center; gap: 8px; font-size: 12px; }
 .chunks-head { color: #8e8e93; font-weight: 600; padding: 0 8px 6px; border-bottom: 1px solid #f0f1f4; }
 .chunk-row { min-height: 34px; color: #6c7680; padding: 6px 8px; border-radius: 8px; background: #fff; border: 1px solid #f0f1f4; }
-.chunk-id { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.copy-cell { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) 38px; align-items: center; gap: 6px; }
+.copy-btn { height: 24px; border: 1px solid #e5e5ea; border-radius: 7px; background: #fff; color: #6c7680; font-size: 11px; cursor: pointer; }
+.copy-btn:hover { border-color: #409eff; color: #409eff; }
+.chunk-id { min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chunk-name, .chunk-content { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chunk-content { color: #1d1d1f; }
 .docs-loading { text-align: center; font-size: 12px; color: #8e8e93; padding: 10px 0; }
@@ -743,10 +1110,13 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helv
 .monitor-head p { font-size: 12px; color: #8e8e93; margin-top: 3px; }
 .monitor-actions { display: flex; align-items: center; gap: 8px; }
 .ghost-btn { height: 30px; padding: 0 12px; border: 1px solid #e5e5ea; border-radius: 8px; background: #fff; color: #6c7680; font-size: 12px; cursor: pointer; }
+.ghost-btn.mini { height: 24px; padding: 0 8px; border-radius: 7px; font-size: 11px; }
 .ghost-btn:hover { border-color: #409eff; color: #409eff; }
 .ghost-btn:disabled { color: #c7c7cc; cursor: not-allowed; }
 .ghost-btn:disabled:hover { border-color: #e5e5ea; color: #c7c7cc; }
 .monitor-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.monitor-grid + .monitor-block { margin-top: 18px; }
+.monitor-section > .monitor-block + .monitor-block { margin-top: 18px; }
 .database-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .config-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .monitor-block { min-width: 0; border: 1px solid #f0f1f4; border-radius: 10px; padding: 12px; background: #fcfcfd; }
@@ -773,13 +1143,31 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helv
 .metric-row span { font-size: 11px; color: #8e8e93; }
 .scope-mini { margin-top: 8px; font-size: 12px; color: #8e8e93; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .trace-table-wrap { overflow-x: auto; }
-.trace-table { min-width: 920px; display: grid; gap: 4px; }
-.trace-table-head, .trace-table-row { display: grid; grid-template-columns: minmax(160px, 1.8fr) 100px 46px repeat(8, 72px); align-items: center; gap: 8px; font-size: 12px; }
+.trace-list-wrap { max-height: 320px; overflow: auto; }
+.trace-table { min-width: 1080px; display: grid; gap: 4px; }
+.trace-table-head, .trace-table-row { display: grid; grid-template-columns: minmax(150px, .9fr) minmax(160px, 1.6fr) 90px 46px repeat(8, 72px); align-items: center; gap: 8px; font-size: 12px; }
 .trace-table-head { color: #8e8e93; font-weight: 600; padding: 0 8px 6px; border-bottom: 1px solid #f0f1f4; }
 .trace-table-row { min-height: 32px; color: #6c7680; padding: 6px 8px; border-radius: 8px; background: #fff; border: 1px solid #f0f1f4; }
 .trace-table-row strong { color: #409eff; font-weight: 600; }
 .trace-query { color: #1d1d1f; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .trace-empty { font-size: 12px; color: #aeaeb2; padding: 18px 0; text-align: center; }
+.error-text { color: #f56a00; }
+.logs-box { height: 520px; overflow: auto; margin: 0; border: 1px solid #e5e5ea; border-radius: 9px; background: #0f1720; color: #d8e2ee; padding: 12px; font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; white-space: pre-wrap; word-break: break-word; }
+.job-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.job-filters { display: flex; flex-wrap: wrap; gap: 4px; }
+.job-filter { height: 24px; padding: 0 8px; border: 1px solid #e5e5ea; border-radius: 7px; background: #fff; color: #6c7680; font-size: 11px; cursor: pointer; }
+.job-filter.active { border-color: #409eff; color: #409eff; background: #e6f2ff; }
+.job-table-wrap { max-height: 320px; overflow: auto; }
+.job-table { min-width: 1320px; display: grid; gap: 4px; }
+.job-table-head, .job-table-row { display: grid; grid-template-columns: 82px minmax(170px, 1fr) minmax(150px, 1fr) minmax(170px, 1fr) 58px minmax(240px, 1.4fr) minmax(160px, 1fr) minmax(160px, 1fr); align-items: center; gap: 8px; font-size: 12px; }
+.job-table-head { color: #8e8e93; font-weight: 600; padding: 0 8px 6px; border-bottom: 1px solid #f0f1f4; }
+.job-table-row { min-height: 32px; color: #6c7680; padding: 6px 8px; border-radius: 8px; background: #fff; border: 1px solid #f0f1f4; }
+.job-status { font-weight: 600; }
+.job-status.processing { color: #d99513; }
+.job-status.finished { color: #22a67e; }
+.job-status.failed { color: #f56a00; }
+.job-status.missing { color: #8e8e93; }
+.job-error { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #f56a00; }
 
 /* Search Section */
 .search-section { position: sticky; bottom: 0; background: #fff; border-radius: 14px; padding: 20px 24px; margin-bottom: 20px; box-shadow: 0 1px 4px rgba(0,0,0,.04); }
@@ -886,6 +1274,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helv
 .cand-label,
 .rerank-control,
 .bal-label,
+.chunk-filter,
 .no-results p,
 .no-results-hint,
 .trace-empty {
@@ -913,6 +1302,8 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helv
 .chunk-row,
 .trace-table-head,
 .trace-table-row,
+.job-table-head,
+.job-table-row,
 .mode-tabs,
 .field-input,
 .field-select,
@@ -920,6 +1311,8 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helv
 .topk-select,
 .cand-input,
 .ghost-btn,
+.copy-btn,
+.job-filter,
 .docs-more {
   background: var(--surface-2);
   border-color: var(--border);
@@ -927,12 +1320,14 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helv
 }
 .files-head,
 .chunks-head,
-.trace-table-head {
+.trace-table-head,
+.job-table-head {
   color: var(--muted);
 }
 .file-row,
 .chunk-row,
-.trace-table-row {
+.trace-table-row,
+.job-table-row {
   background: var(--surface);
   color: var(--muted);
 }
@@ -949,11 +1344,20 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helv
 .rerank-checkbox { accent-color: var(--accent); }
 .bal-value,
 .trace-table-row strong { color: var(--accent); }
+.logs-box { border-color: var(--border); background: #0f1720; color: #d8e2ee; }
+.app.theme-dark .logs-box { background: #050b13; color: #d6e4f2; }
+.job-filter.active { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.job-status.processing { color: var(--warning); }
+.job-status.finished { color: var(--success); }
+.job-status.failed,
+.job-error { color: var(--danger); }
+.job-status.missing { color: var(--soft); }
 .results-bar,
 .result-card,
 .files-head,
 .chunks-head,
-.trace-table-head { border-color: var(--border); }
+.trace-table-head,
+.job-table-head { border-color: var(--border); }
 .result-body { color: var(--text); }
 .result-file { color: var(--muted); }
 .result-file svg { stroke: var(--muted); }
@@ -965,6 +1369,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helv
 .file-delete:disabled { color: var(--soft); border-color: var(--border); background: var(--surface-3); }
 .docs-more:hover,
 .ghost-btn:hover { border-color: var(--accent); color: var(--accent); }
+.copy-btn:hover { border-color: var(--accent); color: var(--accent); }
 .docs-count { background: var(--surface-3); }
 .status-dot.ready { background: var(--success); }
 .status-dot.loading { background: var(--warning); }

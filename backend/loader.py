@@ -73,7 +73,7 @@ def _resolve_model_paths(raw: dict) -> None:
 
 
 def _select_enabled_components(raw: dict) -> None:
-    for section_name in ("dense", "sparse", "store", "rerank", "ocr"):
+    for section_name in ("dense", "store", "rerank", "ocr"):
         section = raw.get(section_name)
         if not _is_component_group(section):
             continue
@@ -99,10 +99,6 @@ def _select_enabled_components(raw: dict) -> None:
 
 def _available_components(raw: dict) -> dict[str, list[dict[str, object]]]:
     return {
-        "store": _component_options(raw.get("store")),
-        "dense": _component_options(raw.get("dense")),
-        "sparse_app": _sparse_backend_options(raw.get("sparse"), "app"),
-        "sparse_vector": _sparse_backend_options(raw.get("sparse"), "vector"),
         "rerank": _component_options(raw.get("rerank")),
         "ocr": _component_options(raw.get("ocr")),
     }
@@ -133,23 +129,8 @@ def _component_group_options(section) -> list[dict[str, object]]:
     return options
 
 
-def _sparse_backend_options(section, backend_name: str) -> list[dict[str, object]]:
-    if not isinstance(section, dict):
-        return []
-    backend = section.get(backend_name)
-    if not isinstance(backend, dict):
-        return []
-    return [{
-        "name": backend.get("name") or backend.get("type") or backend.get("module") or backend_name,
-        "model_name": backend.get("model_name"),
-        "active": True,
-    }]
-
-
 def _is_component_group(section) -> bool:
     if not isinstance(section, dict):
-        return False
-    if any(key in section for key in ("app", "vector")):
         return False
     if any(key in section for key in ("name", "type", "module", "collections")):
         return False
@@ -159,15 +140,6 @@ def _is_component_group(section) -> bool:
 def _resolve_sparse_components(raw: dict, model_by_name: dict[str, str]) -> None:
     section = raw.get("sparse")
     if not isinstance(section, dict):
-        return
-    if "app" in section or "vector" in section:
-        for backend_name in ("app", "vector"):
-            backend = section.get(backend_name)
-            if isinstance(backend, dict):
-                sparse_type = backend.get("type") or backend.get("name")
-                model_name = backend.get("model_name") or model_by_name.get(sparse_type)
-                if model_name:
-                    backend["model_path"] = str(MODELS_DIR / model_name)
         return
     _resolve_component(raw, "sparse", model_by_name)
 

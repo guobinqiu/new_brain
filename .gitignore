@@ -18,6 +18,7 @@ milvus_data/
 minio_data/
 postgres_data/
 qdrant_data/
+redis_data/
 data/
 
 # 日志与测试产物

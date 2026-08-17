@@ -8,6 +8,7 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import TextIO
 
+from log_buffer import BufferLogHandler, LOG_BUFFER
 from schema import LoggingConfig
 
 
@@ -37,6 +38,10 @@ def configure_logging(config: LoggingConfig, stream: TextIO | None = None) -> No
     stdout_handler = logging.StreamHandler(stream or sys.stdout)
     stdout_handler.setFormatter(formatter)
     handlers.append(stdout_handler)
+
+    buffer_handler = BufferLogHandler(LOG_BUFFER)
+    buffer_handler.setFormatter(formatter)
+    handlers.append(buffer_handler)
 
     if config.file:
         path = Path(config.file)

@@ -2,22 +2,23 @@
 
 本文说明知识检索后端的目标架构。系统以文件为父对象，以 chunk 为检索对象，外部系统通过 `file_id` 限定搜索范围。
 
-架构目标是：向量库、dense 模型、sparse 检索、rerank 模型都可以通过 yaml 配置切换。BGE-M3、Chroma、Milvus 等能力作为可选组件接入，不影响默认的 Qdrant + `bge_base` dense + `bm25` sparse 功能。
+架构目标是：向量库、dense 模型、sparse 检索、rerank 模型都通过 yaml profile 声明。服务入口和搜索流程只依赖稳定能力接口，不把某个模型、向量库或部署环境写死到业务逻辑里。
 
 ---
 
 ## 1. 架构目标
 
-- API 保持稳定，调用方不需要知道底层使用哪种向量库或模型。
-- 向量库可切换：Qdrant、Chroma、Milvus 等。
-- dense 能力可切换：当前支持 `bge-base-zh-v1.5` 和 `bge-m3`。
-- sparse 能力可切换：当前支持 `bm25`（`tokenizer=jieba`）、`bge_m3` 和 `milvus_bm25`。`bge_m3` 只用于支持稀疏向量的 store，当前可用于 Qdrant 和 Milvus。
-- rerank 能力可切换：当前支持 `bge-reranker-base`、`bge-reranker-large` 和 `bge-reranker-v2-m3`。
+- 外部契约保持稳定，调用方不需要知道底层使用哪种向量库或模型。
+- 向量库可通过 Store profile 切换。
+- dense 能力可通过 Dense profile 切换。
+- sparse 能力可通过 Sparse profile 切换。
+- rerank 能力可通过 Rerank profile 切换。
 - 使用单一 chunks collection 存储所有文档分块。
 - 支持通过多个 `file_id` 限定搜索范围。
 - 支持 dense、sparse、hybrid 三种检索模式。
 - 支持可选 rerank。
 - 启动时通过配置文件决定使用哪套组合。
+- 应用层统一鉴权：管理用户和外部系统都先换取 JWT，业务入口只认 `Authorization: Bearer <token>`。
 - 代码和配置使用通用命名，不绑定具体业务。
 
 ---
@@ -34,23 +35,27 @@
 | dense | 语义向量检索 |
 | sparse | 关键词、词权重或稀疏向量检索 |
 | hybrid | dense 和 sparse 的融合检索 |
+| User JWT | 管理用户登录后得到的 JWT，用于管理功能 |
+| Service JWT | 外部系统通过 AK/SK 换取的 JWT，用于调用 RAG 业务能力 |
+| `app_id` | 外部系统身份标识，用于鉴权和审计，不参与 `file_id` 或向量库过滤字段 |
 
 查询范围示例：
 
 ```json
 {
-  "file_ids": ["upstream-file-001"]
+  "file_ids": ["<file_id>"]
 }
 ```
 
-`file_ids` 不传表示全量搜索；传空数组会被拒绝；一次最多允许 1000 个 `file_id`。
+`file_ids` 不传时搜索全库；传空数组会被拒绝；一次最多允许 1000 个 `file_id`。`file_id` 由 RAG 生成，是向量库里的全局文件 ID。
 
 ### 2.1 总体架构图
 
 ```mermaid
 flowchart LR
-  Client["外部系统 / 前端"] --> API["FastAPI API"]
-  API --> App["Application"]
+  Client["外部系统 / 管理入口"] --> Auth["Auth: 用户凭证或 AK/SK 换 JWT"]
+  Auth --> Entry["服务入口"]
+  Entry --> App["Application"]
   App --> Search["SearchPipeline"]
   App --> Parser["Document Parser"]
 
@@ -74,7 +79,41 @@ flowchart LR
   Config --> OCR
 ```
 
-这张图表达的是依赖方向：API 不直接知道具体向量库和模型，搜索流程只依赖 `Store`、`Sparse`、`Rerank` 这些能力接口。具体用 Qdrant、Chroma 还是 Milvus，由 yaml 配置决定。
+这张图表达的是依赖方向：服务入口不直接绑定某个向量库或模型，搜索流程只依赖 `Store`、`Sparse`、`Rerank` 这些能力接口。实际使用的向量库和模型由 yaml profile 决定。
+
+### 2.2 鉴权架构
+
+系统只有一个应用层鉴权入口，用于把用户凭证或外部系统 AK/SK 换成 JWT。
+
+```mermaid
+sequenceDiagram
+  participant User as 管理用户
+  participant App as 外部系统
+  participant Entry as 服务入口
+
+  User->>Entry: 用户凭证
+  Entry-->>User: User JWT
+  App->>Entry: AK/SK HMAC 签名
+  Entry-->>App: Service JWT
+  User->>Entry: Bearer User JWT
+  App->>Entry: Bearer Service JWT
+```
+
+管理用户使用用户名和密码换取 User JWT。外部系统使用 `app_id + access_key + secret_key` 对鉴权请求签名，然后换取 Service JWT。业务入口不直接验 access_key/secret_key，只验 JWT。
+
+外部系统签名串固定为 5 行：
+
+```text
+METHOD
+PATH
+TIMESTAMP
+BODY_SHA256
+APP_ID
+```
+
+`signature = hex(hmac_sha256(secret_key, string_to_sign))`。`X-Timestamp` 参与签名，并限制允许的时间偏差；是否启用 nonce 由安全等级决定。
+
+Service JWT 面向外部系统调用，User JWT 面向管理用户。身份只用于鉴权和审计，不参与 `file_id` 生成、向量库写入或搜索过滤。`file_id` 由 RAG 生成并作为全局文件 ID 写入向量库 metadata。
 
 ### LangChain 和原生 SDK 边界
 
@@ -90,55 +129,70 @@ LangChain 在系统里负责文档解析复用、文本切分、HuggingFace embe
 
 这个边界保证搜索流程只依赖 `Store` 接口，不受第三方封装层的底层能力暴露范围影响。新增向量库时，只需要实现 `Store` 接口；如果该向量库支持 vector sparse，再补对应的 `sparse/*` 适配类。
 
-### 2.2 数据库结构图
+### 2.3 数据库结构图
 
 ```mermaid
 flowchart TB
   VectorDB[("向量库")]
 
-  VectorDB --> Chunks["knowledge_chunks collection"]
+  VectorDB --> Chunks["chunks collection"]
 
   Chunks --> Metadata["metadata: file_id, chunk_index, filename"]
   Chunks --> Vectors["dense vector / 可选 vector sparse"]
 ```
 
-系统固定使用一个逻辑集合：`knowledge_chunks` 存所有 chunk。不引入 Postgres 文件父表，文件列表从向量库 chunk metadata 聚合得到。`file_id` 写入 chunk metadata，并在支持的向量库里建立过滤索引。
+系统固定使用一个 chunks 逻辑集合存储所有 chunk。不引入文件父表时，文件列表从向量库 chunk metadata 聚合得到。`file_id` 写入 chunk metadata，并在支持的向量库里建立过滤索引。
 
-### 2.3 写入流程图
+### 2.4 写入流程图
 
 ```mermaid
 sequenceDiagram
-  participant Client as 外部系统或前端
-  participant API as Upload/Index API
+  participant Client as 外部系统或管理入口
+  participant Entry as 写入入口
   participant Parser as DocumentParser
   participant Store as Store
   participant DB as 向量库
+  participant Redis as Redis Queue
+  participant Worker as Index Worker
 
-  Client->>API: POST /api/upload 上传文件
-  API-->>Client: 返回 s3_url + filename
-  Client->>API: POST /api/presign 提交 s3_url
-  API-->>Client: 返回 presigned_url
-  Client->>API: POST /api/index 提交 presigned_url + s3_url + 可选 file_id
-  API->>API: file_id = request.file_id or create_file_id()
-  API->>Parser: 读取并解析文件
+  Client->>Entry: 上传文件到对象存储
+  Entry-->>Client: 返回 s3_url + filename
+  Client->>Entry: 提交 s3_url 获取下载地址
+  Entry-->>Client: 返回 presigned_url
+  Client->>Entry: 同步提交 presigned_url + s3_url
+  Entry->>Entry: 生成 file_id
+  Entry->>Parser: 下载、解析文件
   Parser->>Parser: 清理文本并切 chunk
-  API->>Store: delete file_id + insert chunks
-  Store->>DB: 写入 chunk、vector、metadata.file_id、metadata.s3_url
-  API-->>Client: 返回 file_id
+  Entry->>Store: insert chunks
+  Store->>DB: 写入 chunk、vector、metadata.file_id、metadata.s3_url、metadata.created_at
+  Entry-->>Client: 返回 file_id
+  Client->>Entry: 异步提交 presigned_url + s3_url
+  Entry->>Entry: 生成 job_id 和 file_id
+  Entry->>Redis: enqueue index job
+  Entry-->>Client: 返回 job_id
+  Worker->>Redis: 领取 index job
+  Worker->>Parser: 下载、解析文件
+  Parser->>Parser: 清理文本并切 chunk
+  Worker->>Store: insert chunks
+  Store->>DB: 写入 chunk、vector、metadata.file_id、metadata.s3_url、metadata.created_at
+  Client->>Entry: 查询任务状态
+  Entry-->>Client: 返回 queued/started/finished/failed，完成时包含 file_id
 ```
 
-`/api/upload` 返回 `s3_url + filename`。`/api/index` 接收 `presigned_url + s3_url`，`file_id` 和 `filename` 可选；不传 `file_id` 时由 RAG 生成 32 位 hex ID，不传 `filename` 时从 `s3_url` 推导，传了就作为自定义展示文件名。RAG 完成解析、切分、embedding 并写入向量库。对象存储索引接口使用 `presigned_url` 做一次性下载，不把临时下载 URL 写入 chunk metadata；稳定的 `s3_url` 会写入 chunk metadata 用于追溯。
+写入入口可以同步执行索引，也可以创建异步任务。两种入口都接收 `presigned_url + s3_url`，不接收调用方提供的 `file_id`；`file_id` 只由 RAG 生成，文件名默认可从对象存储地址推导，也允许调用方指定展示名。同步索引成功返回代表已经写入向量库。异步索引创建任务后立即返回 `job_id`，后台 `index-worker` 完成下载、解析、切分、embedding 并写入向量库。调用方用 `job_id` 查询任务状态；状态响应里的 `file_id` 是后续搜索使用的文件 ID，只有 `finished` 后才能保证向量库里已经可查。同步入口和异步 worker 复用同一套索引执行逻辑。对象存储索引使用 `presigned_url` 做一次性下载，不把临时下载 URL 写入 chunk metadata；稳定的 `s3_url` 会写入 chunk metadata 用于追溯。文件和 chunk 的 `created_at` 在索引写入时生成并写入 chunk metadata；异步任务的 `created_at`、`enqueued_at`、`started_at`、`ended_at` 来自 RQ Job 生命周期记录。存储层统一保存 UTC 时间，对外返回前再转换成本机或容器时区。
 
-Docker 开发环境使用 MinIO 模拟 S3。MinIO 提供本地 bucket 和对象下载能力，后端提供本地联调用的 `POST /api/presign`：输入 `s3_url`，返回后端可访问的短期下载地址。这个地址是给 `/api/index` 使用的，前端只负责把它转交给后端。生产环境里，重签通常由业务系统或对象存储网关完成，RAG 仍只消费 `presigned_url + s3_url`。
+异步索引任务使用 Redis Queue 存储，Redis 开启 AOF 持久化。任务入队成功代表任务已被接受；worker 不在线时，任务留在 Redis 中等待消费。RAG 不假设所有上游系统都有自己的队列、限流和重试能力；内部队列是 RAG 服务的资源保护边界，用来削峰并控制 OCR、embedding 和向量库写入并发。异步任务状态包含处理中、成功和失败信息。异步入队前会检查单位时间提交数量和队列积压数量，超过限制时拒绝任务。实际索引并发由 worker 数量控制。`file_id` 由 RAG 签发是写入链路的架构约束。如果允许调用方提供 `file_id`，入口就必须在返回前检查是否已存在；否则冲突可能在后台 worker 阶段才暴露，缺少可靠机制把失败结果同步给调用方。由 RAG 生成全局 `file_id` 后，入口不需要做存在性检查，也不会出现上游 ID 冲突导致后台任务失败的问题。
 
-### 2.4 查询流程图
+Docker 开发环境使用 MinIO 模拟 S3。MinIO 提供本地 bucket 和对象下载能力，服务入口可以在本地联调时根据 `s3_url` 生成后端可访问的短期下载地址。生产环境里，重签通常由业务系统或对象存储网关完成，RAG 仍只消费 `presigned_url + s3_url`。
+
+### 2.5 查询流程图
 
 ```mermaid
 flowchart TB
-  Query["POST /api/search"] --> Plan["SearchPlan"]
+  Query["Search Request"] --> Plan["SearchPlan"]
   Plan --> Filter{"file_ids 是否传入?"}
   Filter -->|是| FileFilter["metadata.file_id 过滤"]
-  Filter -->|否| Full["全量搜索"]
+  Filter -->|否| Full["全库搜索"]
   FileFilter --> Retrieve["Dense / Sparse / Hybrid"]
   Full --> Retrieve
   Retrieve --> Dedupe["去重"]
@@ -150,56 +204,31 @@ flowchart TB
 
 查询只查一个 chunks collection。`file_ids` 作为 metadata filter 缩小候选范围；dense / sparse / hybrid 在同一个范围内检索。hybrid 统一为 dense 和 sparse 两路并发后在应用层做 RRF 融合；开启 rerank 时，再对候选结果做二次排序。
 
-`/api/search` 是公开业务 API，不返回 trace。搜索完成后后端把链路信息写入内存 ring buffer，由内部监控接口暴露给前端诊断面板。trace 描述单次请求的总耗时、结果数和阶段耗时，不做 p50、p95、p99 这类聚合统计。
+搜索入口返回业务搜索结果和本次搜索总耗时。搜索完成后，后端把链路信息写入内存 ring buffer，供诊断入口读取最近搜索请求的总耗时、结果数和阶段耗时。
 
-### 2.5 运行监控
+### 2.6 运行监控
 
-监控是只读能力，不写配置、不触发重启、不切换模型。前端通过 `/api/monitor` 读取当前 ready 状态、组件状态、文件数、chunk 数、collection、索引与存储信息，并通过查询日志读取最近搜索链路。
+运行监控提供轻量系统状态快照，包括运行状态、组件状态、collection、索引配置和组件绑定信息。监控状态不读取 chunk，不做文件数或 chunk 数统计。搜索链路快照面向单次查询诊断。
 
-真正会影响索引结构的配置，例如 store、dense、vector sparse、collection，不允许在前端监控页直接修改。查询级参数，例如 mode、sparse_mode、top_k、fetch_k、dense_weight、sparse_weight、rerank 开关，继续随 `/api/search` 请求传入。
+真正会影响索引结构的配置，例如 store、dense、sparse、collection，不允许在运行监控里直接修改。查询级参数，例如 mode、top_k、fetch_k、dense_weight、sparse_weight、rerank 开关，继续随搜索请求传入。
 
-监控页面面向使用者，不展示“索引契约”这类内部术语，也不重复展示服务状态。它只显示：
+监控能力按三类组织：
 
-- 服务状态：后端、向量库、搜索是否可用。
-- 组件：Store、Dense、Sparse、Rerank、OCR 的状态和绑定模型。
-- 数据：当前文件数、chunk 数。
-- 存储位置：当前向量库类型、chunks collection、vector sparse 是否已建立。
-- 查询日志：最近若干次搜索的总耗时和各阶段耗时。
+- 组件：Store、Redis、Dense、Sparse、Rerank、OCR 的状态和绑定模型。
+- 索引：异步索引任务列表、状态、文件名、文件 ID、chunk 数、错误和时间。
+- 链路：最近若干次搜索的总耗时和各阶段耗时。
 
-组件状态统一为四态：`ready` 表示组件已加载完成，`loading` 表示启用但尚未 ready，`disabled` 表示当前配置未启用，`error` 表示启动或加载失败。Sparse 在前端只作为一个组件展示，当前查询走应用内 BM25 时显示 `bm25（app）`；如果后续切到 vector sparse，再显示对应的 vector sparse 模型。
+组件状态统一为四态：`ready` 表示组件已加载完成，`loading` 表示启用但尚未 ready，`disabled` 表示配置未启用，`error` 表示启动或加载失败。Sparse 作为一个组件表达，显示运行 profile 绑定的 sparse 类型和模型。
 
-未来的模型切换操作放在配置页，不放在监控页。
+模型切换属于配置管理能力，不属于运行监控能力。
 
-数据库页面展示向量库数据本身。主视图通过 `/api/chunks` 分页列出 chunk 主键、`file_id`、`filename`、`chunk_index` 和完整 chunk 文本；文件聚合列表通过 `/api/files` 从 chunk metadata 汇总得到，只用于查看和删除整份文件的 chunks。
+向量数据查看能力直接分页读取向量库 chunk 数据，展示 chunk 主键、`file_id`、`s3_url`、`filename`、`chunk_index` 和完整 chunk 文本；文件聚合列表从 chunk metadata 汇总得到，只用于查看和删除整份文件的 chunks。向量数据查看不自动轮询，只有显式查询时才读取 chunk。
 
 ---
 
 ## 3. 配置目录
 
-后端使用 `backend/config/` 只保存 yaml 配置文件。配置读取代码放在 `backend/loader.py`，配置结构放在 `backend/schema.py`。
-
-```text
-backend/
-  config.py
-  loader.py
-  schema.py
-  config/
-    local.yaml
-    docker-cpu.yaml
-    docker-gpu.yaml
-    qdrant-bge-base.yaml
-    qdrant-bge-m3.yaml
-    chroma-bge-base.yaml
-    chroma-bge-m3.yaml
-    milvus-bge-base.yaml
-    milvus-bge-m3.yaml
-    milvus-builtin-bm25.yaml
-    milvus-lite-bge-base.yaml
-    milvus-lite-bge-m3.yaml
-    milvus-lite-builtin-bm25.yaml
-```
-
-后端通过 `CONFIG_FILE` 指定配置文件。`CONFIG_FILE` 可以写配置文件名，也可以写完整路径。只写文件名时，后端会从 `backend/config/` 读取。未设置 `CONFIG_FILE` 时，后端默认使用 `local.yaml`。
+后端使用 yaml profile 描述一套完整运行组合。配置读取代码和配置结构校验代码与具体 profile 解耦，运行时由环境选择一个 profile 启动。
 
 每个运行 profile 使用一个 yaml 文件。yaml 文件固定一种索引结构，不在同一个文件里放多套 dense 或 vector sparse 候选。真正会影响索引结构的组件，例如 dense、vector sparse、collection 名，必须通过切换 profile 或重建索引改变。不会改变索引结构的组件，例如 rerank、ocr，可以继续在同一个 yaml 里用候选项和 `enable` 表达。
 
@@ -207,243 +236,100 @@ backend/
 
 `bootstrap.py` 负责应用启动和关闭。`container.py` 负责按配置组装 dense、sparse、store、search、rerank、ocr。它们不保存具体业务规则，也不把某个模型或向量库写死到搜索逻辑里。
 
-配置文件名表达向量库和索引结构，例如 `qdrant-bge-m3.yaml` 表示 Qdrant + BGE-M3 dense + BGE-M3 vector sparse。sparse 的 `app` 必须存在，`vector` 可选；是否允许前端切换 sparse 查询方式由 `/api/config` 根据当前 profile 推导。
+profile 名只作为运维识别入口；真正的索引结构以 yaml 里的 store、dense、sparse 和 collection 配置为准。
 
 ---
 
 ## 4. 配置结构
 
-基础 profile 示例：
+profile 结构示例：
 
 ```yaml
 dense:
-  name: bge_base
-  model_name: bge-base-zh-v1.5
-  import_path: dense.huggingface.HuggingFaceDense
+  name: <dense_name>
+  model_name: <dense_model>
+  import_path: <dense_class>
 
 sparse:
-  app:
-    type: bm25
-    tokenizer: jieba
-    import_path: sparse.bm25.BM25Sparse
+  type: <sparse_type>
+  import_path: <sparse_class>
 
 store:
-  type: qdrant
-  url: http://localhost:6333
+  type: <store_type>
   collections:
-    chunks: knowledge_chunks
-  import_path: store.qdrant.QdrantStore
+    chunks: <chunks_collection>
+  import_path: <store_class>
 
 search:
-  default_mode: hybrid
-  top_k: 20
-  fetch_k: 50
-  dense_weight: 0.5
-  sparse_weight: 0.5
-  rrf_k: 60
+  default_mode: <dense|sparse|hybrid>
+  top_k: <max_results>
+  fetch_k: <rerank_candidates>
+  dense_weight: <hybrid_dense_weight>
+  sparse_weight: <hybrid_sparse_weight>
+  rrf_k: <rrf_constant>
 
 logging:
-  level: INFO
-  max_bytes: 10485760
-  backup_count: 5
-  search_trace: true
-
-rerank: null
-
-ocr:
-  name: rapid
-  model_name: rapidocr
-  import_path: ocr.rapid.RapidOCR
-```
-
-BGE-M3 配置：
-
-```yaml
-dense:
-  name: bge_m3
-  model_name: bge-m3
-  import_path: dense.huggingface.HuggingFaceDense
-
-sparse:
-  app:
-    type: bm25
-    tokenizer: jieba
-    import_path: sparse.bm25.BM25Sparse
-  vector:
-    type: bge_m3
-    model_name: bge-m3
-    import_path: sparse.qdrant_bge_m3.QdrantBGEM3Sparse
-
-store:
-  type: qdrant
-  url: http://localhost:6333
-  collections:
-    chunks: qdrant_bge_m3_knowledge_chunks
-  import_path: store.qdrant.QdrantStore
-
-search:
-  default_mode: hybrid
-  top_k: 20
-  fetch_k: 50
-  dense_weight: 0.5
-  sparse_weight: 0.5
-  rrf_k: 60
-
-logging:
-  level: INFO
-  max_bytes: 10485760
-  backup_count: 5
-  search_trace: true
+  level: <log_level>
+  search_trace: <true|false>
 
 rerank:
-  name: bge_m3
-  model_name: bge-reranker-v2-m3
-  import_path: rerank.cross_encoder.CrossEncoderRerank
+  <rerank_name>:
+    enable: <true|false>
+    model_name: <rerank_model>
+    import_path: <rerank_class>
 
 ocr:
-  name: rapid
-  model_name: rapidocr
-  import_path: ocr.rapid.RapidOCR
+  <ocr_name>:
+    enable: <true|false>
+    model_name: <ocr_model>
+    import_path: <ocr_class>
 ```
 
 不同向量库的连接字段不强行统一。统一的是 `store` 暴露给 `search` 的能力。
 
-Qdrant 示例：
-
-```yaml
-store:
-  type: qdrant
-  url: http://localhost:6333
-  collections:
-    chunks: qdrant_bge_base_knowledge_chunks
-  import_path: store.qdrant.QdrantStore
-```
-
-Chroma 本地持久化示例：
-
-```yaml
-store:
-  type: chroma
-  persist_dir: chroma_data
-  collections:
-    chunks: chroma_bge_base_knowledge_chunks
-  import_path: store.chroma.ChromaStore
-```
-
-Milvus 示例：
-
-```yaml
-store:
-  type: milvus
-  uri: http://localhost:19530
-  collections:
-    chunks: milvus_bge_base_knowledge_chunks
-  import_path: store.milvus.MilvusStore
-```
-
-Milvus 评估 profile 按索引结构拆成多个文件：
-
-```text
-milvus-bge-base.yaml       -> BGE-base dense + app BM25
-milvus-bge-m3.yaml         -> BGE-M3 dense + BGE-M3 vector sparse + app BM25
-milvus-builtin-bm25.yaml   -> BGE-base dense + Milvus BM25 vector sparse + app BM25
-milvus-lite-bge-base.yaml       -> Milvus Lite + BGE-base dense + app BM25
-milvus-lite-bge-m3.yaml         -> Milvus Lite + BGE-M3 dense + BGE-M3 vector sparse + app BM25
-milvus-lite-builtin-bm25.yaml   -> Milvus Lite + BGE-base dense + Milvus BM25 vector sparse + app BM25
-```
-
-Milvus Standalone 和 Milvus Lite 使用不同 profile，不在同一个 yaml 里通过 `enable` 切 store。`http://localhost:19530` 表示 Milvus Standalone；`milvus_data/lite/*.db` 表示 Milvus Lite。Milvus 的 `bge-m3` 和 `builtin-bm25` profile 都同时配置 `sparse.app` 和 `sparse.vector`：上传会写入 vector sparse，查询时可在 app BM25 和 vector sparse 之间切换。
+同一个 profile 只声明一种 store 和一种 sparse 后端。运行形态不同、索引结构不同或模型组合不同，都应该拆成不同 profile，不在同一个 yaml 里用 `enable` 切换会改变索引结构的组件。
 
 Milvus 的索引策略按运行形态区分：
 
 - Milvus store 使用 `pymilvus.MilvusClient` 创建 schema、索引、写入和查询。
-- Milvus Standalone 的 dense 索引显式使用 `AUTOINDEX`。
-- Milvus Lite 的 dense 索引显式使用 `FLAT`。Lite 是嵌入式本地库，本机评测中 HNSW/FAISS 后台建索引会触发进程崩溃；`FLAT` 不做近似索引构建，适合本地开发和小数据量 benchmark。
-- Milvus sparse 索引按 sparse 类型选择：`bge_m3` 使用 `SPARSE_INVERTED_INDEX` + `IP`，`milvus_bm25` 使用 `SPARSE_INVERTED_INDEX` + `BM25`。
+- Standalone 和 Lite 使用不同索引策略，由 Store 实现按运行形态选择。
+- sparse 索引按 sparse 类型选择对应的 Milvus sparse index 和 metric。
 - `file_id` 是过滤字段，创建 collection 时会额外建 scalar index。
 
 ---
 
 ## 5. 模块目录
 
-目标目录结构：
+目录按职责分层：
 
 ```text
 backend/
   main.py
   bootstrap.py
   container.py
-  config.py
-  device.py
-  document_parser.py
-  download_models.py
   loader.py
   schema.py
-
   config/
-    local.yaml
-    docker-cpu.yaml
-    docker-gpu.yaml
-    qdrant-bge-base.yaml
-    qdrant-bge-m3.yaml
-    chroma-bge-base.yaml
-    chroma-bge-m3.yaml
-    milvus-bge-base.yaml
-    milvus-bge-m3.yaml
-    milvus-builtin-bm25.yaml
-    milvus-lite-bge-base.yaml
-    milvus-lite-bge-m3.yaml
-    milvus-lite-builtin-bm25.yaml
-
   dense/
-    base.py
-    huggingface.py
-
   sparse/
-    base.py
-    bm25.py
-    bge_m3_common.py
-    qdrant_bge_m3.py
-    milvus_bge_m3.py
-    milvus_bm25.py
-
   store/
-    base.py
-    qdrant.py
-    chroma.py
-    milvus.py
-
   search/
-    base.py
-    pipeline.py
-    runner.py
-
   rerank/
-    base.py
-    cross_encoder.py
-
   ocr/
-    base.py
-    rapid.py
-    paddle.py
-    tesseract.py
-
   tokenizer/
-    base.py
-    jieba_tokenizer.py
 ```
 
 模块职责：
 
 | 模块 | 职责 |
 |---|---|
-| `main.py` | FastAPI 应用、上传、搜索、删除、列表、配置端点 |
+| `main.py` | FastAPI 应用、鉴权、写入、搜索、删除、列表和配置入口 |
 | `bootstrap.py` | 创建 Application，管理组件启动和关闭 |
 | `container.py` | DI 容器，按配置组装组件并注入依赖 |
 | `config.py` | 应用配置入口，暴露搜索参数、模型路径、向量库配置 |
 | `device.py` | 检测当前可用计算设备；有 GPU 时优先使用 GPU，否则使用 CPU |
 | `download_models.py` | 下载或准备本地模型目录 |
-| `loader.py` | 读取 `CONFIG_FILE` 指定的 yaml；未设置时读取 `local.yaml` |
+| `loader.py` | 读取运行环境指定的 yaml profile |
 | `schema.py` | 校验配置结构和默认值 |
 | `document_parser.py` | 文件解析、OCR 调用、文本清理、chunk 生成 |
 | `dense/` | 生成 dense 向量 |
@@ -458,10 +344,9 @@ backend/
 
 - `dense/` 只负责 dense vector。
 - dense 能力接口命名为 `Dense`。
-- 当前 HuggingFace dense 实现命名为 `HuggingFaceDense`。
+- HuggingFace dense 实现命名为 `HuggingFaceDense`。
 - dense 模型通过 yaml 的 `model_name` 指定，启动时解析到 `models/` 下的实际路径。
-- BGE-M3 的模型加载和 lexical weights 归一化放在 `sparse/bge_m3_common.py`。
-- BGE-M3 的 sparse 向量库适配按向量库拆开，例如 `sparse/qdrant_bge_m3.py`、`sparse/milvus_bge_m3.py`，不放在 `dense/` 里。
+- 复用模型能力放在共享模块里，向量库 sparse 适配按 Store 拆开，不放在 `dense/` 里。
 
 ---
 
@@ -470,7 +355,7 @@ backend/
 启动目标流程：
 
 ```text
-1. 读取 CONFIG_FILE，未设置时使用 local.yaml
+1. 读取运行环境指定的配置 profile
 2. 解析 yaml
 3. 校验配置
 4. 创建 DI 容器
@@ -487,19 +372,18 @@ config = load_app_config()
 container = create_container(config)
 
 dense = container.dense()
-app_sparse = container.app_sparse()
-vector_sparse = container.vector_sparse()
-store = container.store(dense=dense, sparse=vector_sparse)
-search = container.search(store=store, app_sparse=app_sparse, vector_sparse=vector_sparse)
+sparse = container.sparse()
+store = container.store(dense=dense, sparse=sparse)
+search = container.search(store=store, sparse=sparse)
 rerank = container.rerank()
 ocr = container.ocr()
 ```
 
-`container.py` 使用 DI 容器组装组件。配置里的组件名映射到容器 provider，provider 负责创建具体实现和注入依赖。例如 `sparse.app.type=bm25` 与 `tokenizer=jieba` 会组装成 `BM25Sparse(tokenizer=JiebaTokenizer())`。`bootstrap.py` 只管理 Application 生命周期。FastAPI 启动后由后台线程初始化 Application；如果数据库暂时不可用，后端进程不退出，后台线程按退避间隔继续重试。搜索流程只依赖组件能力，不直接依赖具体实现类。
+`container.py` 使用 DI 容器组装组件。配置里的组件名映射到容器 provider，provider 负责创建实现并注入依赖。`bootstrap.py` 只管理 Application 生命周期。FastAPI 启动后由后台线程初始化 Application；如果数据库暂时不可用，后端进程不退出，后台线程按退避间隔继续重试。搜索流程只依赖组件能力，不直接依赖实现类。
 
-`Application.start()` 是唯一的组件启动入口，按固定顺序启动：dense、sparse、vector_sparse、store、search、rerank、ocr。其中 `vector_sparse` 和 `rerank` 只有在当前配置启用时才启动。`Application.stop()` 按反向顺序停止组件。
+`Application.start()` 是唯一的组件启动入口，按固定顺序启动：dense、sparse、store、search、rerank、ocr。其中 `rerank` 只有在 profile 启用时才启动。`Application.stop()` 按反向顺序停止组件。
 
-Store 和 Search 不负责偷偷启动 dense、sparse 或 vector_sparse，只校验依赖组件已经 ready。这样初始化和查询严格分离：模型只在启动阶段加载，查询阶段不会懒加载模型。启动某个组件失败时，`Application` 会记录对应的 `component_errors`，`/api/monitor` 根据错误把组件状态标成 `error`，前端用红色展示。
+Store 和 Search 不负责偷偷启动 dense 或 sparse，只校验依赖组件已经 ready。这样初始化和查询严格分离：模型只在启动阶段加载，查询阶段不会懒加载模型。启动某个组件失败时，`Application` 会记录对应的 `component_errors`，监控状态把组件标成 `error`。
 
 ---
 
@@ -538,8 +422,8 @@ class Store:
 
 写入规则：
 
-- 每个文件使用 `file_id` 替换范围。
-- 同一 `file_id` 写入前先删除旧 chunks，再插入新 chunks。
+- 每次索引生成一个新的全局 `file_id`。
+- 更新文件等价于删除旧 `file_id` 后重新索引。
 - `file_id`、`chunk_index`、`filename` 必须写入 chunk metadata。
 - 不同 `file_id` 的写入可以并发。
 - 读操作可以并发。
@@ -548,42 +432,37 @@ class Store:
 
 ## 8. Sparse 能力
 
-`sparse` 配置分成能力声明和查询选择。`sparse.app` 必须存在，当前是应用内 `bm25` + `jieba`；`sparse.vector` 可选，表示上传时会写入向量库 sparse vector 或向量库内置 sparse 索引。搜索流程里统一表现为 Sparse Retriever，但内部有两种路线：
+每个 profile 只配置一个 `sparse` 后端。`sparse` 属于索引结构的一部分，不做运行时切换；要切换 sparse 类型，需要使用对应 profile 和对应 collection。搜索流程里统一表现为 Sparse Retriever，但内部有两种路线：
 
 ```text
 应用内 Sparse Retriever
   -> 先从 store 取候选文本
   -> 应用内 `bm25` sparse 使用 `tokenizer=jieba` 打分
-  -> 适用于 sparse_mode=app
 
 Vector Sparse Retriever
   -> 查询向量库 sparse vector / 内置 sparse 能力
-  -> 适用于 sparse_mode=vector
 ```
 
 这两种都属于检索节点，都会放在 SearchPipeline 的 Retriever 位置；区别只是 sparse 分数在哪里计算。
 benchmark 报告中的 `sparse_impl` 使用 `app` 和 `vector` 区分这两条路线。
 
-`/api/config` 返回当前 profile 支持的 sparse 查询方式：
+配置读取结果包含 profile 固定使用的 sparse 后端：
 
 ```json
 {
   "sparse": {
-    "default_mode": "app",
-    "available_modes": ["app", "vector"]
+    "name": "<sparse_name>",
+    "tokenizer": "<tokenizer>"
   }
 }
 ```
-
-`/api/search` 可以传 `sparse_mode`。不传时默认 `app`；传 `vector` 时，当前 profile 必须配置 `sparse.vector`，否则返回 400。前端只展示 `available_modes` 里的选项。
 
 `bm25` sparse：
 
 ```yaml
 sparse:
-  app:
-    type: bm25
-    tokenizer: jieba
+  type: <sparse_type>
+  tokenizer: <tokenizer>
 ```
 
 流程：
@@ -594,10 +473,10 @@ sparse:
 3. 返回排序后的结果
 ```
 
-当前实现使用 `bm25` sparse + `tokenizer=jieba`：
+应用内 BM25 sparse 流程：
 
 ```text
-1. jieba 对查询和候选文本分词
+1. tokenizer 对查询和候选文本分词
 2. 去掉纯标点和单个汉字这类不稳定命中项
 3. BM25 对候选文本打分排序
 4. 不返回零命中文本
@@ -621,18 +500,7 @@ vector sparse
   -> score 来自 BM25 关键词打分
 ```
 
-BGE-M3 vector sparse：
-
-```yaml
-sparse:
-  app:
-    type: bm25
-    tokenizer: jieba
-  vector:
-    type: bge_m3
-```
-
-流程：
+模型型 vector sparse 流程：
 
 ```text
 1. 上传时 sparse 生成 sparse vector
@@ -641,38 +509,20 @@ sparse:
 4. store 执行 sparse vector 查询
 ```
 
-`milvus_bm25` sparse：
-
-```yaml
-sparse:
-  app:
-    type: bm25
-    tokenizer: jieba
-  vector:
-    type: milvus_bm25
-```
-
-流程：
+向量库内置 sparse 流程：
 
 ```text
-1. 上传时 `milvus_bm25` sparse 按 Milvus analyzer 从文本生成 BM25 sparse vector
-2. 查询时 Milvus 对查询文本执行同一套 analyzer
-3. sparse 由 Milvus 执行；hybrid 仍由 SearchPipeline 对 dense 和 sparse 结果做应用层融合
+1. 上传时按向量库 analyzer 从文本生成 sparse 索引数据
+2. 查询时向量库对查询文本执行同一套 analyzer
+3. sparse 由向量库执行；hybrid 仍由 SearchPipeline 对 dense 和 sparse 结果做应用层融合
 ```
-
-当前 `milvus_bm25` 使用 Milvus analyzer 的 `jieba` tokenizer，便于中文评估。它和应用内 `bm25` sparse 是两条不同路线，配置文件分开。
 
 这个设计可以兼容：
 
 ```text
-Qdrant + `bm25` sparse
-Qdrant + `bge_m3` sparse
-Chroma + `bm25` sparse
-Chroma + `bge_m3` dense + `bm25` sparse
-Milvus + `bm25` sparse
-Milvus + `bge_m3` dense + `bm25` sparse
-Milvus + `bge_m3` sparse
-Milvus + `milvus_bm25` sparse
+任意 Store + 应用内 sparse
+支持 sparse vector 的 Store + 模型型 vector sparse
+支持内置 sparse 的 Store + 向量库内置 sparse
 ```
 
 ---
@@ -685,7 +535,7 @@ Milvus + `milvus_bm25` sparse
 |---|---|
 | chunks | 存储所有文件 chunk |
 
-具体 collection 名由 yaml 决定。当前默认 collection 是 `knowledge_chunks`。文件范围通过 `file_id` metadata filter 表达；系统只有这一套 chunks collection。不同模型组合如果索引结构不兼容，必须使用不同 profile 或重建 collection，避免新旧向量混在一个索引里。
+collection 名由 yaml profile 决定。文件范围通过 `file_id` metadata filter 表达；系统只有这一套 chunks 逻辑集合。不同模型组合如果索引结构不兼容，必须使用不同 profile 或重建 collection，避免新旧向量混在一个索引里。
 
 ---
 
@@ -703,10 +553,10 @@ chunk metadata：
 
 ```json
 {
-  "file_id": "upstream-file-001",
-  "filename": "faq.pdf",
+  "file_id": "<file_id>",
+  "filename": "<filename>",
   "chunk_index": 0,
-  "s3_url": "s3://bucket/path/to/faq.pdf"
+  "s3_url": "<s3_url>"
 }
 ```
 
@@ -741,16 +591,77 @@ chunk 文本会随分块一起写入向量库。不同向量库的原生字段�
 
 ---
 
-## 11. 文档解析与切片
+## 11. 内容存储边界
+
+系统默认使用 `vector` 内容存储形态：chunk 正文随向量一起写入向量库。Qdrant 使用 payload `content`，Chroma 使用 `documents`，Milvus 使用 scalar 字段 `text`。这种形态适合轻量部署，少一个事实数据库，文件列表和删除能力都从 chunk metadata 聚合得到。
+
+系统保留 `postgres` 内容存储形态作为可选架构：Postgres 做文件和 chunk 的事实表，向量库只做检索索引。该形态适合需要文件状态、精确统计、审计、复杂管理查询或大规模数据治理的部署。
+
+两种内容存储形态的数据职责：
+
+| 数据 | `vector` 形态 | `postgres` 形态 |
+|---|---|---|
+| chunk 正文 | 向量库 | Postgres |
+| dense vector | 向量库 | 向量库 |
+| vector sparse | 向量库 | 向量库 |
+| `file_id` 过滤字段 | 向量库 metadata/scalar | 向量库 metadata/scalar + Postgres |
+| `chunk_id` | 向量库主键 | Postgres 主键 + 向量库引用 |
+| 文件列表 | 从向量库 metadata 聚合 | 从 Postgres 查询 |
+| 文件状态 | 不保存 | Postgres |
+
+`postgres` 形态的最小事实表：
+
+```sql
+create table files (
+  id text primary key,
+  filename text not null,
+  s3_url text,
+  status text not null
+);
+
+create table chunks (
+  id text primary key,
+  file_id text not null references files(id),
+  chunk_index integer not null,
+  content text not null
+);
+```
+
+`postgres` 形态下，写入流程由 ContentStore 和 VectorStore 共同完成：
+
+```text
+1. 写入入口接收 presigned_url + s3_url
+2. RAG 生成 file_id
+3. DocumentParser 解析、OCR、切 chunk
+4. ContentStore 写入 files 和 chunks
+5. VectorStore 写入 chunk_id、file_id、chunk_index 和 vector
+6. 写入入口返回 file_id 或异步任务状态
+```
+
+查询流程：
+
+```text
+1. VectorStore 按 query + file_id filter 搜索
+2. VectorStore 返回 chunk_id、file_id、chunk_index、score
+3. ContentStore 按 chunk_id 批量读取 content 和文件信息
+4. SearchPipeline 合并 score、content、metadata
+5. rerank 和 format_response 使用合并后的结果
+```
+
+`vector` 和 `postgres` 两种形态不能直接切配置复用同一份旧数据。切换内容存储形态时，必须迁移 chunk 正文和索引引用，或重新索引原始文件，保证 `chunk_id`、`file_id` 和正文来源一致。
+
+---
+
+## 12. 文档解析与切片
 
 上传文件先解析成纯文本，再切成 chunk 写入 store。
 
-当前切片规则：
+切片参数由配置决定：
 
-| 参数 | 值 |
+| 参数 | 含义 |
 |---|---|
-| chunk size | 250 |
-| overlap | 50 |
+| chunk size | 单个 chunk 的目标长度 |
+| overlap | 相邻 chunk 的重叠长度 |
 
 切片按中文文档常见边界拆分，优先使用段落、换行、中文句号、感叹号、问号、分号、逗号和空格。
 
@@ -758,7 +669,7 @@ chunk 文本会随分块一起写入向量库。不同向量库的原生字段�
 
 ---
 
-## 12. 搜索计划
+## 13. 搜索计划
 
 `SearchPlan` 描述一次搜索：
 
@@ -766,14 +677,13 @@ chunk 文本会随分块一起写入向量库。不同向量库的原生字段�
 SearchPlan(
     query="查询内容",
     mode="hybrid",
-    top_k=20,
+    top_k=max_results,
     rerank=False,
-    fetch_k=50,
-    dense_weight=0.5,
-    sparse_weight=0.5,
-    rrf_k=60,
-    file_ids=["upstream-file-001"],
-    sparse_mode="app",
+    fetch_k=rerank_candidates,
+    dense_weight=hybrid_dense_weight,
+    sparse_weight=hybrid_sparse_weight,
+    rrf_k=rrf_constant,
+    file_ids=["<file_id>"],
 )
 ```
 
@@ -789,12 +699,11 @@ SearchPlan(
 | `dense_weight` | 本次 hybrid 查询的 dense 权重 |
 | `sparse_weight` | 本次 hybrid 查询的 sparse 权重 |
 | `rrf_k` | 本次 hybrid 查询的 RRF 参数 |
-| `file_ids` | 查询文件范围；不传表示全量搜索 |
-| `sparse_mode` | sparse 查询方式，`app` / `vector` |
+| `file_ids` | 查询文件范围；不传时搜索全库 |
 
 ---
 
-## 13. 搜索执行
+## 14. 搜索执行
 
 检索阶段数量：
 
@@ -854,31 +763,31 @@ hybrid -> dense + sparse 并发后应用层 RRF 融合；sparse 可以是应用�
 
 `top_k` 是最多返回条数，不是必须填满。sparse 不补满，查不到就可以返回空；dense 和 hybrid 如果不做额外相关性判断，本质上都是 top_k 排序，在库里有足够文档时可能返回到 `top_k` 条，不保证结果真的相关。
 
-`rrf_k` 是 hybrid 的 RRF 融合参数，当前代码在 `search/pipeline.py` 中使用它计算 dense/sparse 融合分。它不是返回条数，也不是候选池大小。
+`rrf_k` 是 hybrid 的 RRF 融合参数，用于计算 dense/sparse 融合分。它不是返回条数，也不是候选池大小。
 
 ---
 
-## 14. 日志
+## 15. 日志
 
 日志配置跟随业务 yaml：
 
 ```yaml
 logging:
-  level: INFO
-  max_bytes: 10485760
-  backup_count: 5
-  search_trace: true
+  level: <log_level>
+  max_bytes: <max_bytes>
+  backup_count: <backup_count>
+  search_trace: <true|false>
 ```
 
 默认只输出到 stdout，不写本地文件。如果配置 `file`，则同时写 stdout 和本地滚动文件：
 
 ```yaml
 logging:
-  level: INFO
-  file: logs/rag.jsonl
-  max_bytes: 10485760
-  backup_count: 5
-  search_trace: true
+  level: <log_level>
+  file: <log_file>
+  max_bytes: <max_bytes>
+  backup_count: <backup_count>
+  search_trace: <true|false>
 ```
 
 日志格式统一是 JSONL，一行一条 JSON。普通应用日志和搜索链路日志使用同一个格式，通过 `logger` 和 `event` 区分：
@@ -890,73 +799,28 @@ logging:
 
 `rag.app` 记录启动、关闭、模型加载、OCR 加载、上传、删除、异常等应用事件。`rag.trace` 记录一次搜索的链路信息，包括查询参数、总耗时、结果数量和阶段耗时。`search_trace: false` 时不输出搜索链路日志。
 
+后端同时维护一份内存日志 ring buffer，保存最近运行日志。SSE 日志流在连接建立后先输出最近日志，再持续输出实时运行日志。运行日志和搜索 trace 共享 JSONL 日志格式，但读取入口不同。
+
 Docker 模式下，应用仍输出 JSONL 到 stdout。Docker Compose 使用 `json-file` driver 按大小滚动容器日志，避免日志无限增长。
 
 LangSmith 和本地 JSONL 日志可以同时开启。LangSmith 用于查看 LangChain Runnable / Retriever 的可视化链路；JSONL 日志是本地和生产环境都能保留的基础日志。
 
 ---
 
-## 15. BGE-M3 扩展
+## 16. 多模型扩展
 
-`bge-m3` 作为新增配置组合接入，不替换 `bge-base-zh-v1.5` 组合。
-
-当前组合：
-
-```text
-dense  -> bge-base-zh-v1.5
-sparse -> bm25 + tokenizer=jieba
-store  -> Qdrant dense vector
-rerank -> 可选；CPU 默认不启用
-```
-
-`bge-m3` 相关组合：
-
-```text
-dense  -> bge-m3 dense vector，仍通过 LangChain HuggingFaceEmbeddings 执行
-sparse -> bm25 时走应用内检索；bge_m3 时走向量库 sparse vector
-store  -> Qdrant 或 Milvus 使用 bge_m3 vector sparse 时会同时保存 sparse vector；Chroma 当前只使用 dense vector + 应用内 bm25
-rerank -> bge-reranker-v2-m3
-```
-
-相关文件：
-
-```text
-sparse/qdrant_bge_m3.py
-sparse/bge_m3_common.py
-sparse/milvus_bge_m3.py
-schema.py
-bootstrap.py
-container.py
-store/qdrant.py
-store/chroma.py
-store/milvus.py
-search/pipeline.py
-backend/config/qdrant-bge-base.yaml
-backend/config/qdrant-bge-m3.yaml
-backend/config/chroma-bge-base.yaml
-backend/config/chroma-bge-m3.yaml
-backend/config/milvus-bge-base.yaml
-backend/config/milvus-bge-m3.yaml
-backend/config/milvus-builtin-bm25.yaml
-backend/config/milvus-lite-bge-base.yaml
-backend/config/milvus-lite-bge-m3.yaml
-backend/config/milvus-lite-builtin-bm25.yaml
-backend/config/local.yaml
-backend/config/docker-cpu.yaml
-backend/config/docker-gpu.yaml
-```
+新模型作为新的 profile 接入，不替换既有 profile。dense、sparse、rerank 分别通过各自接口扩展，Store 只关心向量维度、字段结构、索引类型和过滤能力是否匹配。
 
 索引规则：
 
-- `bge-m3` 和 `bge-base-zh-v1.5` 不能混用同一个已有索引；切换配置后需要重新上传、重建索引，或改用另一组 collection 名。
 - 不在同一个 collection 里混用不同 dense 向量维度。
-- 不在旧 dense-only collection 里直接写入 BGE-M3 vector sparse。
+- 不在 dense-only collection 里直接写入 vector sparse。
 - 代码不会在启动时阻止使用已有 collection；切换模型、sparse 类型或向量库结构后，由配置和 collection 名约定保证索引不混用。
 - 测试用例使用测试 collection 或临时目录，不复用生产 collection。
 
 ---
 
-## 16. 部署
+## 17. 部署
 
 后端启动只依赖一个配置入口：
 
@@ -969,18 +833,16 @@ CONFIG_FILE=/path/to/config.yaml
 - 向量库使用独立持久化存储。
 - 模型文件保存在固定路径。
 - 配置文件由部署环境指定。
-- `/api/health` 表示后端进程存活；`/api/ready` 表示 RAG 组件和向量库已初始化完成。
-- 该设计对应 Kubernetes 的 liveness/readiness 模式：`/api/health` 可作为 liveness probe，`/api/ready` 可作为 readiness probe。
-- RAG 未 ready 时，上传、查询、文档列表、scope 列表等业务接口返回 503；后台初始化成功后自动恢复。
+- 健康检查表示后端进程存活；就绪检查表示 RAG 组件和向量库已初始化完成。
+- 该设计对应 Kubernetes 的 liveness/readiness 模式：健康检查可作为 liveness probe，就绪检查可作为 readiness probe。
+- RAG 未 ready 时，写入、查询、文档列表等业务入口返回 503；后台初始化成功后自动恢复。
 - LangSmith tracing 由部署环境通过 `LANGSMITH_TRACING`、`LANGSMITH_API_KEY`、`LANGSMITH_PROJECT` 控制，不写入 yaml。
 - 不同检索组合使用不同 collection 或 index。
-- Qdrant、Chroma、Milvus 等具体服务按各自方式部署。Milvus Standalone 使用 `--profile milvus` 启动；Milvus Lite 不需要 Docker 服务，只需要把 `uri` 指向本地 `.db` 文件。
+- Qdrant、Chroma、Milvus 等具体服务按各自方式部署；服务型数据库和嵌入式文件库的部署边界要分开处理。
 - 同名文件替换使用 document key 细粒度锁或按 document key 分区的写入队列。
 - 向量库数据目录需要独立备份。
 
-Docker 开发模式分 CPU 和 GPU 两套 compose。CPU 配置位于 `deploy/cpu/docker-compose.yml`，默认使用 `docker-cpu.yaml`；GPU 配置位于 `deploy/gpu/docker-compose.yml`，默认使用 `docker-gpu.yaml`。代码目录挂载进容器，`uvicorn --reload` 会在代码变更后自动重启。前端使用 Vite dev server，代码目录挂载进容器，支持热更新。
-
-GPU Docker 配置在 `deploy/gpu/docker-compose.yml`，GPU 声明使用 Docker Compose 官方推荐的 device reservation 写法：
+Docker 开发模式按计算资源拆分运行入口。GPU 声明使用 Docker Compose device reservation 写法：
 
 ```yaml
 deploy:
@@ -992,20 +854,6 @@ deploy:
           capabilities: [gpu]
 ```
 
-本地数据目录按数据库产品分组：
+Docker Compose 默认设置 `TZ=Asia/Shanghai`，对外展示时间和日志时间会按该时区输出。存储层仍保存 UTC 时间；部署到其他时区时通过外部 `TZ` 环境变量覆盖展示时区。
 
-```text
-qdrant_data/
-
-chroma_data/
-
-milvus_data/
-  standalone/
-    etcd/
-    minio/
-    milvus/
-  lite/
-    lite.db
-```
-
-Qdrant 和 Milvus Standalone 是服务型数据库，backend 通过网络访问。Chroma local 和 Milvus Lite 是嵌入式文件库，本地后端和 Docker 后端使用同一份数据目录；不要同时启动两个后端访问同一份嵌入式库文件。
+数据目录按数据库产品分组。服务型数据库由独立进程持有数据目录；嵌入式文件库由后端进程直接读写，不要同时启动多个后端访问同一份嵌入式库文件。

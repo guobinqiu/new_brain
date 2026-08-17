@@ -21,26 +21,7 @@ class SparseBackendConfig:
     import_path: str | None = None
 
 
-@dataclass(frozen=True)
-class SparseConfig:
-    app: SparseBackendConfig
-    vector: SparseBackendConfig | None = None
-
-    @property
-    def name(self) -> str:
-        return self.app.name
-
-    @property
-    def model_path(self) -> str | None:
-        return self.app.model_path
-
-    @property
-    def tokenizer(self) -> str | None:
-        return self.app.tokenizer
-
-    @property
-    def import_path(self) -> str | None:
-        return self.app.import_path
+SparseConfig = SparseBackendConfig
 
 
 @dataclass(frozen=True)
@@ -79,6 +60,25 @@ class LoggingConfig:
 
 
 @dataclass(frozen=True)
+class AdminAuthConfig:
+    username: str
+    password: str
+
+
+@dataclass(frozen=True)
+class AppAuthConfig:
+    app_id: str
+    access_key: str
+    secret_key: str
+
+
+@dataclass(frozen=True)
+class AuthConfig:
+    admin: AdminAuthConfig
+    app: AppAuthConfig
+
+
+@dataclass(frozen=True)
 class RerankConfig:
     name: str
     model_path: str
@@ -102,6 +102,7 @@ class AppConfig:
     search: SearchConfig
     rerank: RerankConfig | None
     ocr: OCRConfig
+    auth: AuthConfig
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     available_components: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     name: str = ""
@@ -114,20 +115,20 @@ def parse_app_config(raw: dict[str, Any]) -> AppConfig:
     collections = store.get("collections") or {}
     search = raw.get("search") or {}
     logging = raw.get("logging") or {}
+    auth = raw.get("auth") or {}
     rerank = raw.get("rerank")
     ocr = raw.get("ocr")
+    auth_admin = auth.get("admin") or {}
+    auth_app = auth.get("app") or {}
 
     store_type = _required(store, "type", "store")
     dense_name = _component_name(dense, "dense")
-    sparse_app = _parse_sparse_app(sparse)
-    sparse_vector = _parse_sparse_vector(sparse)
-    sparse_name = sparse_app.name
+    sparse_config = _parse_sparse_backend(sparse, "sparse")
+    sparse_name = sparse_config.name
     rerank_name = _component_name(rerank, "rerank") if rerank is not None else None
     ocr_name = _component_name(ocr, "ocr")
     _validate_supported("dense", dense_name, {"test_dense", "bge_base", "bge_base_zh_v15", "bge_m3", "dense/huggingface"})
     _validate_supported("sparse", sparse_name, {"bm25", "bge_m3", "milvus_bm25", "sparse/bm25", "sparse/qdrant_bge_m3", "sparse/milvus_bge_m3", "sparse/milvus_bm25"})
-    if sparse_vector is not None:
-        _validate_supported("sparse.vector", sparse_vector.name, {"bge_m3", "milvus_bm25", "sparse/qdrant_bge_m3", "sparse/milvus_bge_m3", "sparse/milvus_bm25"})
     if rerank_name is not None:
         _validate_supported("rerank", rerank_name, {"test_rerank", "bge_base", "bge_large", "bge_m3", "bge_reranker_base", "bge_reranker_large", "bge_reranker_v2_m3", "rerank/cross_encoder"})
     _validate_supported("ocr", ocr_name, {"test_ocr", "rapid", "paddle", "rapidocr", "paddleocr", "tesseract", "ocr/rapid", "ocr/paddle", "ocr/tesseract"})
@@ -139,29 +140,16 @@ def parse_app_config(raw: dict[str, Any]) -> AppConfig:
         _required(store, "persist_dir", "store")
     if store_type in ("milvus", "milvus_lite", "store/milvus"):
         _required(store, "uri", "store")
-    if store_type in ("chroma", "store/chroma") and sparse_vector is not None:
+    if store_type in ("chroma", "store/chroma") and sparse_config.name in ("bge_m3", "milvus_bm25", "sparse/qdrant_bge_m3", "sparse/milvus_bge_m3", "sparse/milvus_bm25"):
         raise ValueError("Chroma 不支持 bge_m3 sparse")
-    sparse_app_model_path = _required(sparse_app.__dict__, "model_path", "sparse.app") if sparse_app.name in ("bge_m3", "sparse/qdrant_bge_m3", "sparse/milvus_bge_m3") else None
-    sparse_vector_model_path = (
-        _required(sparse_vector.__dict__, "model_path", "sparse.vector")
-        if sparse_vector is not None and sparse_vector.name in ("bge_m3", "sparse/qdrant_bge_m3", "sparse/milvus_bge_m3")
-        else None
-    )
-    if sparse_app_model_path is not None:
-        sparse_app = SparseBackendConfig(
-            name=sparse_app.name,
-            model_path=sparse_app_model_path,
-            model_name=sparse_app.model_name,
-            tokenizer=sparse_app.tokenizer,
-            import_path=sparse_app.import_path,
-        )
-    if sparse_vector is not None and sparse_vector_model_path is not None:
-        sparse_vector = SparseBackendConfig(
-            name=sparse_vector.name,
-            model_path=sparse_vector_model_path,
-            model_name=sparse_vector.model_name,
-            tokenizer=sparse_vector.tokenizer,
-            import_path=sparse_vector.import_path,
+    sparse_model_path = _required(sparse_config.__dict__, "model_path", "sparse") if sparse_config.name in ("bge_m3", "sparse/qdrant_bge_m3", "sparse/milvus_bge_m3") else None
+    if sparse_model_path is not None:
+        sparse_config = SparseBackendConfig(
+            name=sparse_config.name,
+            model_path=sparse_model_path,
+            model_name=sparse_config.model_name,
+            tokenizer=sparse_config.tokenizer,
+            import_path=sparse_config.import_path,
         )
 
     return AppConfig(
@@ -171,7 +159,13 @@ def parse_app_config(raw: dict[str, Any]) -> AppConfig:
             model_name=dense.get("model_name"),
             import_path=dense.get("import_path"),
         ),
-        sparse=SparseConfig(app=sparse_app, vector=sparse_vector),
+        sparse=SparseConfig(
+            name=sparse_config.name,
+            model_path=sparse_config.model_path,
+            model_name=sparse_config.model_name,
+            tokenizer=sparse_config.tokenizer,
+            import_path=sparse_config.import_path,
+        ),
         store=StoreConfig(
             type=store_type,
             url=store.get("url"),
@@ -197,6 +191,17 @@ def parse_app_config(raw: dict[str, Any]) -> AppConfig:
             max_bytes=int(logging.get("max_bytes", 10485760)),
             backup_count=int(logging.get("backup_count", 5)),
             search_trace=bool(logging.get("search_trace", True)),
+        ),
+        auth=AuthConfig(
+            admin=AdminAuthConfig(
+                username=str(auth_admin.get("username", "admin")),
+                password=str(auth_admin.get("password", "admin123")),
+            ),
+            app=AppAuthConfig(
+                app_id=str(auth_app.get("app_id", "imsdom")),
+                access_key=str(auth_app.get("access_key", "0d01c6bc9577a6dae3095cb7972a9f8c")),
+                secret_key=str(auth_app.get("secret_key", "78ddbd0730125b050b607c81c8398c4fe96f707cfa66f222d42a8eeae3aa47e6")),
+            ),
         ),
         rerank=RerankConfig(
             name=rerank_name,
@@ -231,31 +236,11 @@ def _sparse_name(value: Any) -> str:
     raise ValueError("sparse is required")
 
 
-def _parse_sparse_app(value: Any) -> SparseBackendConfig:
-    if isinstance(value, dict) and "app" in value:
-        app = value.get("app")
-        if not isinstance(app, dict):
-            raise ValueError("sparse.app is required")
-        return _parse_sparse_backend(app, "sparse.app")
-    if isinstance(value, dict) and "vector" in value:
-        raise ValueError("sparse.app is required")
-    if isinstance(value, dict):
-        return _parse_sparse_backend(value, "sparse")
-    raise ValueError("sparse.app is required")
-
-
-def _parse_sparse_vector(value: Any) -> SparseBackendConfig | None:
-    if not isinstance(value, dict) or "vector" not in value:
-        return None
-    vector = value.get("vector")
-    if vector is None:
-        return None
-    if not isinstance(vector, dict):
-        raise ValueError("sparse.vector must be an object")
-    return _parse_sparse_backend(vector, "sparse.vector")
-
-
-def _parse_sparse_backend(value: dict[str, Any], section_name: str) -> SparseBackendConfig:
+def _parse_sparse_backend(value: Any, section_name: str) -> SparseBackendConfig:
+    if not isinstance(value, dict):
+        raise ValueError("sparse is required")
+    if "app" in value or "vector" in value:
+        raise ValueError("sparse must define exactly one backend")
     name = value.get("type") or value.get("name")
     if name is None:
         raise ValueError(f"{section_name}.type is required")

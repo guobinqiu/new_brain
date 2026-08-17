@@ -1,22 +1,29 @@
 import os
+import asyncio
 import logging
 import threading
-import tempfile
+import json
+import uuid
 from io import BytesIO
 from collections import deque
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from contextlib import asynccontextmanager
 from typing import Any, Literal
 from urllib.parse import urlparse
 
-import httpx
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import Depends, FastAPI, Header, Request, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from minio import Minio
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+from auth import Principal, authenticate_client_signature, authenticate_password, issue_token, principal_from_authorization
 from bootstrap import Application
-from indexing import create_file_id, index_file
+from store.files import count_files_from_documents, list_files_from_documents
+from indexing import create_file_id, enqueue_index_job, index_file, index_presigned_object
+from indexing.queue import IndexQueueRejected, IndexQueueUnavailable, get_index_job, list_index_jobs, _redis_url
+from indexing.service import SUPPORTED_FILE_EXTENSIONS, filename_from_s3_url, parse_s3_url, validate_supported_file_extension
+from log_buffer import logs_after, recent_logs
 from search import SearchPlan, _SearchExecutor
 from config import SEARCH_CONFIG
 from logging_config import configure_logging
@@ -28,7 +35,6 @@ logger = logging.getLogger("rag.app")
 class SearchRequest(BaseModel):
     query: str = Field(..., min_length=1)
     mode: Literal["dense", "sparse", "hybrid"] = SEARCH_CONFIG["default_mode"]
-    sparse_mode: Literal["app", "vector"] = "app"
     top_k: int = Field(SEARCH_CONFIG["top_k"], ge=1, le=50)
     rerank: bool = SEARCH_CONFIG["rerank"]
     fetch_k: int = Field(SEARCH_CONFIG["fetch_k"], ge=1)
@@ -49,7 +55,8 @@ class SearchRequest(BaseModel):
 
 
 class ObjectIndexRequest(BaseModel):
-    file_id: str | None = Field(None, min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_.:-]+$")
+    model_config = ConfigDict(extra="forbid")
+
     presigned_url: str = Field(..., min_length=1)
     s3_url: str = Field(..., min_length=1)
     filename: str | None = None
@@ -121,48 +128,81 @@ def ready():
         raise HTTPException(503, "search is not initialized")
     return {"status": "ready"}
 
+
+def create_job_id() -> str:
+    return uuid.uuid4().hex
+
+
+def _require_principal(authorization: str | None = Header(None)) -> Principal:
+    return principal_from_authorization(application.config.auth, authorization)
+
+
+@app.post("/api/auth/token")
+async def auth_token(request: Request):
+    body = await request.body()
+    try:
+        data = json.loads(body.decode("utf-8") or "{}")
+    except json.JSONDecodeError as exc:
+        raise HTTPException(400, "invalid json") from exc
+    grant_type = data.get("grant_type")
+    if grant_type == "password":
+        principal = authenticate_password(application.config.auth, data.get("username"), data.get("password"))
+    elif grant_type == "client_credentials":
+        principal = authenticate_client_signature(application.config.auth, request, body)
+    else:
+        raise HTTPException(400, "unsupported grant_type")
+    return {
+        "access_token": issue_token(application.config.auth, principal),
+        "token_type": "Bearer",
+    }
+
+
 @app.get("/api/config")
-def get_config():
+def get_config(_: Principal = Depends(_require_principal)):
     cfg = dict(SEARCH_CONFIG)
     cfg["config_name"] = application.config_name
     cfg["store"] = _store_config()
     cfg["dense"] = _component_config(application.config.dense)
-    cfg["sparse"] = {
-        "default_mode": "app",
-        "available_modes": _available_sparse_modes(),
-        "app": _component_config(application.config.sparse.app),
-        "vector": _component_config(application.config.sparse.vector),
-    }
+    cfg["sparse"] = _component_config(application.config.sparse)
     cfg["rerank"] = _component_config(application.config.rerank)
     cfg["ocr"] = _component_config(application.config.ocr)
     cfg["available_components"] = application.config.available_components
     return cfg
 
 @app.get("/api/monitor")
-def monitor():
-    data = {
-        "files": 0,
-        "total_chunks": 0,
-        "collections": {
-            "chunks": application.config.store.collections.chunks,
-        },
-    }
-    if application.ready:
-        data.update(
-            {
-                "files": application.store.count_files(),
-                "total_chunks": application.store.get_total_chunks(),
-            }
-        )
+def monitor(_: Principal = Depends(_require_principal)):
     return {
         "ready": application.ready,
         "profile": _profile(),
         "components": _components(),
         "capabilities": _capabilities(),
         "index_contract": _index_contract(),
-        "data": data,
-        "search_traces": _recent_search_traces(),
     }
+
+
+@app.get("/api/traces")
+def traces(limit: int = 50, cursor: str | None = None, _: Principal = Depends(_require_principal)):
+    try:
+        return _recent_search_traces(limit=limit, cursor=cursor)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/logs")
+async def logs(request: Request, _: Principal = Depends(_require_principal)):
+    async def stream():
+        initial_events, last_seq = _initial_log_events()
+        for event in initial_events:
+            yield event
+        while not await request.is_disconnected():
+            await asyncio.sleep(1)
+            rows = logs_after(last_seq)
+            for row in rows:
+                last_seq = max(last_seq, row["seq"])
+                yield _sse(row)
+
+    return StreamingResponse(stream(), media_type="text/event-stream")
+
 
 def index_chunks(
     path: str,
@@ -178,12 +218,13 @@ def index_chunks(
 @app.post("/api/upload")
 async def upload_file(
     file: UploadFile = File(...),
+    _: Principal = Depends(_require_principal),
 ):
     if not file.filename:
         raise HTTPException(400, "No filename")
     
     ext = os.path.splitext(file.filename)[1].lower()
-    if ext not in (".pdf", ".txt", ".md", ".markdown", ".docx", ".png", ".jpg", ".jpeg", ".webp", ".bmp"):
+    if ext not in SUPPORTED_FILE_EXTENSIONS:
         raise HTTPException(400, f"Unsupported file type: {ext}")
     
     try:
@@ -200,16 +241,24 @@ async def upload_file(
 
 
 @app.post("/api/index")
-def index_object(req: ObjectIndexRequest):
+def index_object(req: ObjectIndexRequest, _: Principal = Depends(_require_principal)):
     _require_ready()
     filename = req.filename or _filename_from_s3_url(req.s3_url)
     ext = os.path.splitext(filename)[1].lower()
-    if ext not in (".pdf", ".txt", ".md", ".markdown", ".docx", ".png", ".jpg", ".jpeg", ".webp", ".bmp"):
-        raise HTTPException(400, f"Unsupported file type: {ext}")
-    file_id = req.file_id or create_file_id()
-    path = Path(_download_presigned_file(req.presigned_url, ext))
     try:
-        index_file(application, file_id, path, filename, extra_metadata={"s3_url": req.s3_url})
+        validate_supported_file_extension(ext)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    file_id = create_file_id()
+    try:
+        count = index_presigned_object(
+            application,
+            file_id=file_id,
+            presigned_url=req.presigned_url,
+            s3_url=req.s3_url,
+            filename=filename,
+        )
+        logger.info("Object indexed", extra={"event": "object_indexed", "document_filename": filename, "file_id": file_id, "s3_url": req.s3_url, "chunk_count": count})
         return {"file_id": file_id}
     except HTTPException:
         raise
@@ -220,8 +269,79 @@ def index_object(req: ObjectIndexRequest):
         raise HTTPException(500, str(e))
 
 
+@app.post("/api/index/jobs", status_code=202)
+def create_index_job(req: ObjectIndexRequest, _: Principal = Depends(_require_principal)):
+    _require_ready()
+    filename = req.filename or _filename_from_s3_url(req.s3_url)
+    ext = os.path.splitext(filename)[1].lower()
+    try:
+        validate_supported_file_extension(ext)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    file_id = create_file_id()
+    job_id = create_job_id()
+    try:
+        job = enqueue_index_job(
+            job_id=job_id,
+            file_id=file_id,
+            presigned_url=req.presigned_url,
+            s3_url=req.s3_url,
+            filename=filename,
+        )
+        return {"job_id": job.id}
+    except HTTPException:
+        raise
+    except IndexQueueRejected as e:
+        raise HTTPException(429, str(e))
+    except IndexQueueUnavailable as e:
+        raise HTTPException(503, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        logger.exception("Object index job failed", extra={"event": "object_index_job_failed", "document_filename": filename, "s3_url": req.s3_url})
+        raise HTTPException(500, str(e))
+
+
+@app.get("/api/index/jobs")
+def index_jobs(limit: int = 50, cursor: str | None = None, _: Principal = Depends(_require_principal)):
+    try:
+        page = list_index_jobs(limit=limit, cursor=cursor)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except IndexQueueUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {
+        "jobs": [_index_job_record(job) for job in page["jobs"]],
+        "next_cursor": page["next_cursor"],
+        "has_more": page["has_more"],
+    }
+
+
+@app.get("/api/index/jobs/{job_id}")
+def index_job_status(job_id: str, _: Principal = Depends(_require_principal)):
+    try:
+        job = get_index_job(job_id)
+    except IndexQueueUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if job is None:
+        return {
+            "file_id": None,
+            "job_id": job_id,
+            "status": "not_found",
+            "filename": None,
+            "s3_url": None,
+            "chunk_count": None,
+            "error": None,
+            "created_at": None,
+            "enqueued_at": None,
+            "started_at": None,
+            "ended_at": None,
+        }
+    return _index_job_record(job)
+
+
 @app.post("/api/presign")
-def presign_object(req: PresignRequest):
+def presign_object(req: PresignRequest, _: Principal = Depends(_require_principal)):
     bucket, object_name = _parse_s3_url(req.s3_url)
     client = _minio_client()
     try:
@@ -237,10 +357,8 @@ def presign_object(req: PresignRequest):
 
 
 @app.post("/api/search")
-def search(req: SearchRequest):
+def search(req: SearchRequest, _: Principal = Depends(_require_principal)):
     _require_ready()
-    if req.sparse_mode == "vector" and application.vector_sparse is None:
-        raise HTTPException(400, "current profile does not support sparse_mode=vector")
     effective_rerank = bool(req.rerank and application.rerank is not None)
     plan = SearchPlan(
         req.query,
@@ -252,13 +370,11 @@ def search(req: SearchRequest):
         sparse_weight=req.sparse_weight,
         rrf_k=req.rrf_k,
         file_ids=req.file_ids,
-        sparse_mode=req.sparse_mode,
     )
     executor = _SearchExecutor(
         plan,
         rerank=application.rerank,
         sparse=application.sparse,
-        vector_sparse=application.vector_sparse,
         store=application.store,
         search_trace=application.config.logging.search_trace,
     )
@@ -273,7 +389,6 @@ def search(req: SearchRequest):
         "dense_weight": req.dense_weight,
         "sparse_weight": req.sparse_weight,
         "rrf_k": req.rrf_k,
-        "sparse_mode": req.sparse_mode,
         "elapsed_ms": elapsed_ms,
     }
 
@@ -281,13 +396,6 @@ def search(req: SearchRequest):
 def _require_ready():
     if not application.ready:
         raise HTTPException(503, "search is not initialized")
-
-
-def _available_sparse_modes() -> list[str]:
-    modes = ["app"]
-    if application.vector_sparse is not None:
-        modes.append("vector")
-    return modes
 
 
 def _component_config(component: Any) -> dict[str, Any] | None:
@@ -323,10 +431,7 @@ def _profile() -> dict[str, Any]:
         "config_name": application.config_name,
         "store": _store_config(),
         "dense": _component_config(application.config.dense),
-        "sparse": {
-            "app": _component_config(application.config.sparse.app),
-            "vector": _component_config(application.config.sparse.vector),
-        },
+        "sparse": _component_config(application.config.sparse),
         "rerank": _component_config(application.config.rerank),
         "ocr": _component_config(application.config.ocr),
     }
@@ -335,7 +440,6 @@ def _profile() -> dict[str, Any]:
 def _capabilities() -> dict[str, Any]:
     return {
         "search_modes": ["dense", "sparse", "hybrid"],
-        "sparse_modes": _available_sparse_modes(),
         "rerank": application.rerank is not None,
         "ocr": application.ocr is not None,
         "config_write": False,
@@ -347,28 +451,17 @@ def _index_contract() -> dict[str, Any]:
     store = application.config.store
     return {
         "dense": _component_config(application.config.dense),
-        "sparse_app": _component_config(application.config.sparse.app),
-        "vector_sparse_enabled": application.config.sparse.vector is not None,
-        "sparse_vector": _component_config(application.config.sparse.vector),
+        "sparse": _component_config(application.config.sparse),
         "rerank": _component_config(application.config.rerank),
         "ocr": _component_config(application.config.ocr),
         "collections": {
             "chunks": store.collections.chunks,
         },
-        "sparse_modes": _available_sparse_modes(),
     }
 
 
 def _components() -> list[dict[str, Any]]:
-    sparse_model = application.config.sparse.app
-    sparse_error = application.component_errors.get("sparse") or application.component_errors.get("vector_sparse")
-    sparse = {
-        "name": "Sparse",
-        "status": _component_status(application.sparse, enabled=application.config.sparse.app is not None, error=sparse_error),
-        "model": _component_model(sparse_model),
-        "mode": "app",
-        "available_modes": _available_sparse_modes(),
-    }
+    sparse_error = application.component_errors.get("sparse")
     return [
         {
             "name": "Store",
@@ -376,11 +469,20 @@ def _components() -> list[dict[str, Any]]:
             "model": application.config.store.type,
         },
         {
+            "name": "Redis",
+            "status": "ready" if _redis_ready() else "error",
+            "model": _redis_url(),
+        },
+        {
             "name": "Dense",
             "status": _component_status(application.dense, enabled=application.config.dense is not None, error=application.component_errors.get("dense")),
             "model": _component_model(application.config.dense),
         },
-        sparse,
+        {
+            "name": "Sparse",
+            "status": _component_status(application.sparse, enabled=application.config.sparse is not None, error=sparse_error),
+            "model": _component_model(application.config.sparse),
+        },
         {
             "name": "Rerank",
             "status": _component_status(application.rerank, enabled=application.config.rerank is not None, error=application.component_errors.get("rerank")),
@@ -399,6 +501,8 @@ def _component_status(component: Any, *, enabled: bool, error: str | None = None
         return "disabled"
     if error:
         return "error"
+    if not application.ready:
+        return "loading"
     return "ready" if _is_ready(component) else "loading"
 
 
@@ -410,6 +514,16 @@ def _component_model(component_config: Any) -> str | None:
 
 def _is_ready(component: Any) -> bool:
     return bool(getattr(component, "ready", False))
+
+
+def _redis_ready() -> bool:
+    try:
+        from redis import Redis
+
+        Redis.from_url(_redis_url(), socket_connect_timeout=0.2, socket_timeout=0.2).ping()
+        return True
+    except Exception:
+        return False
 
 
 def _start_application_until_ready(stop_event: threading.Event):
@@ -434,10 +548,10 @@ def _start_application_until_ready(stop_event: threading.Event):
             retry_seconds = min(retry_seconds * 2, STARTUP_RETRY_MAX_INTERVAL_SECONDS)
 
 @app.get("/api/files")
-def files(limit: int = 50, cursor: str | None = None):
+def files(limit: int = 50, cursor: str | None = None, _: Principal = Depends(_require_principal)):
     _require_ready()
     try:
-        page = application.store.list_files(limit=limit, cursor=cursor)
+        page = list_files_from_documents(_visible_documents(), limit=limit, cursor=cursor)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {
@@ -448,17 +562,17 @@ def files(limit: int = 50, cursor: str | None = None):
 
 
 @app.get("/api/chunks")
-def chunks(limit: int = 50, cursor: str | None = None):
+def chunks(limit: int = 50, cursor: str | None = None, file_ids: str | None = None, _: Principal = Depends(_require_principal)):
     _require_ready()
     try:
-        page = _chunk_page(application.store.get_search_documents(None), limit=limit, cursor=cursor)
+        page = _chunk_page(_visible_documents(_parse_file_ids(file_ids)), limit=limit, cursor=cursor)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return page
 
 
 @app.delete("/api/files/{file_id}")
-def delete_file(file_id: str):
+def delete_file(file_id: str, _: Principal = Depends(_require_principal)):
     _require_ready()
     count = application.store.delete_file_chunks(file_id)
     logger.info(
@@ -477,6 +591,7 @@ def _file_record(record) -> dict[str, Any]:
         "id": record.id,
         "filename": record.filename,
         "chunk_count": record.chunk_count,
+        "created_at": _iso_datetime(record.created_at),
     }
     return data
 
@@ -508,25 +623,38 @@ def _chunk_record(document: dict) -> dict[str, Any]:
         "filename": metadata.get("filename"),
         "chunk_index": metadata.get("chunk_index"),
         "s3_url": metadata.get("s3_url"),
+        "created_at": _iso_datetime(metadata.get("created_at")),
         "content": document.get("content"),
     }
 
 
+def _visible_documents(file_ids: list[str] | None = None) -> list[dict]:
+    return application.store.get_search_documents(application.store.build_file_filter(file_ids))
+
+
+def _parse_file_ids(value: str | None) -> list[str] | None:
+    if value is None:
+        return None
+    file_ids = [item.strip() for item in value.split(",") if item.strip()]
+    if not file_ids:
+        raise ValueError("file_ids cannot be empty")
+    if len(file_ids) > 1000:
+        raise ValueError("file_ids exceeds max limit: 1000")
+    return file_ids
+
+
 def _filename_from_s3_url(s3_url: str) -> str:
-    _, object_name = _parse_s3_url(s3_url)
-    filename = Path(object_name).name
-    if not filename:
-        raise HTTPException(400, "filename is required when s3_url has no object name")
-    return filename
+    try:
+        return filename_from_s3_url(s3_url)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 def _parse_s3_url(s3_url: str) -> tuple[str, str]:
-    parsed = urlparse(s3_url)
-    bucket = parsed.netloc
-    object_name = parsed.path.lstrip("/")
-    if not bucket or not object_name:
-        raise HTTPException(400, "s3_url must include bucket and object key")
-    return bucket, object_name
+    try:
+        return parse_s3_url(s3_url)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 def _minio_client() -> Minio:
@@ -558,17 +686,6 @@ def _upload_file_to_storage(filename: str, content: bytes, content_type: str) ->
     return f"s3://{bucket}/{object_name}"
 
 
-def _download_presigned_file(presigned_url: str, suffix: str) -> str:
-    response = httpx.get(presigned_url, timeout=60)
-    response.raise_for_status()
-    handle = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
-    try:
-        handle.write(response.content)
-        return handle.name
-    finally:
-        handle.close()
-
-
 def _append_search_trace(trace: dict[str, Any] | None) -> None:
     if trace is None:
         return
@@ -576,6 +693,73 @@ def _append_search_trace(trace: dict[str, Any] | None) -> None:
         _search_traces.appendleft(trace)
 
 
-def _recent_search_traces() -> list[dict[str, Any]]:
+def _recent_search_traces(limit: int = 50, cursor: str | None = None) -> dict[str, Any]:
+    if limit <= 0:
+        raise ValueError("limit must be greater than 0")
+    limit = min(limit, 200)
+    start = int(cursor) if cursor else 0
     with _search_traces_lock:
-        return list(_search_traces)
+        rows = list(_search_traces)
+    page = rows[start:start + limit]
+    next_index = start + limit
+    return {
+        "traces": page,
+        "next_cursor": str(next_index) if next_index < len(rows) else None,
+        "has_more": next_index < len(rows),
+    }
+
+
+def _initial_log_events(limit: int = 200) -> tuple[list[str], int]:
+    last_seq = 0
+    events = []
+    for row in recent_logs(limit):
+        last_seq = max(last_seq, row["seq"])
+        events.append(_sse(row))
+    return events, last_seq
+
+
+def _sse(row: dict[str, Any]) -> str:
+    return f"data: {json.dumps(row, ensure_ascii=False, default=str)}\n\n"
+
+
+def _iso_datetime(value) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        value = datetime.fromisoformat(value)
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone().isoformat(timespec="seconds")
+
+
+def _job_error(job) -> str | None:
+    exc_info = getattr(job, "exc_info", None)
+    if not exc_info:
+        return None
+    lines = [line.strip() for line in str(exc_info).splitlines() if line.strip()]
+    return lines[-1] if lines else str(exc_info)
+
+
+def _job_status(job) -> str:
+    status = job.get_status(refresh=True)
+    return getattr(status, "value", str(status))
+
+
+def _index_job_record(job, file_id: str | None = None) -> dict[str, Any]:
+    result = job.result if isinstance(job.result, dict) else {}
+    meta = getattr(job, "meta", {}) or {}
+    resolved_file_id = file_id or result.get("file_id") or meta.get("file_id")
+    status = _job_status(job)
+    return {
+        "file_id": resolved_file_id,
+        "job_id": job.id,
+        "status": status,
+        "filename": meta.get("filename"),
+        "s3_url": meta.get("s3_url"),
+        "chunk_count": result.get("chunk_count"),
+        "error": _job_error(job) if status == "failed" else None,
+        "created_at": _iso_datetime(job.created_at),
+        "enqueued_at": _iso_datetime(job.enqueued_at),
+        "started_at": _iso_datetime(job.started_at),
+        "ended_at": _iso_datetime(job.ended_at),
+    }

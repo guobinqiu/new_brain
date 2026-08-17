@@ -4,6 +4,7 @@ import logging
 import threading
 import time
 import uuid
+from datetime import datetime
 from contextlib import contextmanager
 from typing import Any, Iterator
 
@@ -36,10 +37,10 @@ class SearchTrace:
         extra = {
             "event": "search_trace",
             "trace_id": self.trace_id,
+            "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
             "name": "search",
             "query": plan.query,
             "mode": plan.mode,
-            "sparse_mode": plan.sparse_mode,
             "top_k": plan.top_k,
             "rerank": plan.rerank,
             "fetch_k": plan.fetch_k,

@@ -36,10 +36,13 @@ def _file_records(documents: list[dict]) -> list[FileRecord]:
                 "id": str(file_id),
                 "filename": metadata.get("filename") or "",
                 "chunk_count": 0,
+                "created_at": metadata.get("created_at"),
             },
         )
         item["chunk_count"] += 1
         if not item["filename"] and metadata.get("filename"):
             item["filename"] = metadata["filename"]
+        if metadata.get("created_at") and (not item["created_at"] or metadata["created_at"] < item["created_at"]):
+            item["created_at"] = metadata["created_at"]
     records = [FileRecord(**item) for item in grouped.values()]
-    return sorted(records, key=lambda record: record.id, reverse=True)
+    return sorted(records, key=lambda record: (record.created_at or "", record.id), reverse=True)

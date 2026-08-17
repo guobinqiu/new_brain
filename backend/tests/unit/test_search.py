@@ -162,7 +162,6 @@ def test_executor_invokes_runnable_with_file_id_langsmith_metadata(monkeypatch):
     assert captured["config"]["metadata"] == {
         "query": "query",
         "mode": "hybrid",
-        "sparse_mode": "app",
         "top_k": 3,
         "rerank": True,
         "fetch_k": 9,

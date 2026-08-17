@@ -1,4 +1,5 @@
 import pytest
+from pathlib import Path
 
 
 pytestmark = pytest.mark.e2e
@@ -59,17 +60,21 @@ class TestUploadAPI:
             f"Expected 400 or 422, got {resp.status_code}: {resp.text}"
         )
 
-    def test_index_presigned_url_accepts_file_id(self, api_client, test_txt_path, monkeypatch):
-        """``POST /api/index`` uses caller-provided file_id when present."""
+    def test_index_presigned_url_generates_file_id_for_app(self, app_api_client, test_txt_path, monkeypatch):
+        """``POST /api/index`` generates the indexed file_id."""
         import main
 
-        monkeypatch.setattr(main, "_download_presigned_file", lambda presigned_url, suffix: test_txt_path)
+        def index_object(application, file_id, presigned_url, s3_url, filename):
+            main.index_file(main.application, file_id, Path(test_txt_path), filename, extra_metadata={"s3_url": s3_url})
+            return 1
+
+        monkeypatch.setattr(main, "create_file_id", lambda: "generatedfile001")
+        monkeypatch.setattr(main, "index_presigned_object", index_object)
 
         s3_url = "s3://rag-dev/test_ai.txt"
-        resp = api_client.post(
+        resp = app_api_client.post(
             "/api/index",
             json={
-                "file_id": "upstream-file-001",
                 "presigned_url": "https://example.com/presigned",
                 "s3_url": s3_url,
                 "filename": "test_ai.txt",
@@ -78,23 +83,24 @@ class TestUploadAPI:
 
         assert resp.status_code == 200, resp.text
         file_id = resp.json()["file_id"]
-        assert file_id == "upstream-file-001"
-        record = _uploaded_file(api_client, file_id)
+        assert file_id == "generatedfile001"
+        assert resp.json() == {"file_id": "generatedfile001"}
+        record = _uploaded_file(app_api_client, file_id)
         assert record["filename"] == "test_ai.txt"
-        search = api_client.post("/api/search", json={"query": "人工智能", "mode": "dense", "file_ids": [file_id]})
+        search = app_api_client.post("/api/search", json={"query": "人工智能", "mode": "dense", "file_ids": [file_id]})
         assert search.status_code == 200, search.text
         result = search.json()["results"][0]
         assert result["metadata"]["file_id"] == file_id
         assert result["metadata"]["s3_url"] == s3_url
 
-    def test_index_presigned_url_generates_file_id_when_omitted(self, api_client, test_txt_path, monkeypatch):
+    def test_index_presigned_url_generates_file_id_when_omitted(self, app_api_client, test_txt_path, monkeypatch):
         """``POST /api/index`` generates a file_id when caller omits it."""
         import main
 
-        monkeypatch.setattr(main, "_download_presigned_file", lambda presigned_url, suffix: test_txt_path)
         monkeypatch.setattr(main, "create_file_id", lambda: "generatedfile001")
+        monkeypatch.setattr(main, "index_presigned_object", lambda application, file_id, presigned_url, s3_url, filename: 1)
 
-        resp = api_client.post(
+        resp = app_api_client.post(
             "/api/index",
             json={
                 "presigned_url": "https://example.com/presigned",
@@ -104,13 +110,56 @@ class TestUploadAPI:
         )
 
         assert resp.status_code == 200, resp.text
-        assert resp.json()["file_id"] == "generatedfile001"
+        assert resp.json() == {"file_id": "generatedfile001"}
+
+    def test_async_index_job_generates_file_id_when_omitted(self, app_api_client, monkeypatch):
+        """``POST /api/index/jobs`` creates an async index job."""
+        import main
+
+        class FakeJob:
+            id = "job001"
+
+        monkeypatch.setattr(main, "create_file_id", lambda: "generatedfile001")
+        monkeypatch.setattr(main, "create_job_id", lambda: "job001")
+        monkeypatch.setattr(main, "enqueue_index_job", lambda **kwargs: FakeJob())
+
+        resp = app_api_client.post(
+            "/api/index/jobs",
+            json={
+                "presigned_url": "https://example.com/presigned",
+                "s3_url": "s3://rag-dev/generated.txt",
+                "filename": "test_ai.txt",
+            },
+        )
+
+        assert resp.status_code == 202, resp.text
+        assert resp.json() == {"job_id": "job001"}
+
+    def test_index_presigned_url_rejects_caller_file_id(self, app_api_client):
+        """``POST /api/index`` does not accept caller-provided file_id."""
+        import main
+
+        resp = app_api_client.post(
+            "/api/index",
+            json={
+                "file_id": "business-file-001",
+                "presigned_url": "https://example.com/presigned",
+                "s3_url": "s3://rag-dev/business.txt",
+                "filename": "test_ai.txt",
+            },
+        )
+
+        assert resp.status_code == 422
 
     def test_index_presigned_url_can_infer_filename_from_s3_url(self, api_client, test_txt_path, monkeypatch):
         """``POST /api/index`` uses the object name when filename is omitted."""
         import main
 
-        monkeypatch.setattr(main, "_download_presigned_file", lambda presigned_url, suffix: test_txt_path)
+        def index_object(application, file_id, presigned_url, s3_url, filename):
+            main.index_file(main.application, file_id, Path(test_txt_path), filename, extra_metadata={"s3_url": s3_url})
+            return 1
+
+        monkeypatch.setattr(main, "index_presigned_object", index_object)
 
         resp = api_client.post(
             "/api/index",

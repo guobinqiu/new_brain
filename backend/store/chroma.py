@@ -238,7 +238,7 @@ def _ensure_collection() -> None:
         except Exception as exc:
             if "Sparse vector indexing is not enabled in local" in str(exc):
                 raise RuntimeError(
-                    "本地 Chroma 不支持 vector sparse。Chroma 本地配置请只使用 sparse.app。"
+                    "本地 Chroma 不支持 vector sparse。Chroma 本地配置请使用 sparse.type=bm25。"
                 ) from exc
             raise
         return

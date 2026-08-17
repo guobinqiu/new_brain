@@ -7,6 +7,7 @@ class FileRecord:
     id: str
     filename: str
     chunk_count: int
+    created_at: str | None = None
 
 
 @dataclass(frozen=True)

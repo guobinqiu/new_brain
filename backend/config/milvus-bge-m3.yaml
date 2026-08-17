@@ -3,6 +3,14 @@ logging:
   max_bytes: 10485760
   backup_count: 5
   search_trace: true
+auth:
+  admin:
+    username: admin
+    password: admin123
+  app:
+    app_id: imsdom
+    access_key: 0d01c6bc9577a6dae3095cb7972a9f8c
+    secret_key: 78ddbd0730125b050b607c81c8398c4fe96f707cfa66f222d42a8eeae3aa47e6
 store:
   type: milvus
   uri: http://localhost:19530
@@ -15,14 +23,9 @@ dense:
   model_name: bge-m3
   import_path: dense.huggingface.HuggingFaceDense
 sparse:
-  app:
-    type: bm25
-    tokenizer: jieba
-    import_path: sparse.bm25.BM25Sparse
-  vector:
-    type: bge_m3
-    model_name: bge-m3
-    import_path: sparse.milvus_bge_m3.MilvusBGEM3Sparse
+  type: bge_m3
+  model_name: bge-m3
+  import_path: sparse.milvus_bge_m3.MilvusBGEM3Sparse
 search:
   default_mode: hybrid
   top_k: 20

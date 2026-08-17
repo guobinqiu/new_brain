@@ -12,18 +12,27 @@
     "database": "数据库",
     "search": "搜索",
     "monitor": "监控",
+    "logs": "日志",
     "config": "配置"
+  },
+  "auth": {
+    "title": "登录",
+    "desc": "进入 RAG 管理台",
+    "username": "用户名",
+    "password": "密码",
+    "login": "登录",
+    "logout": "退出"
   },
   "common": {
     "all": "全部",
     "refresh": "刷新",
     "loading": "加载中",
     "loadMore": "加载更多",
+    "copy": "复制",
     "delete": "删除",
     "deleting": "删除中"
   },
   "search": {
-    "sparse": "sparse",
     "topK": "返回条数",
     "rerank": "重排",
     "fetchK": "候选池",
@@ -49,17 +58,35 @@
     "empty": "暂无上传文件",
     "uploadingFile": "正在上传 {name}...",
     "presigningFile": "正在生成下载签名 {name}...",
-    "indexingFile": "正在索引 {name}...",
-    "indexedFile": "{name} 已索引，file_id: {fileId}",
+    "indexingFile": "正在创建索引任务 {name}...",
+    "indexedFile": "{name} 已加入索引队列，job_id: {jobId}",
+    "indexWaiting": "索引处理中：{jobId} · {status}",
+    "indexFinished": "{name} 索引完成，file_id: {fileId}",
+    "indexFailed": "{name} 索引失败：{error}",
     "indexedDone": "索引完成：{fileIds}",
     "deletingFile": "正在删除 {name}...",
     "deletedFile": "{name} 已删除，删除 {count} 个分块"
   },
   "monitor": {
-    "title": "运行状态",
+    "title": "监控",
     "components": "组件",
-    "traces": "查询日志",
-    "empty": "暂无查询"
+    "indexJobs": "索引",
+    "traces": "链路",
+    "noIndexJobs": "暂无索引任务",
+    "indexQueueUnavailable": "索引队列不可用，请启动 Redis",
+    "noTraces": "暂无查询",
+    "jobFilter": {
+      "all": "全部",
+      "processing": "处理中",
+      "finished": "成功",
+      "failed": "失败"
+    },
+    "jobStatus": {
+      "processing": "处理中",
+      "finished": "成功",
+      "failed": "失败",
+      "missing": "未找到"
+    }
   },
   "status": {
     "ready": "就绪",
@@ -69,16 +96,47 @@
   },
   "database": {
     "title": "数据库",
-    "stats": "统计",
-    "storage": "存储",
     "location": "地址/路径",
-    "sparseModes": "sparse 模式",
     "chunks": "向量数据",
+    "query": "查询",
+    "fileIdsPlaceholder": "英文逗号分隔多个 file_id",
     "empty": "暂无向量数据"
+  },
+  "trace": {
+    "title": "查询链路",
+    "desc": "最近搜索请求的阶段耗时",
+    "empty": "暂无查询",
+    "columns": {
+      "time": "时间",
+      "query": "查询",
+      "mode": "模式",
+      "topK": "条数",
+      "elapsed": "总耗时",
+      "prepare": "准备",
+      "dense": "Dense",
+      "sparse": "Sparse",
+      "fusion": "融合",
+      "dedupe": "去重",
+      "rerank": "重排",
+      "format": "格式化"
+    }
+  },
+  "logs": {
+    "title": "日志",
+    "desc": "最近运行日志和实时输出",
+    "empty": "暂无日志",
+    "columns": {
+      "time": "时间",
+      "level": "级别",
+      "logger": "来源",
+      "event": "事件",
+      "message": "消息"
+    }
   },
   "config": {
     "title": "配置",
     "searchDefaults": "搜索默认值",
-    "components": "组件配置"
+    "components": "组件配置",
+    "storage": "存储路径"
   }
 }

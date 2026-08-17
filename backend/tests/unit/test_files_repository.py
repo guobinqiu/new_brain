@@ -9,9 +9,9 @@ def test_list_files_from_documents_groups_chunks_and_paginates():
 
     page = list_files_from_documents(
         [
-            {"metadata": {"file_id": "file_a", "filename": "a.pdf", "chunk_index": 0}},
-            {"metadata": {"file_id": "file_a", "filename": "a.pdf", "chunk_index": 1}},
-            {"metadata": {"file_id": "file_b", "filename": "b.pdf", "chunk_index": 0}},
+            {"metadata": {"file_id": "file_a", "filename": "a.pdf", "chunk_index": 0, "created_at": "2026-08-17T10:00:00+08:00"}},
+            {"metadata": {"file_id": "file_a", "filename": "a.pdf", "chunk_index": 1, "created_at": "2026-08-17T10:00:01+08:00"}},
+            {"metadata": {"file_id": "file_b", "filename": "b.pdf", "chunk_index": 0, "created_at": "2026-08-17T11:00:00+08:00"}},
         ],
         limit=1,
     )
@@ -20,6 +20,7 @@ def test_list_files_from_documents_groups_chunks_and_paginates():
     assert page.files[0].id == "file_b"
     assert page.files[0].filename == "b.pdf"
     assert page.files[0].chunk_count == 1
+    assert page.files[0].created_at == "2026-08-17T11:00:00+08:00"
     assert page.next_cursor == "1"
     assert page.has_more is True
 

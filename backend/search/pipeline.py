@@ -18,19 +18,15 @@ from store.base import Store
 
 
 class SearchPipeline:
-    def __init__(self, store: Store, app_sparse: Sparse, vector_sparse: Sparse | None = None):
+    def __init__(self, store: Store, sparse: Sparse):
         self.store = store
-        self.sparse = app_sparse
-        self.app_sparse = app_sparse
-        self.vector_sparse = vector_sparse
+        self.sparse = sparse
         self.ready = False
 
     def start(self) -> None:
         set_default_store(self.store)
-        if not self.app_sparse.ready:
+        if not self.sparse.ready:
             raise RuntimeError("sparse is not initialized")
-        if self.vector_sparse is not None and not self.vector_sparse.ready:
-            raise RuntimeError("vector sparse is not initialized")
         self.ready = True
 
     def stop(self) -> None:
@@ -100,13 +96,10 @@ class SearchPlan:
     sparse_weight: float = 0.5
     rrf_k: int = 60
     file_ids: list[str] | None = None
-    sparse_mode: str = "app"
 
     def __post_init__(self):
         if self.mode not in ("dense", "sparse", "hybrid"):
             raise ValueError(f"unsupported search mode: {self.mode}")
-        if self.sparse_mode not in ("app", "vector"):
-            raise ValueError(f"unsupported sparse_mode: {self.sparse_mode}")
         if self.file_ids is not None:
             if len(self.file_ids) == 0:
                 raise ValueError("file_ids cannot be empty")
@@ -120,14 +113,12 @@ class _SearchExecutor:
         plan: SearchPlan,
         rerank: Rerank | None = None,
         sparse: Sparse | None = None,
-        vector_sparse: Sparse | None = None,
         store: Store | None = None,
         search_trace: bool = False,
     ):
         self.plan = plan
         self.rerank = rerank
         self.sparse = sparse
-        self.vector_sparse = vector_sparse
         self.store = store or _active_store()
         self.runner = SearchRunner()
         self._runtime_retrieve_limit = self.plan.top_k
@@ -153,7 +144,6 @@ class _SearchExecutor:
             "metadata": {
                 "query": self.plan.query,
                 "mode": self.plan.mode,
-                "sparse_mode": self.plan.sparse_mode,
                 "top_k": self.plan.top_k,
                 "rerank": self.plan.rerank,
                 "fetch_k": self.plan.fetch_k,
@@ -203,7 +193,7 @@ class _SearchExecutor:
     def _retriever(self, mode: str) -> _SearchRetriever:
         return _SearchRetriever(
             store=self.store,
-            sparse=self._selected_sparse(),
+            sparse=self.sparse,
             mode=mode,
             query=self.plan.query,
             trace=self.trace,
@@ -218,24 +208,17 @@ class _SearchExecutor:
 
     def _retrieve_collection(self, metadata_filter, limit: int) -> list[dict]:
         if self.plan.mode == "sparse":
-            return _retrieve_sparse(self.store, metadata_filter, self.plan.query, limit, self._selected_sparse())
+            return _retrieve_sparse(self.store, metadata_filter, self.plan.query, limit, self.sparse)
         if self.plan.mode == "hybrid":
             dense_items, sparse_items = self.runner.run_dense_and_sparse(
                 lambda: _retrieve_dense(self.store, metadata_filter, self.plan.query, limit),
-                lambda: _retrieve_sparse(self.store, metadata_filter, self.plan.query, limit, self._selected_sparse()),
+                lambda: _retrieve_sparse(self.store, metadata_filter, self.plan.query, limit, self.sparse),
             )
             return _weighted_reciprocal_rank(dense_items, sparse_items, limit, self.plan)
         return _retrieve_dense(self.store, metadata_filter, self.plan.query, limit)
 
     def _retrieve_dense_context(self, context: dict) -> list[dict]:
         return _retrieve_dense(self.store, context["metadata_filter"], self.plan.query, context["retrieve_limit"])
-
-    def _selected_sparse(self) -> Sparse | None:
-        if self.plan.sparse_mode == "vector":
-            if self.vector_sparse is None:
-                raise ValueError("current profile does not support sparse_mode=vector")
-            return self.vector_sparse
-        return self.sparse
 
     def _retrieve_sparse_context(self, context: dict) -> list[dict]:
         return _retrieve_sparse(self.store, context["metadata_filter"], self.plan.query, context["retrieve_limit"], self.sparse)

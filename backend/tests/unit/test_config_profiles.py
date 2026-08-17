@@ -41,29 +41,25 @@ def test_profiles_fix_index_shaping_components():
         assert "import_path" in config["store"]
 
 
-def test_profiles_define_app_sparse_and_optional_vector_sparse():
-    vector_sparse_profiles = {
-        "docker-gpu.yaml",
-        "qdrant-bge-m3.yaml",
-        "milvus-bge-m3.yaml",
-        "milvus-builtin-bm25.yaml",
-        "milvus-lite-bge-m3.yaml",
-        "milvus-lite-builtin-bm25.yaml",
+def test_profiles_define_one_sparse_backend_from_filename():
+    expected = {
+        "docker-gpu.yaml": "bge_m3",
+        "qdrant-bge-m3.yaml": "bge_m3",
+        "milvus-bge-m3.yaml": "bge_m3",
+        "milvus-builtin-bm25.yaml": "milvus_bm25",
+        "milvus-lite-bge-m3.yaml": "bge_m3",
+        "milvus-lite-builtin-bm25.yaml": "milvus_bm25",
     }
 
     for path in CONFIG_DIR.glob("*.yaml"):
         sparse = _read_config(path.name)["sparse"]
 
-        assert sparse["app"]["type"] == "bm25"
-        assert sparse["app"]["tokenizer"] == "jieba"
-        assert sparse["app"]["import_path"] == "sparse.bm25.BM25Sparse"
-        if path.name in vector_sparse_profiles:
-            assert set(sparse) == {"app", "vector"}
+        if path.name in expected:
+            assert sparse["type"] == expected[path.name]
         else:
-            assert set(sparse) == {"app"}
-        if "vector" in sparse:
-            assert sparse["vector"]["type"] in ("bge_m3", "milvus_bm25")
-            assert "import_path" in sparse["vector"]
+            assert sparse["type"] == "bm25"
+            assert sparse["tokenizer"] == "jieba"
+        assert "import_path" in sparse
 
 
 def test_profiles_select_at_most_one_rerank_component():
@@ -89,10 +85,9 @@ def test_profiles_use_explicit_import_paths_not_legacy_module_paths():
                 assert "module" not in component
                 assert "import_path" in component
                 assert "." in component["import_path"]
-        for component in config["sparse"].values():
-            assert "module" not in component
-            assert "import_path" in component
-            assert "." in component["import_path"]
+        assert "module" not in config["sparse"]
+        assert "import_path" in config["sparse"]
+        assert "." in config["sparse"]["import_path"]
 
 
 def test_profiles_keep_runtime_ocr_candidates():
@@ -104,11 +99,11 @@ def test_profiles_keep_runtime_ocr_candidates():
         assert ocr["tesseract"]["enable"] is False
 
 
-def test_chroma_profile_does_not_include_unsupported_store_sparse_candidate():
+def test_chroma_profile_uses_app_bm25_sparse():
     for filename in ("chroma-bge-base.yaml", "chroma-bge-m3.yaml"):
         config = _read_config(filename)
 
-        assert set(config["sparse"]) == {"app"}
+        assert config["sparse"]["type"] == "bm25"
 
 
 def test_profiles_define_search_result_and_candidate_limits():
@@ -164,10 +159,8 @@ def test_docker_gpu_profile_uses_benchmark_backed_retrieval_with_stronger_rerank
 
     assert config["dense"]["model_name"] == "bge-m3"
     assert config["dense"]["import_path"] == "dense.huggingface.HuggingFaceDense"
-    assert config["sparse"]["app"]["tokenizer"] == "jieba"
-    assert config["sparse"]["app"]["import_path"] == "sparse.bm25.BM25Sparse"
-    assert config["sparse"]["vector"]["type"] == "bge_m3"
-    assert config["sparse"]["vector"]["import_path"] == "sparse.qdrant_bge_m3.QdrantBGEM3Sparse"
+    assert config["sparse"]["type"] == "bge_m3"
+    assert config["sparse"]["import_path"] == "sparse.qdrant_bge_m3.QdrantBGEM3Sparse"
     rerank = _enabled_components(config["rerank"])[0]
     assert rerank["model_name"] == "bge-reranker-v2-m3"
     assert rerank["import_path"] == "rerank.cross_encoder.CrossEncoderRerank"
@@ -179,9 +172,9 @@ def test_docker_cpu_profile_keeps_lightweight_models_with_app_bm25_sparse():
 
     assert config["dense"]["model_name"] == "bge-base-zh-v1.5"
     assert config["dense"]["import_path"] == "dense.huggingface.HuggingFaceDense"
-    assert config["sparse"]["app"]["tokenizer"] == "jieba"
-    assert config["sparse"]["app"]["import_path"] == "sparse.bm25.BM25Sparse"
-    assert "vector" not in config["sparse"]
+    assert config["sparse"]["type"] == "bm25"
+    assert config["sparse"]["tokenizer"] == "jieba"
+    assert config["sparse"]["import_path"] == "sparse.bm25.BM25Sparse"
     assert _enabled_components(config["rerank"]) == []
     assert config["search"]["default_mode"] == "hybrid"
 

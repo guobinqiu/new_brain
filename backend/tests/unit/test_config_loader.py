@@ -90,19 +90,16 @@ ocr: test_ocr
     assert config.logging.search_trace is False
 
 
-def test_load_app_config_supports_sparse_app_and_optional_vector(monkeypatch, tmp_path):
+def test_load_app_config_supports_single_vector_sparse(monkeypatch, tmp_path):
     from loader import load_app_config
 
-    path = tmp_path / "sparse_vector.yaml"
+    path = tmp_path / "single_vector_sparse.yaml"
     path.write_text(
         """
 dense: bge_m3
 sparse:
-  app:
-    type: bm25
-    tokenizer: jieba
-  vector:
-    type: bge_m3
+  type: bge_m3
+  model_name: bge-m3
 store:
   type: qdrant
   url: http://localhost:6333
@@ -119,21 +116,20 @@ ocr: test_ocr
 
     config = load_app_config()
 
-    assert config.sparse.app.name == "bm25"
-    assert config.sparse.app.tokenizer == "jieba"
-    assert config.sparse.vector is not None
-    assert config.sparse.vector.name == "bge_m3"
-    assert config.sparse.vector.model_path == str(PROJECT_ROOT / "models" / "bge-m3")
+    assert config.sparse.name == "bge_m3"
+    assert config.sparse.model_path == str(PROJECT_ROOT / "models" / "bge-m3")
 
 
-def test_load_app_config_requires_sparse_app(monkeypatch, tmp_path):
+def test_load_app_config_rejects_nested_sparse_backends(monkeypatch, tmp_path):
     from loader import load_app_config
 
-    path = tmp_path / "missing_app_sparse.yaml"
+    path = tmp_path / "nested_sparse.yaml"
     path.write_text(
         """
 dense: bge_m3
 sparse:
+  app:
+    type: bm25
   vector:
     type: bge_m3
 store:
@@ -150,7 +146,7 @@ ocr: test_ocr
     )
     monkeypatch.setenv("CONFIG_FILE", str(path))
 
-    with pytest.raises(ValueError, match="sparse.app is required"):
+    with pytest.raises(ValueError, match="sparse must define exactly one backend"):
         load_app_config()
 
 
@@ -164,9 +160,8 @@ dense:
   name: bge_m3
   model_name: bge-m3
 sparse:
-  app:
-    type: bm25
-    tokenizer: jieba
+  type: bm25
+  tokenizer: jieba
 store:
   type: qdrant
   url: http://localhost:6333
@@ -212,9 +207,8 @@ dense:
   name: bge_base
   model_name: bge-base-zh-v1.5
 sparse:
-  app:
-    type: bm25
-    tokenizer: jieba
+  type: bm25
+  tokenizer: jieba
 store:
   type: qdrant
   url: http://localhost:6333
@@ -284,14 +278,9 @@ dense:
   model_name: bge-base-zh-v1.5
   import_path: dense.huggingface.HuggingFaceDense
 sparse:
-  app:
-    type: bm25
-    tokenizer: jieba
-    import_path: sparse.bm25.BM25Sparse
-  vector:
-    type: bge_m3
-    model_name: bge-m3
-    import_path: sparse.qdrant_bge_m3.QdrantBGEM3Sparse
+  type: bge_m3
+  model_name: bge-m3
+  import_path: sparse.qdrant_bge_m3.QdrantBGEM3Sparse
 store:
   type: chroma
   persist_dir: chroma_data
@@ -329,7 +318,7 @@ def test_load_app_config_supports_milvus_store(monkeypatch):
     assert config.store.collections.chunks == "milvus_bge_base_knowledge_chunks"
 
 
-def test_load_app_config_keeps_bge_m3_sparse_model_path_independent(monkeypatch):
+def test_load_app_config_keeps_app_bm25_sparse_without_model_path(monkeypatch):
     from loader import load_app_config
 
     monkeypatch.setenv("CONFIG_FILE", "local.yaml")
@@ -348,10 +337,8 @@ def test_load_app_config_supports_milvus_builtin_bm25_sparse(monkeypatch):
     config = load_app_config()
 
     assert config.store.type == "milvus"
-    assert config.sparse.name == "bm25"
+    assert config.sparse.name == "milvus_bm25"
     assert config.sparse.tokenizer == "jieba"
-    assert config.sparse.vector is not None
-    assert config.sparse.vector.name == "milvus_bm25"
 
 
 def test_load_app_config_supports_paddle_ocr(monkeypatch, tmp_path):
@@ -364,9 +351,8 @@ dense:
   name: bge_base
   model_name: bge-base-zh-v1.5
 sparse:
-  app:
-    type: bm25
-    tokenizer: jieba
+  type: bm25
+  tokenizer: jieba
 store:
   type: qdrant
   url: http://localhost:6333
@@ -401,9 +387,8 @@ dense:
   name: bge_base
   model_name: bge-base-zh-v1.5
 sparse:
-  app:
-    type: bm25
-    tokenizer: jieba
+  type: bm25
+  tokenizer: jieba
 store:
   type: qdrant
   url: http://localhost:6333

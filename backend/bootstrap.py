@@ -17,7 +17,6 @@ class Application:
         config: AppConfig | None = None,
         dense: Dense | None = None,
         sparse: Sparse | None = None,
-        vector_sparse: Sparse | None = None,
         files=None,
         store: Store | None = None,
         search: Search | None = None,
@@ -28,10 +27,9 @@ class Application:
         self.config_name = self.config.name
         self.container = create_container(self.config)
         self.dense = dense or self.container.dense()
-        self.sparse = sparse or self.container.app_sparse()
-        self.vector_sparse = vector_sparse if vector_sparse is not None else self.container.vector_sparse()
-        self.store = store or self.container.store(dense=self.dense, sparse=self.vector_sparse)
-        self.search = search or self.container.search(store=self.store, app_sparse=self.sparse, vector_sparse=self.vector_sparse)
+        self.sparse = sparse or self.container.sparse()
+        self.store = store or self.container.store(dense=self.dense, sparse=self.sparse)
+        self.search = search or self.container.search(store=self.store, sparse=self.sparse)
         self.rerank = rerank or (self.container.rerank() if self.config.rerank is not None else None)
         self.ocr = ocr or self.container.ocr()
         self.search_trace = None
@@ -41,8 +39,6 @@ class Application:
     def start(self):
         self._start_component("dense", self.dense)
         self._start_component("sparse", self.sparse)
-        if self.vector_sparse is not None:
-            self._start_component("vector_sparse", self.vector_sparse)
         self._start_component("store", self.store)
         self._start_component("search", self.search)
         if self.rerank is not None:
@@ -64,8 +60,6 @@ class Application:
             self.rerank.stop()
         self.search.stop()
         self.store.stop()
-        if self.vector_sparse is not None:
-            self.vector_sparse.stop()
         self.sparse.stop()
         self.dense.stop()
         self.ready = False

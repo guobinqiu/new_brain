@@ -12,18 +12,27 @@
     "database": "Database",
     "search": "Search",
     "monitor": "Monitor",
+    "logs": "Logs",
     "config": "Config"
+  },
+  "auth": {
+    "title": "Sign in",
+    "desc": "Access the RAG console",
+    "username": "Username",
+    "password": "Password",
+    "login": "Sign in",
+    "logout": "Sign out"
   },
   "common": {
     "all": "All",
     "refresh": "Refresh",
     "loading": "Loading",
     "loadMore": "Load more",
+    "copy": "Copy",
     "delete": "Delete",
     "deleting": "Deleting"
   },
   "search": {
-    "sparse": "sparse",
     "topK": "Top K",
     "rerank": "Rerank",
     "fetchK": "Fetch K",
@@ -49,8 +58,11 @@
     "empty": "No uploaded files",
     "uploadingFile": "Uploading {name}...",
     "presigningFile": "Creating download signature for {name}...",
-    "indexingFile": "Indexing {name}...",
-    "indexedFile": "{name} indexed, file_id: {fileId}",
+    "indexingFile": "Creating index job for {name}...",
+    "indexedFile": "{name} queued for indexing, job_id: {jobId}",
+    "indexWaiting": "Indexing: {jobId} · {status}",
+    "indexFinished": "{name} index finished, file_id: {fileId}",
+    "indexFailed": "{name} index failed: {error}",
     "indexedDone": "Index complete: {fileIds}",
     "deletingFile": "Deleting {name}...",
     "deletedFile": "{name} deleted, {count} chunks removed"
@@ -58,8 +70,23 @@
   "monitor": {
     "title": "Runtime",
     "components": "Components",
-    "traces": "Search logs",
-    "empty": "No searches yet"
+    "indexJobs": "Index",
+    "traces": "Trace",
+    "noIndexJobs": "No index jobs",
+    "indexQueueUnavailable": "Index queue unavailable. Start Redis.",
+    "noTraces": "No searches yet",
+    "jobFilter": {
+      "all": "All",
+      "processing": "Processing",
+      "finished": "Success",
+      "failed": "Failed"
+    },
+    "jobStatus": {
+      "processing": "Processing",
+      "finished": "Success",
+      "failed": "Failed",
+      "missing": "Missing"
+    }
   },
   "status": {
     "ready": "Ready",
@@ -69,16 +96,47 @@
   },
   "database": {
     "title": "Database",
-    "stats": "Stats",
-    "storage": "Storage",
     "location": "Location",
-    "sparseModes": "Sparse modes",
     "chunks": "Vector data",
+    "query": "Query",
+    "fileIdsPlaceholder": "Separate file_id values with commas",
     "empty": "No vector data"
+  },
+  "trace": {
+    "title": "Trace",
+    "desc": "Stage timings for recent search requests",
+    "empty": "No searches yet",
+    "columns": {
+      "time": "Time",
+      "query": "Query",
+      "mode": "Mode",
+      "topK": "Top K",
+      "elapsed": "Elapsed",
+      "prepare": "Prepare",
+      "dense": "Dense",
+      "sparse": "Sparse",
+      "fusion": "Fusion",
+      "dedupe": "Dedupe",
+      "rerank": "Rerank",
+      "format": "Format"
+    }
+  },
+  "logs": {
+    "title": "Logs",
+    "desc": "Recent runtime logs and live output",
+    "empty": "No logs yet",
+    "columns": {
+      "time": "Time",
+      "level": "Level",
+      "logger": "Logger",
+      "event": "Event",
+      "message": "Message"
+    }
   },
   "config": {
     "title": "Config",
     "searchDefaults": "Search defaults",
-    "components": "Components"
+    "components": "Components",
+    "storage": "Storage path"
   }
 }

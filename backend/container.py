@@ -39,12 +39,7 @@ def _store_key(name: str) -> str:
 
 
 def _sparse_key(app_config: AppConfig) -> str:
-    return _sparse_backend_key(app_config, app_config.sparse.app)
-
-
-def _sparse_backend_key(app_config: AppConfig, sparse_config) -> str:
-    if sparse_config is None:
-        return "none"
+    sparse_config = app_config.sparse
     sparse_key = _component_key(sparse_config.name)
     if sparse_key != "bge_m3":
         return sparse_key
@@ -61,12 +56,9 @@ class ApplicationContainer(containers.DeclarativeContainer):
 
     dense_name = providers.Callable(lambda app_config: _component_key(app_config.dense.name), config)
     dense_model_path = providers.Callable(lambda app_config: app_config.dense.model_path, config)
-    app_sparse_name = providers.Callable(lambda app_config: _component_key(app_config.sparse.app.name), config)
-    app_sparse_key = providers.Callable(_sparse_key, config)
-    app_sparse_tokenizer = providers.Callable(lambda app_config: app_config.sparse.app.tokenizer, config)
-    app_sparse_model_path = providers.Callable(lambda app_config: app_config.sparse.app.model_path, config)
-    vector_sparse_key = providers.Callable(lambda app_config: _sparse_backend_key(app_config, app_config.sparse.vector), config)
-    vector_sparse_model_path = providers.Callable(lambda app_config: app_config.sparse.vector.model_path if app_config.sparse.vector is not None else None, config)
+    sparse_key = providers.Callable(_sparse_key, config)
+    sparse_tokenizer = providers.Callable(lambda app_config: app_config.sparse.tokenizer, config)
+    sparse_model_path = providers.Callable(lambda app_config: app_config.sparse.model_path, config)
     rerank_name = providers.Callable(lambda app_config: _component_key(app_config.rerank.name), config)
     rerank_model_path = providers.Callable(lambda app_config: app_config.rerank.model_path, config)
     ocr_name = providers.Callable(lambda app_config: _component_key(app_config.ocr.name), config)
@@ -80,7 +72,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
     chunks_collection = providers.Callable(lambda app_config: app_config.store.collections.chunks, config)
 
     tokenizer = providers.Selector(
-        app_sparse_tokenizer,
+        sparse_tokenizer,
         jieba=providers.Factory(JiebaTokenizer),
     )
 
@@ -93,21 +85,12 @@ class ApplicationContainer(containers.DeclarativeContainer):
         bge_m3=providers.Singleton(HuggingFaceDense, model_name=dense_model_path),
     )
 
-    app_sparse = providers.Selector(
-        app_sparse_key,
+    sparse = providers.Selector(
+        sparse_key,
         bm25=providers.Singleton(BM25Sparse, tokenizer=tokenizer),
         milvus_bm25=providers.Singleton(MilvusBM25Sparse),
-        qdrant_bge_m3=providers.Singleton(QdrantBGEM3Sparse, model_name=app_sparse_model_path),
-        milvus_bge_m3=providers.Singleton(MilvusBGEM3Sparse, model_name=app_sparse_model_path),
-    )
-    sparse = app_sparse
-
-    vector_sparse = providers.Selector(
-        vector_sparse_key,
-        none=providers.Object(None),
-        milvus_bm25=providers.Singleton(MilvusBM25Sparse),
-        qdrant_bge_m3=providers.Singleton(QdrantBGEM3Sparse, model_name=vector_sparse_model_path),
-        milvus_bge_m3=providers.Singleton(MilvusBGEM3Sparse, model_name=vector_sparse_model_path),
+        qdrant_bge_m3=providers.Singleton(QdrantBGEM3Sparse, model_name=sparse_model_path),
+        milvus_bge_m3=providers.Singleton(MilvusBGEM3Sparse, model_name=sparse_model_path),
     )
 
     rerank = providers.Selector(
@@ -137,7 +120,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
         qdrant=providers.Singleton(
             QdrantStore,
             dense=dense,
-            sparse=vector_sparse,
+            sparse=sparse,
             url=qdrant_url,
             timeout=store_timeout,
             chunks_collection=chunks_collection,
@@ -145,21 +128,21 @@ class ApplicationContainer(containers.DeclarativeContainer):
         chroma=providers.Singleton(
             ChromaStore,
             dense=dense,
-            sparse=vector_sparse,
+            sparse=sparse,
             persist_dir=chroma_persist_dir,
             chunks_collection=chunks_collection,
         ),
         milvus=providers.Singleton(
             MilvusStore,
             dense=dense,
-            sparse=vector_sparse,
+            sparse=sparse,
             uri=milvus_uri,
             timeout=store_timeout,
             chunks_collection=chunks_collection,
         ),
     )
 
-    search = providers.Singleton(SearchPipeline, store=store, app_sparse=app_sparse, vector_sparse=vector_sparse)
+    search = providers.Singleton(SearchPipeline, store=store, sparse=sparse)
 
 
 def create_container(config: AppConfig) -> ApplicationContainer:
@@ -187,11 +170,7 @@ def build_dense(config: AppConfig) -> Dense:
 
 
 def build_sparse(config: AppConfig) -> Sparse:
-    return build_app_sparse(config)
-
-
-def build_app_sparse(config: AppConfig) -> Sparse:
-    sparse_config = config.sparse.app
+    sparse_config = config.sparse
     if sparse_config.import_path:
         cls = _load_class(sparse_config.import_path)
         key = _component_key(sparse_config.name)
@@ -202,20 +181,7 @@ def build_app_sparse(config: AppConfig) -> Sparse:
         if key == "milvus_bm25":
             return cls()
         return cls(model_name=sparse_config.model_path)
-    return _resolve(create_container(config).app_sparse, "sparse", sparse_config.name)
-
-
-def build_vector_sparse(config: AppConfig) -> Sparse | None:
-    sparse_config = config.sparse.vector
-    if sparse_config is None:
-        return None
-    if sparse_config.import_path:
-        cls = _load_class(sparse_config.import_path)
-        key = _component_key(sparse_config.name)
-        if key == "milvus_bm25":
-            return cls()
-        return cls(model_name=sparse_config.model_path)
-    return _resolve(create_container(config).vector_sparse, "sparse.vector", sparse_config.name)
+    return _resolve(create_container(config).sparse, "sparse", sparse_config.name)
 
 
 def build_store(config: AppConfig, dense: Dense, sparse: Sparse | None = None) -> Store:
@@ -240,7 +206,7 @@ def build_store(config: AppConfig, dense: Dense, sparse: Sparse | None = None) -
 
 
 def build_search(config: AppConfig, store: Store, sparse: Sparse) -> Search:
-    return create_container(config).search(store=store, app_sparse=sparse)
+    return create_container(config).search(store=store, sparse=sparse)
 
 
 def build_rerank(config: AppConfig) -> Rerank | None:

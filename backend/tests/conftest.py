@@ -1,6 +1,10 @@
+import hashlib
+import hmac
+import json
 import os
 import re
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -91,9 +95,60 @@ def api_client(store_test_env):
 
     try:
         with TestClient(main.app) as client:
+            resp = client.post(
+                "/api/auth/token",
+                json={
+                    "grant_type": "password",
+                    "username": "admin",
+                    "password": "admin123",
+                },
+            )
+            assert resp.status_code == 200, resp.text
+            client.headers.update({"Authorization": f"Bearer {resp.json()['access_token']}"})
             yield client
     finally:
         main.STARTUP_IN_BACKGROUND = orig_startup_in_background
+
+
+@pytest.fixture
+def anonymous_api_client(store_test_env):
+    """FastAPI TestClient without Authorization header."""
+    import main
+
+    main.application = main.Application()
+    orig_startup_in_background = main.STARTUP_IN_BACKGROUND
+    main.STARTUP_IN_BACKGROUND = False
+
+    try:
+        with TestClient(main.app) as client:
+            yield client
+    finally:
+        main.STARTUP_IN_BACKGROUND = orig_startup_in_background
+
+
+@pytest.fixture
+def app_api_client(api_client):
+    body = json.dumps({"grant_type": "client_credentials"}, separators=(",", ":")).encode("utf-8")
+    timestamp = str(int(time.time()))
+    app_id = "imsdom"
+    secret_key = "78ddbd0730125b050b607c81c8398c4fe96f707cfa66f222d42a8eeae3aa47e6"
+    body_sha256 = hashlib.sha256(body).hexdigest()
+    string_to_sign = "\n".join(["POST", "/api/auth/token", timestamp, body_sha256, app_id])
+    signature = hmac.new(secret_key.encode("utf-8"), string_to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
+    resp = api_client.post(
+        "/api/auth/token",
+        content=body,
+        headers={
+            "content-type": "application/json",
+            "x-app-id": app_id,
+            "x-access-key": "0d01c6bc9577a6dae3095cb7972a9f8c",
+            "x-timestamp": timestamp,
+            "x-signature": signature,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    api_client.headers.update({"Authorization": f"Bearer {resp.json()['access_token']}"})
+    return api_client
 
 
 @pytest.fixture

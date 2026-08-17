@@ -1,4 +1,5 @@
 import pytest
+from pathlib import Path
 
 
 pytestmark = pytest.mark.e2e
@@ -8,7 +9,12 @@ def _index_ready_file(api_client, test_txt_path, monkeypatch, filename="test_ai.
     import main
 
     s3_url = f"s3://rag-dev/{filename}"
-    monkeypatch.setattr(main, "_download_presigned_file", lambda presigned_url, suffix: test_txt_path)
+
+    def index_object(application, file_id, presigned_url, s3_url, filename):
+        main.index_file(main.application, file_id, Path(test_txt_path), filename, extra_metadata={"s3_url": s3_url})
+        return 1
+
+    monkeypatch.setattr(main, "index_presigned_object", index_object)
     resp = api_client.post(
         "/api/index",
         json={
@@ -19,6 +25,7 @@ def _index_ready_file(api_client, test_txt_path, monkeypatch, filename="test_ai.
     )
     assert resp.status_code == 200, resp.text
     file_id = resp.json()["file_id"]
+    assert resp.json() == {"file_id": file_id}
     files = api_client.get("/api/files").json()["files"]
     assert any(item["id"] == file_id for item in files)
     return file_id
@@ -61,6 +68,21 @@ class TestSearchAPI:
         for result in data["results"]:
             assert result["metadata"]["file_id"] == file_id
 
+    def test_search_without_file_ids_searches_all_files(self, app_api_client, test_txt_path, monkeypatch):
+        """``POST /api/search`` without file_ids searches the full index."""
+        import main
+
+        file_id = _index_ready_file(app_api_client, test_txt_path, monkeypatch)
+        main.application.store.add_file_chunks(
+            [{"id": "other-file-chunk", "content": "人工智能 other file", "metadata": {"filename": "other.txt", "chunk_index": 0}}],
+            file_id="other-file",
+        )
+
+        resp = app_api_client.post("/api/search", json={"query": "人工智能", "mode": "sparse", "top_k": 10})
+
+        assert resp.status_code == 200, resp.text
+        assert {result["metadata"]["file_id"] for result in resp.json()["results"]} == {file_id, "other-file"}
+
     def test_search_accepts_per_request_hybrid_weights(self, api_client, test_txt_path, monkeypatch):
         """``POST /api/search`` accepts hybrid weights without changing global config."""
         before = api_client.get("/api/config").json()
@@ -87,13 +109,6 @@ class TestSearchAPI:
         assert after["dense_weight"] == before["dense_weight"]
         assert after["sparse_weight"] == before["sparse_weight"]
         assert after["rrf_k"] == before["rrf_k"]
-
-    def test_search_rejects_unavailable_sparse_mode(self, api_client):
-        """``sparse_mode=vector`` is rejected when current profile only exposes app sparse."""
-        resp = api_client.post("/api/search", json={"query": "人工智能", "mode": "sparse", "sparse_mode": "vector"})
-
-        assert resp.status_code == 400
-        assert "sparse_mode=vector" in resp.text
 
     def test_search_rejects_empty_file_ids(self, api_client):
         resp = api_client.post("/api/search", json={"query": "人工智能", "mode": "dense", "file_ids": []})
@@ -123,8 +138,8 @@ class TestSearchAPI:
         assert "elapsed_ms" in data
         assert isinstance(data["elapsed_ms"], (int, float))
         assert data["elapsed_ms"] >= 0
-        monitor = api_client.get("/api/monitor").json()
-        assert data["elapsed_ms"] == monitor["search_traces"][0]["elapsed_ms"]
+        traces = api_client.get("/api/traces").json()
+        assert data["elapsed_ms"] == traces["traces"][0]["elapsed_ms"]
 
     def test_search_response_does_not_include_trace(self, api_client, test_txt_path, monkeypatch):
         """``POST /api/search`` is a public API and does not expose diagnostics."""

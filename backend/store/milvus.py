@@ -228,6 +228,7 @@ def _collection_schema():
     schema.add_field(field_name="file_id", datatype=DataType.VARCHAR, max_length=128)
     schema.add_field(field_name="chunk_index", datatype=DataType.INT64)
     schema.add_field(field_name="filename", datatype=DataType.VARCHAR, max_length=1024)
+    schema.add_field(field_name="created_at", datatype=DataType.VARCHAR, max_length=64, nullable=True)
     schema.add_field(field_name=_dense_vector_field(), datatype=DataType.FLOAT_VECTOR, dim=_dense_vector_size())
     if _sparse_uses_store():
         schema.add_field(field_name="sparse", datatype=DataType.SPARSE_FLOAT_VECTOR)
@@ -543,6 +544,8 @@ def _to_file_rows(chunks: list[dict], file_id: str) -> list[dict]:
         }
         if metadata.get("s3_url"):
             row["s3_url"] = metadata["s3_url"]
+        if metadata.get("created_at"):
+            row["created_at"] = metadata["created_at"]
         if sparse_vector is not None:
             row["sparse"] = sparse_vector
         rows.append(row)

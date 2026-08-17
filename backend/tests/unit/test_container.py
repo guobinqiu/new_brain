@@ -4,7 +4,7 @@ import pytest
 pytestmark = pytest.mark.unit
 
 
-def _config_file(tmp_path, store_key: str = "qdrant", sparse_key: str = "bm25", sparse_extra: str = "    tokenizer: jieba\n", ocr_key: str = "rapid", ocr_model_name: str = "rapidocr"):
+def _config_file(tmp_path, store_key: str = "qdrant", sparse_key: str = "bm25", sparse_extra: str = "  tokenizer: jieba\n", ocr_key: str = "rapid", ocr_model_name: str = "rapidocr"):
     store_settings = {
         "qdrant": """
   url: http://localhost:6333
@@ -29,8 +29,7 @@ dense:
   name: bge_base
   model_name: bge-base-zh-v1.5
 sparse:
-  app:
-    type: {sparse_key}
+  type: {sparse_key}
 {sparse_extra.rstrip()}
 store:
   type: {store_key}
@@ -102,7 +101,7 @@ def test_container_selects_qdrant_bge_m3_sparse_adapter(tmp_path):
     from loader import load_config_file
     from sparse.qdrant_bge_m3 import QdrantBGEM3Sparse
 
-    config = load_config_file(_config_file(tmp_path, sparse_key="bge_m3", sparse_extra="    model_name: bge-m3\n"))
+    config = load_config_file(_config_file(tmp_path, sparse_key="bge_m3", sparse_extra="  model_name: bge-m3\n"))
     container = create_container(config)
 
     sparse = container.sparse()
@@ -115,7 +114,7 @@ def test_container_selects_milvus_bge_m3_sparse_adapter(tmp_path):
     from loader import load_config_file
     from sparse.milvus_bge_m3 import MilvusBGEM3Sparse
 
-    config = load_config_file(_config_file(tmp_path, store_key="milvus", sparse_key="bge_m3", sparse_extra="    model_name: bge-m3\n"))
+    config = load_config_file(_config_file(tmp_path, store_key="milvus", sparse_key="bge_m3", sparse_extra="  model_name: bge-m3\n"))
     container = create_container(config)
 
     sparse = container.sparse()

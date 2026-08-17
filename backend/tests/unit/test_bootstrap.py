@@ -25,7 +25,6 @@ def test_application_starts_public_components_in_order():
     application = bootstrap.Application(
         dense=FakeComponent("dense"),
         sparse=FakeComponent("sparse"),
-        vector_sparse=FakeComponent("vector_sparse"),
         store=FakeComponent("store"),
         search=FakeComponent("search"),
         rerank=FakeComponent("rerank"),
@@ -33,7 +32,7 @@ def test_application_starts_public_components_in_order():
     )
     application.start()
 
-    assert calls == ["dense", "sparse", "vector_sparse", "store", "search", "rerank", "ocr"]
+    assert calls == ["dense", "sparse", "store", "search", "rerank", "ocr"]
     assert application.ready is True
 
 
@@ -84,12 +83,8 @@ dense:
   name: bge_m3
   model_name: bge-m3
 sparse:
-  app:
-    type: bm25
-    tokenizer: jieba
-  vector:
-    type: bge_m3
-    model_name: bge-m3
+  type: bge_m3
+  model_name: bge-m3
 store:
   type: qdrant
   url: http://localhost:6333
@@ -109,9 +104,9 @@ ocr:
     config = load_config_file(path)
     application = bootstrap.Application(config=config)
 
-    assert isinstance(application.vector_sparse, QdrantBGEM3Sparse)
-    assert application.vector_sparse.model_name == config.sparse.vector.model_path
-    assert application.store.sparse is application.vector_sparse
+    assert isinstance(application.sparse, QdrantBGEM3Sparse)
+    assert application.sparse.model_name == config.sparse.model_path
+    assert application.store.sparse is application.sparse
 
 
 def test_application_passes_store_config_to_qdrant_store():
@@ -137,15 +132,19 @@ def test_application_reads_config_name_from_explicit_yaml(monkeypatch):
 
 def test_build_dense_rejects_unsupported_dense_type():
     import container
-    from schema import AppConfig, DenseConfig, OCRConfig, RerankConfig, SearchConfig, SparseBackendConfig, SparseConfig, StoreCollectionsConfig, StoreConfig
+    from schema import AdminAuthConfig, AppAuthConfig, AppConfig, AuthConfig, DenseConfig, OCRConfig, RerankConfig, SearchConfig, SparseConfig, StoreCollectionsConfig, StoreConfig
 
     config = AppConfig(
         dense=DenseConfig(name="unknown", model_path="/models/dense"),
-        sparse=SparseConfig(app=SparseBackendConfig(name="bm25", tokenizer="jieba")),
+        sparse=SparseConfig(name="bm25", tokenizer="jieba"),
         store=StoreConfig(type="qdrant", url="http://localhost:6333", collections=StoreCollectionsConfig(chunks="chunks")),
         search=SearchConfig(),
         rerank=RerankConfig(name="bge_reranker_base", model_path="/models/rerank"),
         ocr=OCRConfig(name="rapidocr", model_path="/models/ocr"),
+        auth=AuthConfig(
+            admin=AdminAuthConfig(username="admin", password="admin123"),
+            app=AppAuthConfig(app_id="imsdom", access_key="access", secret_key="secret"),
+        ),
     )
 
     with pytest.raises(ValueError, match="unsupported dense"):
@@ -249,7 +248,6 @@ def test_application_stops_public_components(monkeypatch):
     application = bootstrap.Application(
         dense=FakeComponent("dense"),
         sparse=FakeComponent("sparse"),
-        vector_sparse=FakeComponent("vector_sparse"),
         store=FakeComponent("store"),
         search=FakeComponent("search"),
         rerank=FakeComponent("rerank"),
@@ -258,5 +256,5 @@ def test_application_stops_public_components(monkeypatch):
     application.ready = True
     application.stop()
 
-    assert calls == ["ocr", "rerank", "search", "store", "vector_sparse", "sparse", "dense"]
+    assert calls == ["ocr", "rerank", "search", "store", "sparse", "dense"]
     assert application.ready is False

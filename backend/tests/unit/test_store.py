@@ -16,10 +16,10 @@ def test_close_store_closes_qdrant_client_and_clears_store_cache():
 
     fake = FakeClient()
     store._client = fake
-    store._stores[("common", "hybrid")] = object()
+    store._ready = True
 
     store.close_store()
 
     assert fake.closed is True
     assert store._client is None
-    assert store._stores == {}
+    assert store._ready is False
