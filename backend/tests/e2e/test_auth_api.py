@@ -9,11 +9,10 @@ import pytest
 pytestmark = pytest.mark.e2e
 
 
-def test_password_grant_returns_token(api_client):
+def test_login_returns_token(api_client):
     resp = api_client.post(
-        "/api/auth/token",
+        "/api/admin/login",
         json={
-            "grant_type": "password",
             "username": "admin",
             "password": "admin123",
         },
@@ -25,44 +24,46 @@ def test_password_grant_returns_token(api_client):
     assert data["access_token"]
 
 
-def test_client_credentials_grant_returns_token(api_client):
-    body = b'{"grant_type":"client_credentials"}'
+def test_business_api_accepts_client_signature(api_client):
+    credential = api_client.post("/api/admin/apps", json={"app_id": "signed_search"}).json()
+    db_resp = api_client.post("/api/admin/apps/signed_search/database")
+    assert db_resp.status_code == 200, db_resp.text
+    body = json.dumps({"query": "人工智能", "mode": "sparse"}, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
     timestamp = str(int(time.time()))
     signature = _signature(
-        secret_key="78ddbd0730125b050b607c81c8398c4fe96f707cfa66f222d42a8eeae3aa47e6",
+        secret_key=credential["secret_key"],
         method="POST",
-        path="/api/auth/token",
+        path="/api/search",
         timestamp=timestamp,
         body=body,
-        app_id="imsdom",
+        app_id="signed_search",
     )
 
     resp = api_client.post(
-        "/api/auth/token",
+        "/api/search",
         content=body,
         headers={
+            "Authorization": "",
             "content-type": "application/json",
-            "x-app-id": "imsdom",
-            "x-access-key": "0d01c6bc9577a6dae3095cb7972a9f8c",
+            "x-app-id": "signed_search",
+            "x-access-key": credential["access_key"],
             "x-timestamp": timestamp,
             "x-signature": signature,
         },
     )
 
     assert resp.status_code == 200, resp.text
-    data = resp.json()
-    assert data["token_type"] == "Bearer"
-    assert data["access_token"]
+    assert resp.json()["mode"] == "sparse"
 
 
 def test_config_requires_bearer_token(anonymous_api_client):
-    resp = anonymous_api_client.get("/api/config")
+    resp = anonymous_api_client.get("/api/admin/config")
 
     assert resp.status_code == 401
 
 
 def test_monitor_reports_sparse_as_one_runtime_component(api_client):
-    resp = api_client.get("/api/monitor")
+    resp = api_client.get("/api/admin/monitor")
 
     assert resp.status_code == 200, resp.text
     components = {item["name"]: item for item in resp.json()["components"]}

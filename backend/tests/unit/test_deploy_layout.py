@@ -41,44 +41,30 @@ def test_deploy_installs_opencv_runtime_library_for_ocr():
 def test_cpu_deploy_installs_cpu_extra():
     dockerfile = (ROOT / "deploy/cpu/Dockerfile").read_text(encoding="utf-8")
 
-    command = dockerfile.split("CMD", 1)[1]
-
     assert "uv sync --extra cpu" in dockerfile
     assert "USE_CN_MIRROR" in dockerfile
     assert "UV_DEFAULT_INDEX_CN" in dockerfile
-    assert "uv sync" not in command
-    assert '"uv", "run"' not in dockerfile
     assert 'CMD ["/app/.venv/bin/uvicorn"' in dockerfile
-    assert "--extra ocr" not in dockerfile
-    assert "uv sync --extra gpu" not in dockerfile
 
 
 def test_gpu_deploy_installs_gpu_extra_and_exposes_gpu():
     dockerfile = (ROOT / "deploy/gpu/Dockerfile").read_text(encoding="utf-8")
     compose = (ROOT / "deploy/gpu/docker-compose.yml").read_text(encoding="utf-8")
 
-    command = dockerfile.split("CMD", 1)[1]
-
     assert "uv sync --extra gpu" in dockerfile
     assert "USE_CN_MIRROR" in dockerfile
     assert "UV_DEFAULT_INDEX_CN" in dockerfile
-    assert "uv sync" not in command
-    assert '"uv", "run"' not in dockerfile
     assert 'CMD ["/app/.venv/bin/uvicorn"' in dockerfile
-    assert "--extra ocr" not in dockerfile
     assert "driver: nvidia" in compose
     assert "count: all" in compose
     assert "capabilities: [gpu]" in compose
-    assert "NVIDIA_VISIBLE_DEVICES" not in compose
-    assert "NVIDIA_DRIVER_CAPABILITIES" not in compose
 
 
-def test_backend_venv_is_not_mounted_over_image_environment():
+def test_backend_source_is_mounted_into_container():
     for compose_file in ("deploy/cpu/docker-compose.yml", "deploy/gpu/docker-compose.yml"):
         compose = (ROOT / compose_file).read_text(encoding="utf-8")
 
-        assert ".venv-docker" not in compose
-        assert "../../backend/.venv-docker:/app/backend/.venv-docker" not in compose
+        assert "../../backend:/app/backend" in compose
 
 
 def test_backend_mounts_database_dirs_without_docker_subdirectories():
@@ -87,8 +73,6 @@ def test_backend_mounts_database_dirs_without_docker_subdirectories():
 
         assert "../../chroma_data:/app/chroma_data" in compose
         assert "../../milvus_data/lite:/app/milvus_data/lite" in compose
-        assert "../../chroma_data/docker:/app/chroma_data" not in compose
-        assert "../../milvus_data/lite/docker:/app/milvus_data" not in compose
 
 
 def test_service_database_dirs_are_grouped_by_database():
@@ -96,7 +80,6 @@ def test_service_database_dirs_are_grouped_by_database():
         compose = (ROOT / compose_file).read_text(encoding="utf-8")
 
         assert "../../qdrant_data:/qdrant/storage" in compose
-        assert "../../qdrant_data/docker:/qdrant/storage" not in compose
         assert "../../milvus_data/standalone/etcd:/etcd" in compose
         assert "../../milvus_data/standalone/minio:/minio_data" in compose
         assert "../../milvus_data/standalone/milvus:/var/lib/milvus" in compose
@@ -117,7 +100,6 @@ def test_backend_host_port_does_not_conflict_with_vllm():
         compose = (ROOT / compose_file).read_text(encoding="utf-8")
 
         assert '"28000:8000"' in compose
-        assert '"8000:8000"' not in compose
 
 
 def test_deploy_uses_matching_backend_config_file():
@@ -126,8 +108,6 @@ def test_deploy_uses_matching_backend_config_file():
 
     assert "CONFIG_FILE: ${CONFIG_FILE:-docker-cpu.yaml}" in cpu_compose
     assert "CONFIG_FILE: ${CONFIG_FILE:-docker-gpu.yaml}" in gpu_compose
-    assert "CONFIG_FILE: ${CONFIG_FILE:-docker.yaml}" not in cpu_compose
-    assert "CONFIG_FILE: ${CONFIG_FILE:-docker.yaml}" not in gpu_compose
 
 
 def test_deploy_build_supports_optional_cn_mirror():

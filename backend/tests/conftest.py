@@ -1,14 +1,12 @@
-import hashlib
-import hmac
-import json
 import os
-import re
 import sys
+import json
 import time
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from auth import sign_request
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
@@ -26,10 +24,8 @@ def store_test_env(request, tmp_path):
 
     import store as st
     import config as cf
-
     orig_config_file_env = os.environ.get("CONFIG_FILE")
     orig_config = dict(cf.SEARCH_CONFIG)
-    orig_chunks = cf.QDRANT_CHUNKS_COLLECTION
     orig_client = st._client
     orig_dense = st._dense
     orig_sparse = st._sparse
@@ -42,26 +38,23 @@ def store_test_env(request, tmp_path):
 
     st.close_store()
     search_module._default_store = None
-    chunks_collection = f"test_qdrant_{_collection_suffix(request.node.nodeid)}"
-    _drop_qdrant_collection(cf.QDRANT_URL, chunks_collection)
+    app_chunks_collection = "imsdom_chunks"
+    _drop_qdrant_collection(cf.QDRANT_URL, app_chunks_collection)
     test_config_path = tmp_path / "qdrant_test.yaml"
     test_config_path.write_text(
         (BACKEND_DIR / "config" / "local.yaml")
         .read_text(encoding="utf-8")
-        .replace("chunks: knowledge_chunks", f"chunks: {chunks_collection}"),
+        .replace("auth:\n  admin:", f"auth:\n  registry_file: {tmp_path / 'apps.json'}\n  admin:"),
         encoding="utf-8",
     )
     os.environ["CONFIG_FILE"] = str(test_config_path)
-    _set_qdrant_collection_name(cf, st, chunks_collection)
 
     yield
 
-    _drop_qdrant_collection(cf.QDRANT_URL, chunks_collection)
+    _drop_qdrant_collection(cf.QDRANT_URL, app_chunks_collection)
     st.close_store()
     cf.SEARCH_CONFIG.clear()
     cf.SEARCH_CONFIG.update(orig_config)
-    cf.QDRANT_CHUNKS_COLLECTION = orig_chunks
-    _set_qdrant_collection_name(cf, st, orig_chunks)
     st._client = orig_client
     st._dense = orig_dense
     st._sparse = orig_sparse
@@ -96,9 +89,8 @@ def api_client(store_test_env):
     try:
         with TestClient(main.app) as client:
             resp = client.post(
-                "/api/auth/token",
+                "/api/admin/login",
                 json={
-                    "grant_type": "password",
                     "username": "admin",
                     "password": "admin123",
                 },
@@ -126,29 +118,42 @@ def anonymous_api_client(store_test_env):
         main.STARTUP_IN_BACKGROUND = orig_startup_in_background
 
 
+class AppApiClient:
+    def __init__(self, client, app_id: str, access_key: str, secret_key: str):
+        self._client = client
+        self.app_id = app_id
+        self.access_key = access_key
+        self.secret_key = secret_key
+
+    def post(self, path: str, *, json=None, **kwargs):
+        if json is None:
+            body = b""
+        else:
+            body = json_dumps(json).encode("utf-8")
+        timestamp = str(int(time.time()))
+        headers = {
+            "content-type": "application/json",
+            "x-app-id": self.app_id,
+            "x-access-key": self.access_key,
+            "x-timestamp": timestamp,
+            "x-signature": sign_request(self.secret_key, "POST", path, timestamp, body, self.app_id),
+        }
+        headers.update(kwargs.pop("headers", {}))
+        return self._client.post(path, content=body, headers=headers, **kwargs)
+
+
 @pytest.fixture
 def app_api_client(api_client):
-    body = json.dumps({"grant_type": "client_credentials"}, separators=(",", ":")).encode("utf-8")
-    timestamp = str(int(time.time()))
-    app_id = "imsdom"
-    secret_key = "78ddbd0730125b050b607c81c8398c4fe96f707cfa66f222d42a8eeae3aa47e6"
-    body_sha256 = hashlib.sha256(body).hexdigest()
-    string_to_sign = "\n".join(["POST", "/api/auth/token", timestamp, body_sha256, app_id])
-    signature = hmac.new(secret_key.encode("utf-8"), string_to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
-    resp = api_client.post(
-        "/api/auth/token",
-        content=body,
-        headers={
-            "content-type": "application/json",
-            "x-app-id": app_id,
-            "x-access-key": "0d01c6bc9577a6dae3095cb7972a9f8c",
-            "x-timestamp": timestamp,
-            "x-signature": signature,
-        },
-    )
-    assert resp.status_code == 200, resp.text
-    api_client.headers.update({"Authorization": f"Bearer {resp.json()['access_token']}"})
-    return api_client
+    app_resp = api_client.post("/api/admin/apps", json={"app_id": "imsdom"})
+    assert app_resp.status_code == 201, app_resp.text
+    db_resp = api_client.post("/api/admin/apps/imsdom/database")
+    assert db_resp.status_code == 200, db_resp.text
+    credential = app_resp.json()
+    return AppApiClient(api_client, "imsdom", credential["access_key"], credential["secret_key"])
+
+
+def json_dumps(value) -> str:
+    return json.dumps(value, separators=(",", ":"), ensure_ascii=False)
 
 
 @pytest.fixture
@@ -253,15 +258,6 @@ def test_img_path(tmp_path):
     return str(path)
 
 
-def _set_qdrant_collection_name(config_module, store_module, collection_name: str) -> None:
-    config_module.QDRANT_CHUNKS_COLLECTION = collection_name
-    store_module.QDRANT_CHUNKS_COLLECTION = collection_name
-    store_module.COLLECTION_BY_TYPE = {
-        "common": collection_name,
-        "scoped": collection_name,
-    }
-
-
 def _drop_qdrant_collection(url: str, collection_name: str) -> None:
     try:
         from qdrant_client import QdrantClient
@@ -274,11 +270,6 @@ def _drop_qdrant_collection(url: str, collection_name: str) -> None:
             close()
     except Exception:
         pass
-
-
-def _collection_suffix(nodeid: str) -> str:
-    suffix = re.sub(r"[^a-zA-Z0-9_]+", "_", nodeid).strip("_").lower()
-    return suffix[-48:] or "knowledge_chunks"
 
 
 # ---------------------------------------------------------------------------

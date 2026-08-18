@@ -25,14 +25,8 @@ SparseConfig = SparseBackendConfig
 
 
 @dataclass(frozen=True)
-class StoreCollectionsConfig:
-    chunks: str
-
-
-@dataclass(frozen=True)
 class StoreConfig:
     type: str
-    collections: StoreCollectionsConfig
     url: str | None = None
     persist_dir: str | None = None
     uri: str | None = None
@@ -66,16 +60,9 @@ class AdminAuthConfig:
 
 
 @dataclass(frozen=True)
-class AppAuthConfig:
-    app_id: str
-    access_key: str
-    secret_key: str
-
-
-@dataclass(frozen=True)
 class AuthConfig:
     admin: AdminAuthConfig
-    app: AppAuthConfig
+    registry_file: str | None = None
 
 
 @dataclass(frozen=True)
@@ -112,14 +99,12 @@ def parse_app_config(raw: dict[str, Any]) -> AppConfig:
     dense = raw.get("dense") or {}
     sparse = raw.get("sparse") or {}
     store = raw.get("store") or {}
-    collections = store.get("collections") or {}
     search = raw.get("search") or {}
     logging = raw.get("logging") or {}
     auth = raw.get("auth") or {}
     rerank = raw.get("rerank")
     ocr = raw.get("ocr")
     auth_admin = auth.get("admin") or {}
-    auth_app = auth.get("app") or {}
 
     store_type = _required(store, "type", "store")
     dense_name = _component_name(dense, "dense")
@@ -173,9 +158,6 @@ def parse_app_config(raw: dict[str, Any]) -> AppConfig:
             uri=store.get("uri"),
             timeout=int(store.get("timeout", 30)),
             import_path=store.get("import_path"),
-            collections=StoreCollectionsConfig(
-                chunks=_required(collections, "chunks", "store.collections"),
-            ),
         ),
         search=SearchConfig(
             default_mode=search.get("default_mode", "hybrid"),
@@ -197,11 +179,7 @@ def parse_app_config(raw: dict[str, Any]) -> AppConfig:
                 username=str(auth_admin.get("username", "admin")),
                 password=str(auth_admin.get("password", "admin123")),
             ),
-            app=AppAuthConfig(
-                app_id=str(auth_app.get("app_id", "imsdom")),
-                access_key=str(auth_app.get("access_key", "0d01c6bc9577a6dae3095cb7972a9f8c")),
-                secret_key=str(auth_app.get("secret_key", "78ddbd0730125b050b607c81c8398c4fe96f707cfa66f222d42a8eeae3aa47e6")),
-            ),
+            registry_file=auth.get("registry_file"),
         ),
         rerank=RerankConfig(
             name=rerank_name,

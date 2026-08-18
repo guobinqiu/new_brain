@@ -7,6 +7,7 @@ pytestmark = pytest.mark.unit
 
 def test_add_file_chunks_writes_file_metadata(monkeypatch):
     import store
+    from collection_names import app_collection
 
     calls = []
 
@@ -28,12 +29,13 @@ def test_add_file_chunks_writes_file_metadata(monkeypatch):
         {"id": "chunk-1", "content": "华为给我们一万六千张卡", "metadata": {"filename": "liang.pdf", "chunk_index": 0}},
     ]
 
-    assert store.add_file_chunks(chunks, file_id="550e8400e29b41d4a716446655440000") == 1
+    with app_collection("imsdom"):
+        assert store.add_file_chunks(chunks, file_id="550e8400e29b41d4a716446655440000") == 1
     assert calls[0] == ("ready",)
     assert calls[1] == ("delete", "550e8400e29b41d4a716446655440000")
 
     _, collection_name, points = calls[3]
-    assert collection_name == store.QDRANT_CHUNKS_COLLECTION
+    assert collection_name == "imsdom_chunks"
     assert points[0].id == store._point_id("chunk-1")
     assert points[0].payload["content"] == "华为给我们一万六千张卡"
     assert points[0].payload["metadata"]["file_id"] == "550e8400e29b41d4a716446655440000"
@@ -52,13 +54,14 @@ def test_ensure_payload_indexes_only_creates_file_id_index(monkeypatch):
 
     monkeypatch.setattr(store, "get_qdrant_client", lambda: FakeClient())
 
-    store.ensure_payload_indexes()
+    store.ensure_payload_indexes("imsdom_chunks")
 
-    assert calls == [(store.QDRANT_CHUNKS_COLLECTION, "metadata.file_id")]
+    assert calls == [("imsdom_chunks", "metadata.file_id")]
 
 
 def test_add_file_chunks_writes_sparse_vector_when_sparse_vectors_are_stored(monkeypatch):
     import store
+    from collection_names import app_collection
     from sparse.qdrant_bge_m3 import QdrantBGEM3Sparse
 
     calls = []
@@ -89,7 +92,8 @@ def test_add_file_chunks_writes_sparse_vector_when_sparse_vectors_are_stored(mon
         {"id": "chunk-1", "content": "通用知识", "metadata": {"filename": "faq.pdf", "chunk_index": 0}},
     ]
 
-    assert store.add_file_chunks(chunks, file_id="file_a") == 1
+    with app_collection("imsdom"):
+        assert store.add_file_chunks(chunks, file_id="file_a") == 1
     point = calls[0][1][0]
     assert "dense" in point.vector
     assert "sparse" in point.vector
@@ -147,7 +151,39 @@ def test_qdrant_client_uses_configured_timeout(monkeypatch):
     assert created[0]["timeout"] == 30
 
 
-def test_init_store_retries_when_qdrant_is_not_ready(monkeypatch):
+def test_qdrant_list_chunks_uses_scroll_cursor(monkeypatch):
+    import store
+    from collection_names import app_collection
+
+    calls = []
+
+    class FakeRecord:
+        id = "point-1"
+        payload = {
+            "content": "chunk text",
+            "metadata": {"file_id": "file-a", "filename": "a.txt", "chunk_index": 0},
+        }
+
+    class FakeClient:
+        def scroll(self, **kwargs):
+            calls.append(kwargs)
+            return [FakeRecord()], "next-point"
+
+    monkeypatch.setattr(store, "get_qdrant_client", lambda: FakeClient())
+
+    with app_collection("imsdom"):
+        page = store.list_chunks(file_ids=["file-a"], limit=2, cursor="point-0")
+
+    assert page["documents"][0]["id"] == "point-1"
+    assert page["next_cursor"] == "next-point"
+    assert page["has_more"] is True
+    assert calls[0]["collection_name"] == "imsdom_chunks"
+    assert calls[0]["limit"] == 2
+    assert calls[0]["offset"] == "point-0"
+    assert calls[0]["with_vectors"] is False
+
+
+def test_init_store_does_not_create_collection(monkeypatch):
     import store
 
     calls = []
@@ -167,25 +203,15 @@ def test_init_store_retries_when_qdrant_is_not_ready(monkeypatch):
         def embed_documents(self, texts):
             return [[0.1, 0.2, 0.3] for _ in texts]
 
-    attempts = {"count": 0}
-
-    def flaky_ensure_collections():
-        attempts["count"] += 1
-        if attempts["count"] == 1:
-            raise RuntimeError("qdrant not ready")
-        calls.append(("ensure", attempts["count"]))
-
-    monkeypatch.setattr(store, "ensure_collections", flaky_ensure_collections)
-    monkeypatch.setattr("store.startup.time.sleep", lambda seconds: calls.append(("sleep", seconds)))
+    monkeypatch.setattr(store, "ensure_collections", lambda collection_name=None: calls.append(("ensure", collection_name)))
 
     store.init_store(dense=FakeDense())
 
-    assert attempts["count"] == 2
-    assert ("sleep", 1) in calls
     assert store.is_search_ready() is True
+    assert calls == []
 
 
-def test_init_store_loads_model_probes_size_and_ensures_collection(monkeypatch):
+def test_init_store_loads_model_and_probes_size(monkeypatch):
     import store
 
     calls = []
@@ -220,8 +246,8 @@ def test_init_store_loads_model_probes_size_and_ensures_collection(monkeypatch):
 
     assert store.is_search_ready() is True
     assert calls.count(("probe", "dimension probe")) == 1
-    assert ("exists", store.QDRANT_CHUNKS_COLLECTION) in calls
-    assert ("payload_index", store.QDRANT_CHUNKS_COLLECTION, "metadata.file_id") in calls
+    assert all(call[0] != "exists" for call in calls)
+    assert all(call[0] != "payload_index" for call in calls)
 
 
 def test_init_store_creates_sparse_vector_config_when_sparse_uses_store(monkeypatch):
@@ -273,6 +299,9 @@ def test_init_store_creates_sparse_vector_config_when_sparse_uses_store(monkeypa
         def get_collection(self, collection_name):
             return object()
 
+        def count(self, **kwargs):
+            return object()
+
         def create_payload_index(self, **kwargs):
             pass
 
@@ -280,5 +309,6 @@ def test_init_store_creates_sparse_vector_config_when_sparse_uses_store(monkeypa
     monkeypatch.setattr(store, "get_qdrant_client", lambda: FakeClient())
 
     store.init_store(dense=FakeDense(), sparse=sparse)
+    store.ensure_collections("imsdom_chunks")
 
     assert any(call[0] == "create" and "sparse" in call[2] for call in calls)

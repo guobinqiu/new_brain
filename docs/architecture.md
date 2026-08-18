@@ -13,12 +13,12 @@
 - dense 能力可通过 Dense profile 切换。
 - sparse 能力可通过 Sparse profile 切换。
 - rerank 能力可通过 Rerank profile 切换。
-- 使用单一 chunks collection 存储所有文档分块。
+- 每个外部系统使用独立 chunks collection，collection 名由 `app_id` 统一生成。
 - 支持通过多个 `file_id` 限定搜索范围。
 - 支持 dense、sparse、hybrid 三种检索模式。
 - 支持可选 rerank。
 - 启动时通过配置文件决定使用哪套组合。
-- 应用层统一鉴权：管理用户和外部系统都先换取 JWT，业务入口只认 `Authorization: Bearer <token>`。
+- 应用层统一鉴权：管理用户使用 User JWT；外部系统业务请求直接使用 AK/SK HMAC 签名。
 - 代码和配置使用通用命名，不绑定具体业务。
 
 ---
@@ -36,8 +36,7 @@
 | sparse | 关键词、词权重或稀疏向量检索 |
 | hybrid | dense 和 sparse 的融合检索 |
 | User JWT | 管理用户登录后得到的 JWT，用于管理功能 |
-| Service JWT | 外部系统通过 AK/SK 换取的 JWT，用于调用 RAG 业务能力 |
-| `app_id` | 外部系统身份标识，用于鉴权和审计，不参与 `file_id` 或向量库过滤字段 |
+| `app_id` | 外部系统身份标识，用于鉴权、审计和 collection 隔离 |
 
 查询范围示例：
 
@@ -47,13 +46,13 @@
 }
 ```
 
-`file_ids` 不传时搜索全库；传空数组会被拒绝；一次最多允许 1000 个 `file_id`。`file_id` 由 RAG 生成，是向量库里的全局文件 ID。
+`file_ids` 不传时搜索当前应用的整个 collection；传空数组会被拒绝；一次最多允许 1000 个 `file_id`。`file_id` 在当前应用的 collection 内使用；上游可以传入 UUID 作为 `file_id`，不传时由 RAG 生成。
 
 ### 2.1 总体架构图
 
 ```mermaid
 flowchart LR
-  Client["外部系统 / 管理入口"] --> Auth["Auth: 用户凭证或 AK/SK 换 JWT"]
+  Client["外部系统 / 管理入口"] --> Auth["Auth: User JWT 或 AK/SK 签名"]
   Auth --> Entry["服务入口"]
   Entry --> App["Application"]
   App --> Search["SearchPipeline"]
@@ -83,7 +82,7 @@ flowchart LR
 
 ### 2.2 鉴权架构
 
-系统只有一个应用层鉴权入口，用于把用户凭证或外部系统 AK/SK 换成 JWT。
+系统在应用层区分管理用户和外部系统调用。管理用户登录后使用 User JWT；外部系统业务请求使用 AK/SK HMAC 签名。
 
 ```mermaid
 sequenceDiagram
@@ -93,13 +92,11 @@ sequenceDiagram
 
   User->>Entry: 用户凭证
   Entry-->>User: User JWT
-  App->>Entry: AK/SK HMAC 签名
-  Entry-->>App: Service JWT
   User->>Entry: Bearer User JWT
-  App->>Entry: Bearer Service JWT
+  App->>Entry: 业务请求 + AK/SK HMAC 签名
 ```
 
-管理用户使用用户名和密码换取 User JWT。外部系统使用 `app_id + access_key + secret_key` 对鉴权请求签名，然后换取 Service JWT。业务入口不直接验 access_key/secret_key，只验 JWT。
+管理用户使用用户名和密码换取 User JWT。外部系统使用 `app_id + access_key + secret_key` 对每个业务请求签名，业务入口直接验 access_key/secret_key 和签名。
 
 外部系统签名串固定为 5 行：
 
@@ -111,9 +108,32 @@ BODY_SHA256
 APP_ID
 ```
 
-`signature = hex(hmac_sha256(secret_key, string_to_sign))`。`X-Timestamp` 参与签名，并限制允许的时间偏差；是否启用 nonce 由安全等级决定。
+`PATH` 只使用 URL path，不包含 query string。`signature = hex(hmac_sha256(secret_key, string_to_sign))`。`X-Timestamp` 参与签名，并限制允许的时间偏差；是否启用 nonce 由安全等级决定。
 
-Service JWT 面向外部系统调用，User JWT 面向管理用户。身份只用于鉴权和审计，不参与 `file_id` 生成、向量库写入或搜索过滤。`file_id` 由 RAG 生成并作为全局文件 ID 写入向量库 metadata。
+AK/SK 面向外部系统调用，User JWT 面向管理用户。AK/SK 签名里的 `app_id` 决定本次请求访问哪个 chunks collection。`file_id` 写入当前 app collection 的 chunk metadata。
+
+服务入口完成鉴权后，会把请求身份归一成内部身份对象：
+
+```text
+admin -> 管理台用户，不绑定 app_id
+app   -> 外部系统，绑定 AK/SK 签名里的 app_id
+```
+
+业务入口只使用归一后的身份对象判断数据范围。外部系统不能通过请求体切换 `app_id`；管理台用户调用索引、搜索、文件列表或向量数据接口时，需要显式选择 `app_id`，服务端再把它归一成当前请求的数据范围。
+
+### 2.2.1 应用凭证和数据库初始化
+
+外部系统身份由管理台创建。创建 app 时，后端只生成 `access_key` 和 `secret_key`，不创建、不删除、不重建向量库 collection。
+
+```text
+collection = {app_id}_chunks
+```
+
+应用凭证保存在 App Registry 文件中，路径由配置项 `auth.registry_file` 指定；未指定时使用项目根目录下的 `data/apps.json`。该文件是运行时数据，不进入 git。
+
+数据库初始化属于数据库管理能力，由管理台在数据库页面显式触发。索引入口不会自动创建 collection；当前 app 尚未初始化数据库时，索引请求返回 `app database is not initialized`。删除 app 只删除 AK/SK 凭证，不删除该 app 的历史向量数据。
+
+业务接口不允许调用方传入 collection 名，也不允许外部系统自行建表。外部系统只保存管理台分配的 `app_id`、`access_key`、`secret_key`。后续索引、查询、删除都根据 AK/SK 签名里的 `app_id` 自动进入对应 collection。
 
 ### LangChain 和原生 SDK 边界
 
@@ -135,13 +155,13 @@ LangChain 在系统里负责文档解析复用、文本切分、HuggingFace embe
 flowchart TB
   VectorDB[("向量库")]
 
-  VectorDB --> Chunks["chunks collection"]
+  VectorDB --> Chunks["{app_id}_chunks collection"]
 
   Chunks --> Metadata["metadata: file_id, chunk_index, filename"]
   Chunks --> Vectors["dense vector / 可选 vector sparse"]
 ```
 
-系统固定使用一个 chunks 逻辑集合存储所有 chunk。不引入文件父表时，文件列表从向量库 chunk metadata 聚合得到。`file_id` 写入 chunk metadata，并在支持的向量库里建立过滤索引。
+系统按 app 使用独立 chunks collection 存储 chunk。不引入文件父表时，文件列表从当前 app collection 的 chunk metadata 聚合得到。`file_id` 写入 chunk metadata，并在支持的向量库里建立过滤索引。
 
 ### 2.4 写入流程图
 
@@ -164,7 +184,7 @@ sequenceDiagram
   Entry->>Parser: 下载、解析文件
   Parser->>Parser: 清理文本并切 chunk
   Entry->>Store: insert chunks
-  Store->>DB: 写入 chunk、vector、metadata.file_id、metadata.s3_url、metadata.created_at
+  Store->>DB: 写入当前 app collection 的 chunk、vector、metadata.file_id、metadata.s3_url、metadata.created_at
   Entry-->>Client: 返回 file_id
   Client->>Entry: 异步提交 presigned_url + s3_url
   Entry->>Entry: 生成 job_id 和 file_id
@@ -174,14 +194,14 @@ sequenceDiagram
   Worker->>Parser: 下载、解析文件
   Parser->>Parser: 清理文本并切 chunk
   Worker->>Store: insert chunks
-  Store->>DB: 写入 chunk、vector、metadata.file_id、metadata.s3_url、metadata.created_at
+  Store->>DB: 写入当前 app collection 的 chunk、vector、metadata.file_id、metadata.s3_url、metadata.created_at
   Client->>Entry: 查询任务状态
   Entry-->>Client: 返回 queued/started/finished/failed，完成时包含 file_id
 ```
 
-写入入口可以同步执行索引，也可以创建异步任务。两种入口都接收 `presigned_url + s3_url`，不接收调用方提供的 `file_id`；`file_id` 只由 RAG 生成，文件名默认可从对象存储地址推导，也允许调用方指定展示名。同步索引成功返回代表已经写入向量库。异步索引创建任务后立即返回 `job_id`，后台 `index-worker` 完成下载、解析、切分、embedding 并写入向量库。调用方用 `job_id` 查询任务状态；状态响应里的 `file_id` 是后续搜索使用的文件 ID，只有 `finished` 后才能保证向量库里已经可查。同步入口和异步 worker 复用同一套索引执行逻辑。对象存储索引使用 `presigned_url` 做一次性下载，不把临时下载 URL 写入 chunk metadata；稳定的 `s3_url` 会写入 chunk metadata 用于追溯。文件和 chunk 的 `created_at` 在索引写入时生成并写入 chunk metadata；异步任务的 `created_at`、`enqueued_at`、`started_at`、`ended_at` 来自 RQ Job 生命周期记录。存储层统一保存 UTC 时间，对外返回前再转换成本机或容器时区。
+写入入口可以同步执行索引，也可以创建异步任务。两种入口都接收 `presigned_url + s3_url`，并允许外部系统传入 UUID 格式的 `file_id`；不传时由 RAG 生成。管理台本地上传链路先通过上传接口生成 `file_id` 并写入对象存储路径，再调用 `/api/admin/index/jobs`，因此管理台异步索引必须传入上传阶段返回的 `file_id`。文件名默认可从对象存储地址推导，也允许调用方指定展示名。同步索引成功返回代表已经写入向量库。异步索引创建任务后立即返回 `job_id`，后台 `index-worker` 完成下载、解析、切分、embedding 并写入向量库。调用方用 `job_id` 查询任务状态；只有状态为 `finished` 后才能保证 `file_id` 在向量库里已经可查。同步入口和异步 worker 复用同一套索引执行逻辑。对象存储索引使用 `presigned_url` 做一次性下载，不把临时下载 URL 写入 chunk metadata；稳定的 `s3_url` 会写入 chunk metadata 用于追溯。文件和 chunk 的 `created_at` 在索引写入时生成并写入 chunk metadata；异步任务的 `created_at`、`enqueued_at`、`started_at`、`ended_at` 来自 RQ Job 生命周期记录。存储层统一保存 UTC 时间，对外返回前再转换成本机或容器时区。
 
-异步索引任务使用 Redis Queue 存储，Redis 开启 AOF 持久化。任务入队成功代表任务已被接受；worker 不在线时，任务留在 Redis 中等待消费。RAG 不假设所有上游系统都有自己的队列、限流和重试能力；内部队列是 RAG 服务的资源保护边界，用来削峰并控制 OCR、embedding 和向量库写入并发。异步任务状态包含处理中、成功和失败信息。异步入队前会检查单位时间提交数量和队列积压数量，超过限制时拒绝任务。实际索引并发由 worker 数量控制。`file_id` 由 RAG 签发是写入链路的架构约束。如果允许调用方提供 `file_id`，入口就必须在返回前检查是否已存在；否则冲突可能在后台 worker 阶段才暴露，缺少可靠机制把失败结果同步给调用方。由 RAG 生成全局 `file_id` 后，入口不需要做存在性检查，也不会出现上游 ID 冲突导致后台任务失败的问题。
+异步索引任务使用 Redis Queue 存储，Redis 开启 AOF 持久化。任务入队成功代表任务已被接受；worker 不在线时，任务留在 Redis 中等待消费；任务成功或失败后的状态记录不设置过期时间，正常重启后仍可查询。RAG 不假设所有上游系统都有自己的队列、限流和重试能力；内部队列是 RAG 服务的资源保护边界，用来削峰并控制 OCR、embedding 和向量库写入并发。异步任务状态包含处理中、成功和失败信息。异步入队前会检查单位时间提交数量和队列积压数量，超过限制时拒绝任务。实际索引并发由 worker 数量控制。Native、Docker 和生产部署都使用 RQ Worker 常驻运行，并由进程管理器或容器重启策略托管。每个 `app_id` 对应独立 collection，外部系统只要按 UUID 规约生成 `file_id`，就不会和其他 app 的同名文件发生跨系统冲突。
 
 Docker 开发环境使用 MinIO 模拟 S3。MinIO 提供本地 bucket 和对象下载能力，服务入口可以在本地联调时根据 `s3_url` 生成后端可访问的短期下载地址。生产环境里，重签通常由业务系统或对象存储网关完成，RAG 仍只消费 `presigned_url + s3_url`。
 
@@ -202,7 +222,7 @@ flowchart TB
   Rerank --> Format
 ```
 
-查询只查一个 chunks collection。`file_ids` 作为 metadata filter 缩小候选范围；dense / sparse / hybrid 在同一个范围内检索。hybrid 统一为 dense 和 sparse 两路并发后在应用层做 RRF 融合；开启 rerank 时，再对候选结果做二次排序。
+查询只查当前调用身份对应 app 的 chunks collection。`file_ids` 作为 metadata filter 缩小候选范围；dense / sparse / hybrid 在同一个范围内检索。hybrid 统一为 dense 和 sparse 两路并发后在应用层做 RRF 融合；开启 rerank 时，再对候选结果做二次排序。
 
 搜索入口返回业务搜索结果和本次搜索总耗时。搜索完成后，后端把链路信息写入内存 ring buffer，供诊断入口读取最近搜索请求的总耗时、结果数和阶段耗时。
 
@@ -222,7 +242,7 @@ flowchart TB
 
 模型切换属于配置管理能力，不属于运行监控能力。
 
-向量数据查看能力直接分页读取向量库 chunk 数据，展示 chunk 主键、`file_id`、`s3_url`、`filename`、`chunk_index` 和完整 chunk 文本；文件聚合列表从 chunk metadata 汇总得到，只用于查看和删除整份文件的 chunks。向量数据查看不自动轮询，只有显式查询时才读取 chunk。
+向量数据查看能力直接分页读取向量库 chunk 数据，展示 chunk 主键、`file_id`、`s3_url`、`filename`、`chunk_index` 和完整 chunk 文本。管理台文件列表从 MinIO/S3 按 `uploads/{app_id}/` 前缀分页读取原始上传文件，文件 ID 来自对象路径 `uploads/{app_id}/{file_id}/{filename}`。管理台按 `file_id` 删除文件时同时删除向量库 chunks 和该 MinIO/S3 前缀下的对象；上游删除文件接口只删除向量库 chunks。
 
 ---
 
@@ -230,13 +250,13 @@ flowchart TB
 
 后端使用 yaml profile 描述一套完整运行组合。配置读取代码和配置结构校验代码与具体 profile 解耦，运行时由环境选择一个 profile 启动。
 
-每个运行 profile 使用一个 yaml 文件。yaml 文件固定一种索引结构，不在同一个文件里放多套 dense 或 vector sparse 候选。真正会影响索引结构的组件，例如 dense、vector sparse、collection 名，必须通过切换 profile 或重建索引改变。不会改变索引结构的组件，例如 rerank、ocr，可以继续在同一个 yaml 里用候选项和 `enable` 表达。
+每个运行 profile 使用一个 yaml 文件。yaml 文件固定一种索引结构，不在同一个文件里放多套 dense 或 vector sparse 候选。真正会影响索引结构的组件，例如 dense 和 vector sparse，必须通过切换 profile 或重建索引改变。不会改变索引结构的组件，例如 rerank、ocr，可以继续在同一个 yaml 里用候选项和 `enable` 表达。
 
 每个组件都显式写 `import_path`。组件名负责表达“我要哪种能力”，`import_path` 负责表达“这类能力由哪个 Python 类实现”。这样配置文件里能直接看出实现位置，也方便以后把组件迁移成插件。
 
 `bootstrap.py` 负责应用启动和关闭。`container.py` 负责按配置组装 dense、sparse、store、search、rerank、ocr。它们不保存具体业务规则，也不把某个模型或向量库写死到搜索逻辑里。
 
-profile 名只作为运维识别入口；真正的索引结构以 yaml 里的 store、dense、sparse 和 collection 配置为准。
+profile 名只作为运维识别入口；真正的索引结构以 yaml 里的 store、dense 和 sparse 配置为准。业务 collection 名不写在 yaml 里，由后端根据 `app_id` 统一生成。
 
 ---
 
@@ -256,8 +276,6 @@ sparse:
 
 store:
   type: <store_type>
-  collections:
-    chunks: <chunks_collection>
   import_path: <store_class>
 
 search:
@@ -529,13 +547,13 @@ vector sparse
 
 ## 9. 知识集合
 
-系统逻辑上始终使用一个知识集合：
+系统对每个 app 使用一个知识集合：
 
 | 集合 | 用途 |
 |---|---|
-| chunks | 存储所有文件 chunk |
+| `{app_id}_chunks` | 存储当前 app 的所有文件 chunk |
 
-collection 名由 yaml profile 决定。文件范围通过 `file_id` metadata filter 表达；系统只有这一套 chunks 逻辑集合。不同模型组合如果索引结构不兼容，必须使用不同 profile 或重建 collection，避免新旧向量混在一个索引里。
+collection 名由后端根据 `app_id` 生成。文件范围通过 `file_id` metadata filter 表达；不同 app 的数据落在不同 collection。不同模型组合如果索引结构不兼容，必须使用不同 profile 或重建对应 app collection，避免新旧向量混在一个索引里。
 
 ---
 
@@ -699,7 +717,7 @@ SearchPlan(
 | `dense_weight` | 本次 hybrid 查询的 dense 权重 |
 | `sparse_weight` | 本次 hybrid 查询的 sparse 权重 |
 | `rrf_k` | 本次 hybrid 查询的 RRF 参数 |
-| `file_ids` | 查询文件范围；不传时搜索全库 |
+| `file_ids` | 查询文件范围；不传时搜索当前 app collection |
 
 ---
 
@@ -718,7 +736,7 @@ rerank=true  -> retrieve_limit = fetch_k
 1. 检查 application 已 ready
 2. SearchPlan 进入 SearchPipeline Runnable
 3. prepare_plan 计算 retrieve_limit
-4. retrieve 按 file_ids 构造的 metadata_filter 查询 chunks collection
+4. retrieve 按当前调用身份的 app_id 选择 collection，并按 file_ids 构造 metadata_filter
 5. hybrid 时 dense / sparse 使用 RunnableParallel 并发查询
 6. fusion 对 dense / sparse 结果做加权倒数排名融合
 7. dedupe 按 chunk id 去重
@@ -815,7 +833,7 @@ LangSmith 和本地 JSONL 日志可以同时开启。LangSmith 用于查看 Lang
 
 - 不在同一个 collection 里混用不同 dense 向量维度。
 - 不在 dense-only collection 里直接写入 vector sparse。
-- 代码不会在启动时阻止使用已有 collection；切换模型、sparse 类型或向量库结构后，由配置和 collection 名约定保证索引不混用。
+- 代码不会在启动时阻止使用已有 app collection；切换模型、sparse 类型或向量库结构后，由配置和 app collection 重建流程保证索引不混用。
 - 测试用例使用测试 collection 或临时目录，不复用生产 collection。
 
 ---
@@ -837,7 +855,7 @@ CONFIG_FILE=/path/to/config.yaml
 - 该设计对应 Kubernetes 的 liveness/readiness 模式：健康检查可作为 liveness probe，就绪检查可作为 readiness probe。
 - RAG 未 ready 时，写入、查询、文档列表等业务入口返回 503；后台初始化成功后自动恢复。
 - LangSmith tracing 由部署环境通过 `LANGSMITH_TRACING`、`LANGSMITH_API_KEY`、`LANGSMITH_PROJECT` 控制，不写入 yaml。
-- 不同检索组合使用不同 collection 或 index。
+- 不同检索组合需要使用不同 profile，并重建对应 app collection 或 index。
 - Qdrant、Chroma、Milvus 等具体服务按各自方式部署；服务型数据库和嵌入式文件库的部署边界要分开处理。
 - 同名文件替换使用 document key 细粒度锁或按 document key 分区的写入队列。
 - 向量库数据目录需要独立备份。

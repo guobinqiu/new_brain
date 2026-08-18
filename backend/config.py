@@ -19,8 +19,6 @@ SEARCH_CONFIG = {
 }
 
 QDRANT_URL = CONFIG.store.url or "http://localhost:6333"
-QDRANT_CHUNKS_COLLECTION = CONFIG.store.collections.chunks
-
 MODELS_DIR = str(Path(__file__).resolve().parent.parent / "models")
 
 DENSE_MODEL_DIR = CONFIG.dense.model_path

@@ -5,6 +5,7 @@ import logging
 import device
 
 from config import DENSE_MODEL_DIR
+from progress import disable_model_progress_bars
 
 logger = logging.getLogger("rag.app")
 
@@ -19,6 +20,7 @@ class HuggingFaceDense:
     def start(self) -> None:
         if self._dense is None:
             logger.info("Loading dense model", extra={"event": "model_load", "component": "dense", "model": self.model_name})
+            disable_model_progress_bars()
             from langchain_huggingface import HuggingFaceEmbeddings
             self._dense = HuggingFaceEmbeddings(model_name=self.model_name, model_kwargs={"device": device.auto_device()})
         if self._vector_size is None:

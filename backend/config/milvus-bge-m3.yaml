@@ -7,16 +7,10 @@ auth:
   admin:
     username: admin
     password: admin123
-  app:
-    app_id: imsdom
-    access_key: 0d01c6bc9577a6dae3095cb7972a9f8c
-    secret_key: 78ddbd0730125b050b607c81c8398c4fe96f707cfa66f222d42a8eeae3aa47e6
 store:
   type: milvus
   uri: http://localhost:19530
   timeout: 30
-  collections:
-    chunks: milvus_bge_m3_knowledge_chunks
   import_path: store.milvus.MilvusStore
 dense:
   name: bge_m3

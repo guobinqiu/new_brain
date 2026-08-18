@@ -203,7 +203,6 @@ def _run_scenario(application, batch: BenchmarkBatch, mode: str, top_k: int) -> 
 
 def _config_for(batch: BenchmarkBatch, tmp_path: Path) -> dict[str, Any]:
     combo = batch.combo
-    collection_suffix = f"{_slug(combo.database)}_{_slug(combo.dense)}_{_slug(combo.sparse)}_{_slug(combo.sparse_impl)}"
     store_config = dict(combo.store_config)
     if combo.store_key == "chroma":
         store_config["persist_dir"] = str(tmp_path / "chroma")
@@ -212,9 +211,6 @@ def _config_for(batch: BenchmarkBatch, tmp_path: Path) -> dict[str, Any]:
     store = {
         "type": combo.store_key,
         "import_path": _store_import_path(combo.store_key),
-        "collections": {
-            "chunks": f"benchmark_{collection_suffix}_chunks",
-        },
         **store_config,
     }
     dense_model = "bge-m3" if combo.dense == "bge-m3" else "bge-base-zh-v1.5"

@@ -132,7 +132,7 @@ def _component_group_options(section) -> list[dict[str, object]]:
 def _is_component_group(section) -> bool:
     if not isinstance(section, dict):
         return False
-    if any(key in section for key in ("name", "type", "module", "collections")):
+    if any(key in section for key in ("name", "type", "module")):
         return False
     return all(isinstance(value, dict) for value in section.values())
 

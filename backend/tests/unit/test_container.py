@@ -8,18 +8,12 @@ def _config_file(tmp_path, store_key: str = "qdrant", sparse_key: str = "bm25", 
     store_settings = {
         "qdrant": """
   url: http://localhost:6333
-  collections:
-    chunks: chunks
 """,
         "chroma": """
   persist_dir: ./chroma_data
-  collections:
-    chunks: chunks
 """,
         "milvus": """
   uri: http://localhost:19530
-  collections:
-    chunks: chunks
 """,
     }[store_key]
     path = tmp_path / "profile.yaml"
@@ -78,7 +72,6 @@ def test_container_selects_chroma_store(tmp_path):
 
     assert isinstance(store, ChromaStore)
     assert store.persist_dir == config.store.persist_dir
-    assert store.chunks_collection == config.store.collections.chunks
 
 
 def test_container_selects_milvus_store(tmp_path):
@@ -93,7 +86,6 @@ def test_container_selects_milvus_store(tmp_path):
 
     assert isinstance(store, MilvusStore)
     assert store.uri == config.store.uri
-    assert store.chunks_collection == config.store.collections.chunks
 
 
 def test_container_selects_qdrant_bge_m3_sparse_adapter(tmp_path):

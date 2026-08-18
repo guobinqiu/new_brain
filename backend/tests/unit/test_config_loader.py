@@ -19,9 +19,6 @@ def test_load_app_config_loads_local_config(monkeypatch):
     assert config.name == "local"
     assert config.store.type == "qdrant"
     assert config.store.url == "http://localhost:6333"
-    assert config.store.collections.chunks == "knowledge_chunks"
-    assert not hasattr(config.store.collections, "common")
-    assert not hasattr(config.store.collections, "scoped")
     assert config.logging.level == "INFO"
     assert config.logging.file is None
     assert config.logging.max_bytes == 10485760
@@ -48,8 +45,6 @@ store:
   type: qdrant
   url: http://localhost:6333
   timeout: 42
-  collections:
-    chunks: chunks_custom
 search:
   default_mode: hybrid
   top_k: 12
@@ -79,7 +74,6 @@ ocr: test_ocr
     assert config.rerank.model_path == str(PROJECT_ROOT / "models" / "rerank")
     assert config.ocr.model_path == str(PROJECT_ROOT / "models" / "ocr")
     assert config.store.timeout == 42
-    assert config.store.collections.chunks == "chunks_custom"
     assert config.search.top_k == 12
     assert config.search.fetch_k == 48
     assert config.search.dense_weight == 0.7
@@ -103,8 +97,6 @@ sparse:
 store:
   type: qdrant
   url: http://localhost:6333
-  collections:
-    chunks: chunks_custom
 search:
   default_mode: hybrid
 rerank: test_rerank
@@ -135,8 +127,6 @@ sparse:
 store:
   type: qdrant
   url: http://localhost:6333
-  collections:
-    chunks: chunks_custom
 search:
   default_mode: hybrid
 rerank: test_rerank
@@ -165,8 +155,6 @@ sparse:
 store:
   type: qdrant
   url: http://localhost:6333
-  collections:
-    chunks: chunks_custom
 search:
   default_mode: hybrid
   top_k: 12
@@ -212,8 +200,6 @@ sparse:
 store:
   type: qdrant
   url: http://localhost:6333
-  collections:
-    chunks: chunks_custom
 rerank: null
 ocr:
   name: rapid
@@ -239,7 +225,6 @@ def test_load_app_config_can_use_config_filename(monkeypatch):
     assert config.dense.model_path == str(PROJECT_ROOT / "models" / "bge-base-zh-v1.5")
     assert config.store.type == "qdrant"
     assert config.store.url == "http://localhost:6333"
-    assert config.store.collections.chunks == "knowledge_chunks"
 
 
 def test_load_app_config_supports_qdrant_profile(monkeypatch):
@@ -251,7 +236,6 @@ def test_load_app_config_supports_qdrant_profile(monkeypatch):
 
     assert config.name == "qdrant-bge-base"
     assert config.store.type == "qdrant"
-    assert config.store.collections.chunks == "qdrant_bge_base_knowledge_chunks"
 
 
 def test_load_app_config_supports_chroma_store(monkeypatch):
@@ -264,7 +248,6 @@ def test_load_app_config_supports_chroma_store(monkeypatch):
     assert config.name == "chroma-bge-base"
     assert config.store.type == "chroma"
     assert config.store.persist_dir == "chroma_data"
-    assert config.store.collections.chunks == "chroma_bge_base_knowledge_chunks"
 
 
 def test_load_app_config_rejects_chroma_bge_m3_sparse(tmp_path):
@@ -284,8 +267,6 @@ sparse:
 store:
   type: chroma
   persist_dir: chroma_data
-  collections:
-    chunks: chroma_bge_base_knowledge_chunks
   import_path: store.chroma.ChromaStore
 search:
   default_mode: hybrid
@@ -315,7 +296,6 @@ def test_load_app_config_supports_milvus_store(monkeypatch):
     assert config.name == "milvus-bge-base"
     assert config.store.type == "milvus"
     assert config.store.uri == "http://localhost:19530"
-    assert config.store.collections.chunks == "milvus_bge_base_knowledge_chunks"
 
 
 def test_load_app_config_keeps_app_bm25_sparse_without_model_path(monkeypatch):
@@ -356,8 +336,6 @@ sparse:
 store:
   type: qdrant
   url: http://localhost:6333
-  collections:
-    chunks: chunks
 search:
   default_mode: hybrid
 rerank:
@@ -392,8 +370,6 @@ sparse:
 store:
   type: qdrant
   url: http://localhost:6333
-  collections:
-    chunks: chunks
 search:
   default_mode: hybrid
 rerank:
@@ -425,8 +401,6 @@ sparse:
   tokenizer: jieba
 store:
   type: unknown
-  collections:
-    chunks: chunks
 search:
   default_mode: hybrid
 rerank: test_rerank

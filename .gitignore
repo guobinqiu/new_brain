@@ -20,6 +20,7 @@ postgres_data/
 qdrant_data/
 redis_data/
 data/
+backend/data/
 
 # 日志与测试产物
 logs/

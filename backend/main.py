@@ -8,23 +8,24 @@ from io import BytesIO
 from collections import deque
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, nullcontext
 from typing import Any, Literal
 from urllib.parse import urlparse
 
-from fastapi import Depends, FastAPI, Header, Request, UploadFile, File, HTTPException
+from fastapi import Depends, FastAPI, Header, Request, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from minio import Minio
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from app_registry import AppRegistry
 from auth import Principal, authenticate_client_signature, authenticate_password, issue_token, principal_from_authorization
 from bootstrap import Application
-from store.files import count_files_from_documents, list_files_from_documents
 from indexing import create_file_id, enqueue_index_job, index_file, index_presigned_object
 from indexing.queue import IndexQueueRejected, IndexQueueUnavailable, get_index_job, list_index_jobs, _redis_url
 from indexing.service import SUPPORTED_FILE_EXTENSIONS, filename_from_s3_url, parse_s3_url, validate_supported_file_extension
 from log_buffer import logs_after, recent_logs
 from search import SearchPlan, _SearchExecutor
+from collection_names import validate_app_id
 from config import SEARCH_CONFIG
 from logging_config import configure_logging
 
@@ -32,8 +33,16 @@ from logging_config import configure_logging
 logger = logging.getLogger("rag.app")
 
 
+def normalize_file_id(file_id: str) -> str:
+    try:
+        return uuid.UUID(file_id).hex
+    except ValueError as exc:
+        raise ValueError("file_id must be a UUID") from exc
+
+
 class SearchRequest(BaseModel):
     query: str = Field(..., min_length=1)
+    app_id: str | None = None
     mode: Literal["dense", "sparse", "hybrid"] = SEARCH_CONFIG["default_mode"]
     top_k: int = Field(SEARCH_CONFIG["top_k"], ge=1, le=50)
     rerank: bool = SEARCH_CONFIG["rerank"]
@@ -60,12 +69,24 @@ class ObjectIndexRequest(BaseModel):
     presigned_url: str = Field(..., min_length=1)
     s3_url: str = Field(..., min_length=1)
     filename: str | None = None
+    app_id: str | None = None
+    file_id: str | None = Field(None, min_length=1, max_length=64)
 
     @model_validator(mode="after")
-    def validate_s3_url(self):
+    def validate_request(self):
         if not self.s3_url.startswith("s3://"):
             raise ValueError("s3_url must start with s3://")
+        if self.file_id is not None:
+            self.file_id = normalize_file_id(self.file_id)
         return self
+
+
+class AdminIndexJobRequest(ObjectIndexRequest):
+    file_id: str = Field(..., min_length=1, max_length=64)
+
+
+class IndexJobsStatusRequest(BaseModel):
+    job_ids: list[str] = Field(..., min_length=1, max_length=200)
 
 
 class PresignRequest(BaseModel):
@@ -79,10 +100,34 @@ class PresignRequest(BaseModel):
         return self
 
 
+class LoginRequest(BaseModel):
+    username: str = Field(..., min_length=1)
+    password: str = Field(..., min_length=1)
+
+
+class AppCreateRequest(BaseModel):
+    app_id: str = Field(..., min_length=2, max_length=64)
+
+
+class ChunksQueryRequest(BaseModel):
+    limit: int = Field(50, ge=1, le=200)
+    cursor: str | None = None
+    app_id: str | None = None
+    file_ids: list[str] | None = None
+
+    @model_validator(mode="after")
+    def validate_file_ids(self):
+        if self.file_ids is not None and len(self.file_ids) == 0:
+            raise ValueError("file_ids cannot be empty")
+        if self.file_ids is not None and len(self.file_ids) > 1000:
+            raise ValueError("file_ids exceeds max limit: 1000")
+        return self
+
+
 application = Application()
 STARTUP_IN_BACKGROUND = True
 STARTUP_RETRY_MAX_INTERVAL_SECONDS = 30
-SEARCH_TRACE_LIMIT = 50
+SEARCH_TRACE_LIMIT = 200
 _search_traces = deque(maxlen=SEARCH_TRACE_LIMIT)
 _search_traces_lock = threading.Lock()
 
@@ -133,32 +178,96 @@ def create_job_id() -> str:
     return uuid.uuid4().hex
 
 
-def _require_principal(authorization: str | None = Header(None)) -> Principal:
+def require_jwt(authorization: str | None = Header(None)) -> Principal:
     return principal_from_authorization(application.config.auth, authorization)
 
 
-@app.post("/api/auth/token")
-async def auth_token(request: Request):
-    body = await request.body()
-    try:
-        data = json.loads(body.decode("utf-8") or "{}")
-    except json.JSONDecodeError as exc:
-        raise HTTPException(400, "invalid json") from exc
-    grant_type = data.get("grant_type")
-    if grant_type == "password":
-        principal = authenticate_password(application.config.auth, data.get("username"), data.get("password"))
-    elif grant_type == "client_credentials":
-        principal = authenticate_client_signature(application.config.auth, request, body)
-    else:
-        raise HTTPException(400, "unsupported grant_type")
+async def require_aksk(request: Request) -> Principal:
+    return authenticate_client_signature(application.config.auth, request, await request.body())
+
+
+@app.post("/api/admin/login")
+def login(req: LoginRequest):
+    principal = authenticate_password(application.config.auth, req.username, req.password)
     return {
         "access_token": issue_token(application.config.auth, principal),
         "token_type": "Bearer",
     }
 
 
-@app.get("/api/config")
-def get_config(_: Principal = Depends(_require_principal)):
+@app.get("/api/admin/apps")
+def list_apps(_: Principal = Depends(require_jwt)):
+    registry = AppRegistry(application.config.auth.registry_file)
+    return {
+        "apps": [
+            {
+                "app_id": app_credential.app_id,
+                "access_key": app_credential.access_key,
+                "secret_key": app_credential.secret_key,
+            }
+            for app_credential in registry.list_apps()
+        ]
+    }
+
+
+@app.post("/api/admin/apps", status_code=201)
+def create_app(req: AppCreateRequest, _: Principal = Depends(require_jwt)):
+    registry = AppRegistry(application.config.auth.registry_file)
+    try:
+        if registry.get_app(req.app_id) is not None:
+            raise ValueError("app_id already exists")
+        credential = registry.create_app(req.app_id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {
+        "app_id": credential.app_id,
+        "access_key": credential.access_key,
+        "secret_key": credential.secret_key,
+    }
+
+
+@app.delete("/api/admin/apps/{app_id}")
+def delete_app(app_id: str, _: Principal = Depends(require_jwt)):
+    registry = AppRegistry(application.config.auth.registry_file)
+    try:
+        deleted = registry.delete_app(app_id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if not deleted:
+        raise HTTPException(404, "app not found")
+    return {"deleted": True}
+
+
+@app.post("/api/admin/apps/{app_id}/database")
+def initialize_app_database(app_id: str, _: Principal = Depends(require_jwt)):
+    _require_ready()
+    try:
+        application.store.ensure_app_collection(app_id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"app_id": app_id, "initialized": True}
+
+
+@app.get("/api/admin/apps/{app_id}/database")
+def app_database_status(app_id: str, _: Principal = Depends(require_jwt)):
+    _require_ready()
+    return _app_database_status(app_id)
+
+
+@app.delete("/api/admin/apps/{app_id}/database")
+def delete_app_database(app_id: str, _: Principal = Depends(require_jwt)):
+    _require_ready()
+    status = _app_database_status(app_id)
+    if not status["exists"]:
+        raise HTTPException(404, "app database not found")
+    if status["chunk_count"] > 0:
+        raise HTTPException(409, "app database is not empty")
+    deleted = application.store.drop_app_collection(app_id)
+    return {"app_id": app_id, "deleted": deleted}
+
+
+@app.get("/api/admin/config")
+def get_config(_: Principal = Depends(require_jwt)):
     cfg = dict(SEARCH_CONFIG)
     cfg["config_name"] = application.config_name
     cfg["store"] = _store_config()
@@ -169,8 +278,8 @@ def get_config(_: Principal = Depends(_require_principal)):
     cfg["available_components"] = application.config.available_components
     return cfg
 
-@app.get("/api/monitor")
-def monitor(_: Principal = Depends(_require_principal)):
+@app.get("/api/admin/monitor")
+def monitor(_: Principal = Depends(require_jwt)):
     return {
         "ready": application.ready,
         "profile": _profile(),
@@ -180,16 +289,16 @@ def monitor(_: Principal = Depends(_require_principal)):
     }
 
 
-@app.get("/api/traces")
-def traces(limit: int = 50, cursor: str | None = None, _: Principal = Depends(_require_principal)):
+@app.get("/api/admin/traces")
+def traces(limit: int = 50, app_id: str | None = None, principal: Principal = Depends(require_jwt)):
     try:
-        return _recent_search_traces(limit=limit, cursor=cursor)
+        return _recent_search_traces(limit=limit, app_id=_app_filter(principal, app_id))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@app.get("/api/logs")
-async def logs(request: Request, _: Principal = Depends(_require_principal)):
+@app.get("/api/admin/logs")
+async def logs(request: Request, _: Principal = Depends(require_jwt)):
     async def stream():
         initial_events, last_seq = _initial_log_events()
         for event in initial_events:
@@ -215,11 +324,14 @@ def index_chunks(
     return {"file_id": file_id}
 
 
-@app.post("/api/upload")
+@app.post("/api/admin/upload")
 async def upload_file(
     file: UploadFile = File(...),
-    _: Principal = Depends(_require_principal),
+    app_id: str = Form(...),
+    principal: Principal = Depends(require_jwt),
 ):
+    effective_principal = _database_principal(principal, app_id)
+    _require_app_database(effective_principal)
     if not file.filename:
         raise HTTPException(400, "No filename")
     
@@ -228,9 +340,10 @@ async def upload_file(
         raise HTTPException(400, f"Unsupported file type: {ext}")
     
     try:
+        file_id = create_file_id()
         content = await file.read()
-        s3_url = _upload_file_to_storage(file.filename, content, file.content_type or "application/octet-stream")
-        return {"s3_url": s3_url, "filename": file.filename}
+        s3_url = _upload_file_to_storage(effective_principal.app_id, file_id, file.filename, content, file.content_type or "application/octet-stream")
+        return {"file_id": file_id, "s3_url": s3_url, "filename": file.filename}
     except HTTPException:
         raise
     except ValueError as e:
@@ -241,7 +354,16 @@ async def upload_file(
 
 
 @app.post("/api/index")
-def index_object(req: ObjectIndexRequest, _: Principal = Depends(_require_principal)):
+def client_index_object(req: ObjectIndexRequest, principal: Principal = Depends(require_aksk)):
+    return _index_object(req, principal)
+
+
+@app.post("/api/admin/index")
+def index_object(req: ObjectIndexRequest, principal: Principal = Depends(require_jwt)):
+    return _index_object(req, principal)
+
+
+def _index_object(req: ObjectIndexRequest, principal: Principal):
     _require_ready()
     filename = req.filename or _filename_from_s3_url(req.s3_url)
     ext = os.path.splitext(filename)[1].lower()
@@ -249,15 +371,18 @@ def index_object(req: ObjectIndexRequest, _: Principal = Depends(_require_princi
         validate_supported_file_extension(ext)
     except ValueError as e:
         raise HTTPException(400, str(e))
-    file_id = create_file_id()
+    file_id = getattr(req, "file_id", None) or create_file_id()
     try:
-        count = index_presigned_object(
-            application,
-            file_id=file_id,
-            presigned_url=req.presigned_url,
-            s3_url=req.s3_url,
-            filename=filename,
-        )
+        effective_principal = _database_principal(principal, req.app_id)
+        _require_app_database(effective_principal)
+        with _store_context(effective_principal):
+            count = index_presigned_object(
+                application,
+                file_id=file_id,
+                presigned_url=req.presigned_url,
+                s3_url=req.s3_url,
+                filename=filename,
+            )
         logger.info("Object indexed", extra={"event": "object_indexed", "document_filename": filename, "file_id": file_id, "s3_url": req.s3_url, "chunk_count": count})
         return {"file_id": file_id}
     except HTTPException:
@@ -270,7 +395,16 @@ def index_object(req: ObjectIndexRequest, _: Principal = Depends(_require_princi
 
 
 @app.post("/api/index/jobs", status_code=202)
-def create_index_job(req: ObjectIndexRequest, _: Principal = Depends(_require_principal)):
+def client_create_index_job(req: ObjectIndexRequest, principal: Principal = Depends(require_aksk)):
+    return _create_index_job(req, principal)
+
+
+@app.post("/api/admin/index/jobs", status_code=202)
+def create_index_job(req: AdminIndexJobRequest, principal: Principal = Depends(require_jwt)):
+    return _create_index_job(req, principal)
+
+
+def _create_index_job(req: ObjectIndexRequest, principal: Principal):
     _require_ready()
     filename = req.filename or _filename_from_s3_url(req.s3_url)
     ext = os.path.splitext(filename)[1].lower()
@@ -278,11 +412,14 @@ def create_index_job(req: ObjectIndexRequest, _: Principal = Depends(_require_pr
         validate_supported_file_extension(ext)
     except ValueError as e:
         raise HTTPException(400, str(e))
-    file_id = create_file_id()
+    file_id = getattr(req, "file_id", None) or create_file_id()
     job_id = create_job_id()
+    effective_principal = _database_principal(principal, req.app_id)
     try:
+        _require_app_database(effective_principal)
         job = enqueue_index_job(
             job_id=job_id,
+            app_id=effective_principal.app_id,
             file_id=file_id,
             presigned_url=req.presigned_url,
             s3_url=req.s3_url,
@@ -302,10 +439,11 @@ def create_index_job(req: ObjectIndexRequest, _: Principal = Depends(_require_pr
         raise HTTPException(500, str(e))
 
 
-@app.get("/api/index/jobs")
-def index_jobs(limit: int = 50, cursor: str | None = None, _: Principal = Depends(_require_principal)):
+@app.get("/api/admin/index/jobs")
+def index_jobs(limit: int = 50, cursor: str | None = None, app_id: str | None = None, principal: Principal = Depends(require_jwt)):
+    selected_app_id = _app_filter(principal, app_id)
     try:
-        page = list_index_jobs(limit=limit, cursor=cursor)
+        page = list_index_jobs(limit=limit, cursor=cursor, app_id=selected_app_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except IndexQueueUnavailable as exc:
@@ -317,31 +455,42 @@ def index_jobs(limit: int = 50, cursor: str | None = None, _: Principal = Depend
     }
 
 
-@app.get("/api/index/jobs/{job_id}")
-def index_job_status(job_id: str, _: Principal = Depends(_require_principal)):
+@app.post("/api/index/jobs/status")
+def client_index_jobs_status(req: IndexJobsStatusRequest, principal: Principal = Depends(require_aksk)):
+    return _index_jobs_status(req, principal)
+
+
+@app.post("/api/admin/index/jobs/status")
+def admin_index_jobs_status(req: IndexJobsStatusRequest, principal: Principal = Depends(require_jwt)):
+    return _index_jobs_status(req, principal)
+
+
+@app.get("/api/admin/index/jobs/{job_id}")
+def index_job_status(job_id: str, principal: Principal = Depends(require_jwt)):
+    return _index_job_status(job_id, principal)
+
+
+def _index_jobs_status(req: IndexJobsStatusRequest, principal: Principal):
+    principal = _effective_principal(principal)
+    jobs = []
+    for job_id in req.job_ids:
+        jobs.append(_index_job_status(job_id, principal))
+    return {"jobs": jobs}
+
+
+def _index_job_status(job_id: str, principal: Principal):
+    principal = _effective_principal(principal)
     try:
         job = get_index_job(job_id)
     except IndexQueueUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    if job is None:
-        return {
-            "file_id": None,
-            "job_id": job_id,
-            "status": "not_found",
-            "filename": None,
-            "s3_url": None,
-            "chunk_count": None,
-            "error": None,
-            "created_at": None,
-            "enqueued_at": None,
-            "started_at": None,
-            "ended_at": None,
-        }
+    if job is None or (principal.type == "app" and _job_app_id(job) != principal.app_id):
+        return {"job_id": job_id, "status": "not_found"}
     return _index_job_record(job)
 
 
-@app.post("/api/presign")
-def presign_object(req: PresignRequest, _: Principal = Depends(_require_principal)):
+@app.post("/api/admin/presign")
+def presign_object(req: PresignRequest, _: Principal = Depends(require_jwt)):
     bucket, object_name = _parse_s3_url(req.s3_url)
     client = _minio_client()
     try:
@@ -357,8 +506,18 @@ def presign_object(req: PresignRequest, _: Principal = Depends(_require_principa
 
 
 @app.post("/api/search")
-def search(req: SearchRequest, _: Principal = Depends(_require_principal)):
+def client_search(req: SearchRequest, principal: Principal = Depends(require_aksk)):
+    return _search(req, principal)
+
+
+@app.post("/api/admin/search")
+def search(req: SearchRequest, principal: Principal = Depends(require_jwt)):
+    return _search(req, principal)
+
+
+def _search(req: SearchRequest, principal: Principal):
     _require_ready()
+    search_principal = _database_principal(principal, req.app_id)
     effective_rerank = bool(req.rerank and application.rerank is not None)
     plan = SearchPlan(
         req.query,
@@ -375,11 +534,11 @@ def search(req: SearchRequest, _: Principal = Depends(_require_principal)):
         plan,
         rerank=application.rerank,
         sparse=application.sparse,
-        store=application.store,
+        store=_scoped_store(search_principal),
         search_trace=application.config.logging.search_trace,
     )
     results = executor.execute()
-    _append_search_trace(executor.trace.result)
+    _append_search_trace(executor.trace.result, app_id=search_principal.app_id)
     elapsed_ms = executor.trace.result["elapsed_ms"] if executor.trace.result else 0
     return {
         "results": results,
@@ -420,9 +579,6 @@ def _store_config() -> dict[str, Any]:
         "persist_dir": store.persist_dir,
         "timeout": store.timeout,
         "import_path": store.import_path,
-        "collections": {
-            "chunks": store.collections.chunks,
-        },
     }
 
 
@@ -448,15 +604,11 @@ def _capabilities() -> dict[str, Any]:
 
 
 def _index_contract() -> dict[str, Any]:
-    store = application.config.store
     return {
         "dense": _component_config(application.config.dense),
         "sparse": _component_config(application.config.sparse),
         "rerank": _component_config(application.config.rerank),
         "ocr": _component_config(application.config.ocr),
-        "collections": {
-            "chunks": store.collections.chunks,
-        },
     }
 
 
@@ -526,6 +678,22 @@ def _redis_ready() -> bool:
         return False
 
 
+def _store_context(principal: Principal):
+    principal = _effective_principal(principal)
+    if not principal.app_id:
+        return nullcontext()
+    context = getattr(application.store, "app_context", None)
+    if callable(context):
+        return context(principal.app_id)
+    return nullcontext()
+
+
+def _effective_principal(principal) -> Principal:
+    if isinstance(principal, Principal):
+        return principal
+    return Principal(type="admin", app_id="")
+
+
 def _start_application_until_ready(stop_event: threading.Event):
     retry_seconds = 1
     while not stop_event.is_set() and not application.ready:
@@ -547,72 +715,57 @@ def _start_application_until_ready(stop_event: threading.Event):
             stop_event.wait(retry_seconds)
             retry_seconds = min(retry_seconds * 2, STARTUP_RETRY_MAX_INTERVAL_SECONDS)
 
-@app.get("/api/files")
-def files(limit: int = 50, cursor: str | None = None, _: Principal = Depends(_require_principal)):
+@app.get("/api/admin/files")
+def files(limit: int = 50, cursor: str | None = None, app_id: str | None = None, principal: Principal = Depends(require_jwt)):
     _require_ready()
     try:
-        page = list_files_from_documents(_visible_documents(), limit=limit, cursor=cursor)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {
-        "files": [_file_record(record) for record in page.files],
-        "next_cursor": page.next_cursor,
-        "has_more": page.has_more,
-    }
-
-
-@app.get("/api/chunks")
-def chunks(limit: int = 50, cursor: str | None = None, file_ids: str | None = None, _: Principal = Depends(_require_principal)):
-    _require_ready()
-    try:
-        page = _chunk_page(_visible_documents(_parse_file_ids(file_ids)), limit=limit, cursor=cursor)
+        page = _list_storage_files(_database_principal(principal, app_id).app_id, limit=limit, cursor=cursor)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return page
 
 
-@app.delete("/api/files/{file_id}")
-def delete_file(file_id: str, _: Principal = Depends(_require_principal)):
+@app.post("/api/admin/chunks")
+def chunks(req: ChunksQueryRequest, principal: Principal = Depends(require_jwt)):
     _require_ready()
-    count = application.store.delete_file_chunks(file_id)
+    try:
+        scoped_store = _scoped_store(_database_principal(principal, req.app_id))
+        page = scoped_store.list_chunks(file_ids=req.file_ids, limit=req.limit, cursor=req.cursor)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "chunks": [_chunk_record(document) for document in page["documents"]],
+        "next_cursor": page["next_cursor"],
+        "has_more": page["has_more"],
+    }
+
+
+@app.delete("/api/files/{file_id}")
+def client_delete_file(file_id: str, principal: Principal = Depends(require_aksk)):
+    return _delete_index_file(file_id, principal)
+
+
+@app.delete("/api/admin/files/{file_id}")
+def delete_file(file_id: str, app_id: str | None = None, principal: Principal = Depends(require_jwt)):
+    effective_principal = _database_principal(principal, app_id)
+    result = _delete_index_file(file_id, effective_principal)
+    _delete_storage_file(effective_principal.app_id, file_id)
     logger.info(
         "File deleted",
         extra={
             "event": "file_deleted",
+            "app_id": effective_principal.app_id,
             "file_id": file_id,
-            "deleted_chunks": count,
+            "deleted_chunks": result["deleted_chunks"],
         },
     )
-    return {"deleted_chunks": count}
+    return result
 
 
-def _file_record(record) -> dict[str, Any]:
-    data = {
-        "id": record.id,
-        "filename": record.filename,
-        "chunk_count": record.chunk_count,
-        "created_at": _iso_datetime(record.created_at),
-    }
-    return data
-
-
-def _chunk_page(documents: list[dict], limit: int = 50, cursor: str | None = None) -> dict[str, Any]:
-    if limit <= 0:
-        raise ValueError("limit must be greater than 0")
-    limit = min(limit, 200)
-    start = int(cursor) if cursor else 0
-    records = sorted(
-        (_chunk_record(document) for document in documents),
-        key=lambda item: (item["file_id"], item["chunk_index"], item["id"]),
-    )
-    page_records = records[start:start + limit]
-    next_index = start + limit
-    has_more = next_index < len(records)
-    return {
-        "chunks": page_records,
-        "next_cursor": str(next_index) if has_more else None,
-        "has_more": has_more,
-    }
+def _delete_index_file(file_id: str, principal: Principal) -> dict[str, Any]:
+    _require_ready()
+    scoped_store = _scoped_store(principal)
+    return {"deleted_chunks": scoped_store.delete_file_chunks(file_id)}
 
 
 def _chunk_record(document: dict) -> dict[str, Any]:
@@ -628,19 +781,85 @@ def _chunk_record(document: dict) -> dict[str, Any]:
     }
 
 
-def _visible_documents(file_ids: list[str] | None = None) -> list[dict]:
-    return application.store.get_search_documents(application.store.build_file_filter(file_ids))
+def _database_principal(principal: Principal, app_id: str | None) -> Principal:
+    principal = _effective_principal(principal)
+    if principal.type == "admin":
+        selected_app_id = app_id or principal.app_id
+        if not selected_app_id:
+            raise HTTPException(status_code=400, detail="app_id is required")
+        validate_app_id(selected_app_id)
+        return Principal(type="admin", app_id=selected_app_id)
+    if app_id and app_id != principal.app_id:
+        raise HTTPException(status_code=403, detail="app_id is not allowed")
+    return principal
 
 
-def _parse_file_ids(value: str | None) -> list[str] | None:
-    if value is None:
-        return None
-    file_ids = [item.strip() for item in value.split(",") if item.strip()]
-    if not file_ids:
-        raise ValueError("file_ids cannot be empty")
-    if len(file_ids) > 1000:
-        raise ValueError("file_ids exceeds max limit: 1000")
-    return file_ids
+def _app_filter(principal: Principal, app_id: str | None) -> str | None:
+    principal = _effective_principal(principal)
+    if principal.type == "admin":
+        if app_id:
+            validate_app_id(app_id)
+        return app_id
+    if app_id and app_id != principal.app_id:
+        raise HTTPException(status_code=403, detail="app_id is not allowed")
+    return principal.app_id
+
+
+def _scoped_store(principal: Principal):
+    scoped_methods = {
+        "delete_file_chunks",
+        "get_search_documents",
+        "get_total_chunks",
+        "list_chunks",
+        "search_dense",
+        "search_hybrid",
+        "search_sparse",
+    }
+
+    class ScopedStore:
+        def __getattr__(self, name):
+            attr = getattr(application.store, name)
+            if not callable(attr) or name not in scoped_methods:
+                return attr
+
+            def call(*args, **kwargs):
+                if not _app_database_exists(principal):
+                    return 0 if name in {"delete_file_chunks", "get_total_chunks"} else []
+                with _store_context(principal):
+                    return attr(*args, **kwargs)
+
+            return call
+
+    return ScopedStore()
+
+
+def _require_app_database(principal: Principal) -> None:
+    principal = _effective_principal(principal)
+    if principal.app_id and not _app_database_exists(principal):
+        raise HTTPException(status_code=409, detail="app database is not initialized")
+
+
+def _app_database_status(app_id: str) -> dict[str, Any]:
+    try:
+        validate_app_id(app_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    principal = Principal(type="admin", app_id=app_id)
+    exists = _app_database_exists(principal)
+    chunk_count = _scoped_store(principal).get_total_chunks(None) if exists else 0
+    return {
+        "app_id": app_id,
+        "exists": exists,
+        "chunk_count": chunk_count,
+        "empty": chunk_count == 0,
+    }
+
+
+def _app_database_exists(principal: Principal) -> bool:
+    principal = _effective_principal(principal)
+    if not principal.app_id:
+        return True
+    return application.store.app_collection_exists(principal.app_id)
 
 
 def _filename_from_s3_url(s3_url: str) -> str:
@@ -670,9 +889,75 @@ def _minio_client() -> Minio:
     )
 
 
-def _upload_file_to_storage(filename: str, content: bytes, content_type: str) -> str:
+def _list_storage_files(app_id: str, limit: int = 50, cursor: str | None = None) -> dict[str, Any]:
+    if limit <= 0:
+        raise ValueError("limit must be greater than 0")
+    limit = min(limit, 200)
     bucket = os.getenv("S3_BUCKET", "rag-dev")
-    object_name = f"uploads/{create_file_id()}/{Path(filename).name}"
+    prefix = _storage_prefix(app_id)
+    client = _minio_client()
+    if not client.bucket_exists(bucket):
+        return {"files": [], "next_cursor": None, "has_more": False}
+    objects = client.list_objects(bucket, prefix=prefix, recursive=True, start_after=cursor)
+    rows = []
+    for item in objects:
+        object_name = item.object_name
+        if object_name.endswith("/"):
+            continue
+        rows.append({
+            "cursor": object_name,
+            "record": _storage_file_record(bucket, object_name, item),
+        })
+        if len(rows) > limit:
+            break
+    return {
+        "files": [row["record"] for row in rows[:limit]],
+        "next_cursor": rows[limit - 1]["cursor"] if len(rows) > limit else None,
+        "has_more": len(rows) > limit,
+    }
+
+
+def _delete_storage_file(app_id: str, file_id: str) -> int:
+    bucket = os.getenv("S3_BUCKET", "rag-dev")
+    client = _minio_client()
+    if not client.bucket_exists(bucket):
+        return 0
+    prefix = _storage_file_prefix(app_id, file_id)
+    deleted_count = 0
+    for item in client.list_objects(bucket, prefix=prefix, recursive=True):
+        client.remove_object(bucket, item.object_name)
+        deleted_count += 1
+    return deleted_count
+
+
+def _storage_file_record(bucket: str, object_name: str, item) -> dict[str, Any]:
+    file_id = _file_id_from_object_name(object_name)
+    return {
+        "id": file_id,
+        "filename": Path(object_name).name,
+        "s3_url": f"s3://{bucket}/{object_name}",
+        "size": getattr(item, "size", None),
+        "created_at": _iso_datetime(getattr(item, "last_modified", None)),
+    }
+
+
+def _storage_prefix(app_id: str) -> str:
+    validate_app_id(app_id)
+    return f"uploads/{app_id}/"
+
+
+def _storage_file_prefix(app_id: str, file_id: str) -> str:
+    return f"{_storage_prefix(app_id)}{file_id}/"
+
+
+def _file_id_from_object_name(object_name: str) -> str:
+    parts = object_name.split("/")
+    return parts[2] if len(parts) >= 4 and parts[0] == "uploads" else object_name
+
+
+def _upload_file_to_storage(app_id: str, file_id: str, filename: str, content: bytes, content_type: str) -> str:
+    bucket = os.getenv("S3_BUCKET", "rag-dev")
+    object_name = f"{_storage_file_prefix(app_id, file_id)}{Path(filename).name}"
     client = _minio_client()
     if not client.bucket_exists(bucket):
         client.make_bucket(bucket)
@@ -686,27 +971,23 @@ def _upload_file_to_storage(filename: str, content: bytes, content_type: str) ->
     return f"s3://{bucket}/{object_name}"
 
 
-def _append_search_trace(trace: dict[str, Any] | None) -> None:
+def _append_search_trace(trace: dict[str, Any] | None, app_id: str) -> None:
     if trace is None:
         return
+    trace = {**trace, "app_id": app_id}
     with _search_traces_lock:
         _search_traces.appendleft(trace)
 
 
-def _recent_search_traces(limit: int = 50, cursor: str | None = None) -> dict[str, Any]:
+def _recent_search_traces(limit: int = 50, app_id: str | None = None) -> dict[str, Any]:
     if limit <= 0:
         raise ValueError("limit must be greater than 0")
     limit = min(limit, 200)
-    start = int(cursor) if cursor else 0
     with _search_traces_lock:
         rows = list(_search_traces)
-    page = rows[start:start + limit]
-    next_index = start + limit
-    return {
-        "traces": page,
-        "next_cursor": str(next_index) if next_index < len(rows) else None,
-        "has_more": next_index < len(rows),
-    }
+    if app_id:
+        rows = [row for row in rows if row.get("app_id") == app_id]
+    return {"traces": rows[:limit]}
 
 
 def _initial_log_events(limit: int = 200) -> tuple[list[str], int]:
@@ -745,12 +1026,19 @@ def _job_status(job) -> str:
     return getattr(status, "value", str(status))
 
 
+def _job_app_id(job) -> str | None:
+    result = job.result if isinstance(job.result, dict) else {}
+    meta = getattr(job, "meta", {}) or {}
+    return result.get("app_id") or meta.get("app_id")
+
+
 def _index_job_record(job, file_id: str | None = None) -> dict[str, Any]:
     result = job.result if isinstance(job.result, dict) else {}
     meta = getattr(job, "meta", {}) or {}
     resolved_file_id = file_id or result.get("file_id") or meta.get("file_id")
     status = _job_status(job)
     return {
+        "app_id": _job_app_id(job),
         "file_id": resolved_file_id,
         "job_id": job.id,
         "status": status,

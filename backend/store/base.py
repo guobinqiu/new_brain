@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Protocol
+from contextlib import AbstractContextManager
 
 from files.base import FilePage
 from sparse.base import Sparse
@@ -33,7 +34,22 @@ class Store(Protocol):
     def list_files(self, limit: int = 50, cursor: str | None = None) -> FilePage:
         ...
 
+    def list_chunks(self, file_ids: list[str] | None = None, limit: int = 50, cursor: str | None = None) -> dict:
+        ...
+
     def count_files(self) -> int:
+        ...
+
+    def ensure_app_collection(self, app_id: str) -> str:
+        ...
+
+    def app_collection_exists(self, app_id: str) -> bool:
+        ...
+
+    def drop_app_collection(self, app_id: str) -> bool:
+        ...
+
+    def app_context(self, app_id: str) -> AbstractContextManager:
         ...
 
     def get_search_documents(self, metadata_filter: object) -> list[dict]:

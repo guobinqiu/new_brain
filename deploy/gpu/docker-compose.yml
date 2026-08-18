@@ -71,6 +71,8 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       INDEX_QUEUE_NAME: ${INDEX_QUEUE_NAME:-index}
       INDEX_JOB_TIMEOUT_SECONDS: ${INDEX_JOB_TIMEOUT_SECONDS:-1800}
+      INDEX_JOB_RESULT_TTL_SECONDS: ${INDEX_JOB_RESULT_TTL_SECONDS:-604800}
+      INDEX_JOB_FAILURE_TTL_SECONDS: ${INDEX_JOB_FAILURE_TTL_SECONDS:-2592000}
       INDEX_JOB_RETRY_MAX: ${INDEX_JOB_RETRY_MAX:-2}
       INDEX_RATE_LIMIT_PER_MINUTE: ${INDEX_RATE_LIMIT_PER_MINUTE:-30}
       INDEX_MAX_PENDING_JOBS: ${INDEX_MAX_PENDING_JOBS:-200}
@@ -101,7 +103,7 @@ services:
         APT_SECURITY_MIRROR: ${APT_SECURITY_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/debian-security}
         UV_DEFAULT_INDEX_CN: ${UV_DEFAULT_INDEX_CN:-https://pypi.tuna.tsinghua.edu.cn/simple}
     container_name: rag-index-worker
-    command: ["/app/.venv/bin/rq", "worker", "--url", "redis://redis:6379/0", "--with-scheduler", "--worker-class", "rq.worker.SimpleWorker", "index"]
+    command: ["/app/.venv/bin/rq", "worker", "--url", "redis://redis:6379/0", "--with-scheduler", "index"]
     environment:
       TZ: ${TZ:-Asia/Shanghai}
       CONFIG_FILE: ${CONFIG_FILE:-docker-gpu.yaml}
@@ -116,6 +118,8 @@ services:
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       INDEX_QUEUE_NAME: ${INDEX_QUEUE_NAME:-index}
       INDEX_JOB_TIMEOUT_SECONDS: ${INDEX_JOB_TIMEOUT_SECONDS:-1800}
+      INDEX_JOB_RESULT_TTL_SECONDS: ${INDEX_JOB_RESULT_TTL_SECONDS:-604800}
+      INDEX_JOB_FAILURE_TTL_SECONDS: ${INDEX_JOB_FAILURE_TTL_SECONDS:-2592000}
       INDEX_JOB_RETRY_MAX: ${INDEX_JOB_RETRY_MAX:-2}
       INDEX_RATE_LIMIT_PER_MINUTE: ${INDEX_RATE_LIMIT_PER_MINUTE:-30}
       INDEX_MAX_PENDING_JOBS: ${INDEX_MAX_PENDING_JOBS:-200}

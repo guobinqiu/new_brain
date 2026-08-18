@@ -6,7 +6,8 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Literal
 from chromadb.utils.embedding_functions import SparseEmbeddingFunction
-from config import QDRANT_CHUNKS_COLLECTION, SEARCH_CONFIG
+from config import SEARCH_CONFIG
+from collection_names import app_collection, collection_name_for_app, current_collection
 from dense.base import Dense
 from dense.huggingface import HuggingFaceDense
 from sparse.base import Sparse
@@ -20,7 +21,6 @@ _dense: Dense | None = None
 _sparse: Sparse | None = None
 _persist_dir: str | None = None
 _stores: dict[SearchMode, object] = {}
-_chunks_collection = QDRANT_CHUNKS_COLLECTION
 _client = None
 _ready = False
 SPARSE_VECTOR_KEY = "sparse_embedding"
@@ -32,26 +32,23 @@ class ChromaStore:
         dense: Dense | None = None,
         sparse: Sparse | None = None,
         persist_dir: str | None = None,
-        chunks_collection: str | None = None,
     ):
         self.dense = dense or HuggingFaceDense()
         self.sparse = sparse
         self.persist_dir = persist_dir
-        self.chunks_collection = chunks_collection or QDRANT_CHUNKS_COLLECTION
 
     def start(self) -> None:
         init_store(
             dense=self.dense,
             sparse=self.sparse,
             persist_dir=self.persist_dir,
-            chunks_collection=self.chunks_collection,
         )
 
     def stop(self) -> None:
         close_store()
 
     def drop_collections(self) -> None:
-        _configure_store(self.persist_dir, self.chunks_collection)
+        _configure_store(self.persist_dir)
         drop_collections()
 
     @property
@@ -70,8 +67,36 @@ class ChromaStore:
     def list_files(self, limit: int = 50, cursor: str | None = None):
         return list_files_from_documents(get_search_documents(None), limit=limit, cursor=cursor)
 
+    def list_chunks(self, file_ids: list[str] | None = None, limit: int = 50, cursor: str | None = None) -> dict:
+        return list_chunks(file_ids=file_ids, limit=limit, cursor=cursor)
+
     def count_files(self) -> int:
         return count_files_from_documents(get_search_documents(None))
+
+    def ensure_app_collection(self, app_id: str) -> str:
+        collection_name = collection_name_for_app(app_id)
+        _configure_store(self.persist_dir)
+        with app_collection(app_id):
+            _ensure_collection()
+        return collection_name
+
+    def app_collection_exists(self, app_id: str) -> bool:
+        _configure_store(self.persist_dir)
+        collection_name = collection_name_for_app(app_id)
+        names = [getattr(collection, "name", collection) for collection in _get_chroma_client().list_collections()]
+        return collection_name in names
+
+    def drop_app_collection(self, app_id: str) -> bool:
+        _configure_store(self.persist_dir)
+        collection_name = collection_name_for_app(app_id)
+        if not self.app_collection_exists(app_id):
+            return False
+        _get_chroma_client().delete_collection(collection_name)
+        _stores.clear()
+        return True
+
+    def app_context(self, app_id: str):
+        return app_collection(app_id)
 
     def get_search_documents(self, metadata_filter: dict | None) -> list[dict]:
         return get_search_documents(metadata_filter)
@@ -109,8 +134,9 @@ def close_store():
 
 def drop_collections() -> None:
     client = _get_chroma_client()
+    collection_name = _chunks_collection()
     try:
-        client.delete_collection(_chunks_collection)
+        client.delete_collection(collection_name)
     except Exception:
         pass
     _stores.clear()
@@ -120,17 +146,11 @@ def init_store(
     dense: Dense | None = None,
     sparse: Sparse | None = None,
     persist_dir: str | None = None,
-    chunks_collection: str | None = None,
 ):
     global _ready
-    _configure_store(persist_dir, chunks_collection)
+    _configure_store(persist_dir)
     _init_dense(dense)
     _init_sparse(sparse)
-    _ensure_collection()
-    _get_store_unchecked("dense")
-    if _sparse_uses_store():
-        _get_store_unchecked("sparse")
-        _get_store_unchecked("hybrid")
     _ready = True
 
 
@@ -140,13 +160,10 @@ def init_search():
 
 def _configure_store(
     persist_dir: str | None = None,
-    chunks_collection: str | None = None,
 ):
-    global _persist_dir, _chunks_collection
+    global _persist_dir
     if persist_dir is not None:
         _persist_dir = persist_dir
-    if chunks_collection is not None:
-        _chunks_collection = chunks_collection
 
 
 def is_search_ready() -> bool:
@@ -228,10 +245,11 @@ def _persist_path(persist_dir: str | None, project_root: Path = PROJECT_ROOT) ->
 
 def _ensure_collection() -> None:
     client = _get_chroma_client()
+    collection_name = _chunks_collection()
     if _sparse_uses_store():
         try:
             client.get_or_create_collection(
-                name=_chunks_collection,
+                name=collection_name,
                 schema=_chroma_schema(),
                 embedding_function=None,
             )
@@ -242,7 +260,7 @@ def _ensure_collection() -> None:
                 ) from exc
             raise
         return
-    client.get_or_create_collection(name=_chunks_collection, embedding_function=None)
+    client.get_or_create_collection(name=collection_name, embedding_function=None)
 
 
 def _chroma_schema():
@@ -359,6 +377,25 @@ def get_total_chunks(file_ids: list[str] | None = None) -> int:
 
 def get_search_documents(metadata_filter: dict | None) -> list[dict]:
     rows = _collection_get(metadata_filter)
+    return _rows_to_documents(rows)
+
+
+def list_chunks(file_ids: list[str] | None = None, limit: int = 50, cursor: str | None = None) -> dict:
+    if limit <= 0:
+        raise ValueError("limit must be greater than 0")
+    limit = min(limit, 200)
+    start = int(cursor) if cursor else 0
+    rows = _collection_get_page(build_file_filter(file_ids), limit=limit + 1, offset=start)
+    ids = rows.get("ids") or []
+    documents = _rows_to_documents(rows)
+    return {
+        "documents": documents[:limit],
+        "next_cursor": str(start + limit) if len(ids) > limit else None,
+        "has_more": len(ids) > limit,
+    }
+
+
+def _rows_to_documents(rows: dict) -> list[dict]:
     documents = rows.get("documents") or []
     metadatas = rows.get("metadatas") or []
     ids = rows.get("ids") or []
@@ -408,8 +445,18 @@ def _collection_get(metadata_filter: dict | None) -> dict:
     return _collection().get(where=metadata_filter, include=["documents", "metadatas"])
 
 
+def _collection_get_page(metadata_filter: dict | None, *, limit: int, offset: int) -> dict:
+    if metadata_filter is None:
+        return _collection().get(limit=limit, offset=offset, include=["documents", "metadatas"])
+    return _collection().get(where=metadata_filter, limit=limit, offset=offset, include=["documents", "metadatas"])
+
+
 def _collection():
-    return _get_chroma_client().get_collection(_chunks_collection)
+    return _get_chroma_client().get_collection(_chunks_collection())
+
+
+def _chunks_collection() -> str:
+    return current_collection()
 
 
 def _query_rows_to_items(rows: dict) -> list[dict]:

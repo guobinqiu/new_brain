@@ -11,9 +11,12 @@
     "upload": "Upload",
     "database": "Database",
     "search": "Search",
+    "index": "Index",
+    "trace": "Trace",
     "monitor": "Monitor",
     "logs": "Logs",
-    "config": "Config"
+    "config": "Config",
+    "apps": "Apps"
   },
   "auth": {
     "title": "Sign in",
@@ -30,7 +33,8 @@
     "loadMore": "Load more",
     "copy": "Copy",
     "delete": "Delete",
-    "deleting": "Deleting"
+    "deleting": "Deleting",
+    "actions": "Actions"
   },
   "search": {
     "topK": "Top K",
@@ -56,16 +60,9 @@
     "uploading": "Uploading",
     "files": "Uploaded files",
     "empty": "No uploaded files",
-    "uploadingFile": "Uploading {name}...",
-    "presigningFile": "Creating download signature for {name}...",
-    "indexingFile": "Creating index job for {name}...",
-    "indexedFile": "{name} queued for indexing, job_id: {jobId}",
-    "indexWaiting": "Indexing: {jobId} · {status}",
-    "indexFinished": "{name} index finished, file_id: {fileId}",
-    "indexFailed": "{name} index failed: {error}",
-    "indexedDone": "Index complete: {fileIds}",
-    "deletingFile": "Deleting {name}...",
-    "deletedFile": "{name} deleted, {count} chunks removed"
+    "indexSubmitted": "{count} indexing job(s) submitted. Check status on the Index page.",
+    "selectApp": "Select an app first",
+    "deletedFile": "{name} deleted"
   },
   "monitor": {
     "title": "Runtime",
@@ -75,6 +72,7 @@
     "noIndexJobs": "No index jobs",
     "indexQueueUnavailable": "Index queue unavailable. Start Redis.",
     "noTraces": "No searches yet",
+    "noAppSelected": "Select an app first",
     "jobFilter": {
       "all": "All",
       "processing": "Processing",
@@ -86,6 +84,16 @@
       "finished": "Success",
       "failed": "Failed",
       "missing": "Missing"
+    },
+    "jobColumns": {
+      "status": "Status",
+      "jobId": "Job ID",
+      "filename": "Filename",
+      "fileId": "File ID",
+      "chunks": "Chunks",
+      "error": "Error",
+      "created": "Created",
+      "ended": "Ended"
     }
   },
   "status": {
@@ -98,6 +106,12 @@
     "title": "Database",
     "location": "Location",
     "chunks": "Vector data",
+    "app": "App",
+    "initialize": "Initialize database",
+    "initialized": "{appId} database initialized",
+    "delete": "Delete database",
+    "deleted": "{appId} database deleted",
+    "deleteConfirm": "Delete empty database for {appId}?",
     "query": "Query",
     "fileIdsPlaceholder": "Separate file_id values with commas",
     "empty": "No vector data"
@@ -105,6 +119,7 @@
   "trace": {
     "title": "Trace",
     "desc": "Stage timings for recent search requests",
+    "limitNote": "Latest {count} only",
     "empty": "No searches yet",
     "columns": {
       "time": "Time",
@@ -119,6 +134,11 @@
       "dedupe": "Dedupe",
       "rerank": "Rerank",
       "format": "Format"
+    },
+    "modeValues": {
+      "dense": "Dense",
+      "sparse": "Sparse",
+      "hybrid": "Hybrid"
     }
   },
   "logs": {
@@ -138,5 +158,17 @@
     "searchDefaults": "Search defaults",
     "components": "Components",
     "storage": "Storage path"
+  },
+  "apps": {
+    "title": "Apps",
+    "desc": "Manage upstream app_id and AK/SK credentials",
+    "appIdPlaceholder": "Enter app_id, e.g. imsdom",
+    "create": "Create app",
+    "created": "{appId} created",
+    "deleted": "{appId} deleted",
+    "deleteConfirm": "Delete AK/SK for {appId}?",
+    "current": "Current app",
+    "enter": "Enter",
+    "empty": "No apps"
   }
 }

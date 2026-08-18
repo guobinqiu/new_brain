@@ -5,6 +5,7 @@ import logging
 import device
 
 from config import RERANKER_MODEL_DIR
+from progress import disable_model_progress_bars
 
 logger = logging.getLogger("rag.app")
 
@@ -48,5 +49,6 @@ class CrossEncoderRerank:
 
     def _load_reranker(self):
         logger.info("Loading reranker model", extra={"event": "model_load", "component": "rerank", "model": self.model_name})
+        disable_model_progress_bars()
         from sentence_transformers import CrossEncoder
         return CrossEncoder(model_name=self.model_name, device=device.auto_device())

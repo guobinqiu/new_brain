@@ -69,8 +69,6 @@ class ApplicationContainer(containers.DeclarativeContainer):
     chroma_persist_dir = providers.Callable(lambda app_config: app_config.store.persist_dir, config)
     milvus_uri = providers.Callable(lambda app_config: app_config.store.uri, config)
     store_timeout = providers.Callable(lambda app_config: app_config.store.timeout, config)
-    chunks_collection = providers.Callable(lambda app_config: app_config.store.collections.chunks, config)
-
     tokenizer = providers.Selector(
         sparse_tokenizer,
         jieba=providers.Factory(JiebaTokenizer),
@@ -123,14 +121,12 @@ class ApplicationContainer(containers.DeclarativeContainer):
             sparse=sparse,
             url=qdrant_url,
             timeout=store_timeout,
-            chunks_collection=chunks_collection,
         ),
         chroma=providers.Singleton(
             ChromaStore,
             dense=dense,
             sparse=sparse,
             persist_dir=chroma_persist_dir,
-            chunks_collection=chunks_collection,
         ),
         milvus=providers.Singleton(
             MilvusStore,
@@ -138,7 +134,6 @@ class ApplicationContainer(containers.DeclarativeContainer):
             sparse=sparse,
             uri=milvus_uri,
             timeout=store_timeout,
-            chunks_collection=chunks_collection,
         ),
     )
 
@@ -190,7 +185,6 @@ def build_store(config: AppConfig, dense: Dense, sparse: Sparse | None = None) -
         kwargs = {
             "dense": dense,
             "sparse": sparse,
-            "chunks_collection": config.store.collections.chunks,
         }
         if _store_key(config.store.type) == "qdrant":
             kwargs["url"] = config.store.url

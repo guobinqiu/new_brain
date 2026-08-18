@@ -5,7 +5,7 @@ import uuid
 from pathlib import Path
 from typing import Literal
 
-from config import QDRANT_CHUNKS_COLLECTION
+from collection_names import app_collection, collection_name_for_app, current_collection
 from dense.base import Dense
 from dense.huggingface import HuggingFaceDense
 from sparse.base import Sparse
@@ -31,13 +31,11 @@ class MilvusStore:
         sparse: Sparse | None = None,
         uri: str | None = None,
         timeout: int | None = None,
-        chunks_collection: str | None = None,
     ):
         self.dense = dense or HuggingFaceDense()
         self.sparse = sparse
         self.uri = uri or "http://localhost:19530"
         self.timeout = timeout
-        self.chunks_collection = chunks_collection or QDRANT_CHUNKS_COLLECTION
 
     def start(self) -> None:
         init_store(
@@ -45,14 +43,13 @@ class MilvusStore:
             sparse=self.sparse,
             uri=self.uri,
             timeout=self.timeout,
-            chunks_collection=self.chunks_collection,
         )
 
     def stop(self) -> None:
         close_store()
 
     def drop_collections(self) -> None:
-        _configure_store(self.uri, self.chunks_collection, self.timeout)
+        _configure_store(self.uri, self.timeout)
         drop_collections()
 
     @property
@@ -71,8 +68,33 @@ class MilvusStore:
     def list_files(self, limit: int = 50, cursor: str | None = None):
         return list_files_from_documents(get_search_documents(""), limit=limit, cursor=cursor)
 
+    def list_chunks(self, file_ids: list[str] | None = None, limit: int = 50, cursor: str | None = None) -> dict:
+        return list_chunks(file_ids=file_ids, limit=limit, cursor=cursor)
+
     def count_files(self) -> int:
         return count_files_from_documents(get_search_documents(""))
+
+    def ensure_app_collection(self, app_id: str) -> str:
+        collection_name = collection_name_for_app(app_id)
+        _configure_store(self.uri, self.timeout)
+        run_with_startup_retry(lambda: ensure_collections(collection_name))
+        return collection_name
+
+    def app_collection_exists(self, app_id: str) -> bool:
+        _configure_store(self.uri, self.timeout)
+        return get_milvus_client().has_collection(collection_name_for_app(app_id))
+
+    def drop_app_collection(self, app_id: str) -> bool:
+        _configure_store(self.uri, self.timeout)
+        collection_name = collection_name_for_app(app_id)
+        client = get_milvus_client()
+        if not client.has_collection(collection_name):
+            return False
+        client.drop_collection(collection_name)
+        return True
+
+    def app_context(self, app_id: str):
+        return app_collection(app_id)
 
     def get_search_documents(self, metadata_filter: str) -> list[dict]:
         return get_search_documents(metadata_filter)
@@ -115,8 +137,9 @@ def close_store():
 
 def drop_collections() -> None:
     client = get_milvus_client()
-    if client.has_collection(QDRANT_CHUNKS_COLLECTION):
-        client.drop_collection(QDRANT_CHUNKS_COLLECTION)
+    collection_name = _chunks_collection()
+    if client.has_collection(collection_name):
+        client.drop_collection(collection_name)
 
 
 def init_store(
@@ -124,13 +147,11 @@ def init_store(
     sparse: Sparse | None = None,
     uri: str | None = None,
     timeout: int | None = None,
-    chunks_collection: str | None = None,
 ):
     global _ready
-    _configure_store(uri, chunks_collection, timeout)
+    _configure_store(uri, timeout)
     _init_dense(dense)
     _init_sparse(sparse)
-    run_with_startup_retry(ensure_collections)
     _ready = True
 
 
@@ -140,15 +161,12 @@ def init_search():
 
 def _configure_store(
     uri: str | None = None,
-    chunks_collection: str | None = None,
     timeout: int | None = None,
 ):
-    global _uri, _timeout, QDRANT_CHUNKS_COLLECTION
+    global _uri, _timeout
     if uri is not None:
         _uri = uri
     _timeout = timeout
-    if chunks_collection is not None:
-        QDRANT_CHUNKS_COLLECTION = chunks_collection
 
 
 def is_search_ready() -> bool:
@@ -207,16 +225,17 @@ def get_milvus_client():
     return _client
 
 
-def ensure_collections() -> None:
+def ensure_collections(collection_name: str | None = None) -> None:
     client = get_milvus_client()
-    if not client.has_collection(QDRANT_CHUNKS_COLLECTION):
+    target_collection = collection_name or _chunks_collection()
+    if not client.has_collection(target_collection):
         client.create_collection(
-            collection_name=QDRANT_CHUNKS_COLLECTION,
+            collection_name=target_collection,
             schema=_collection_schema(),
             index_params=_collection_index_params(),
             timeout=_timeout,
         )
-    client.load_collection(QDRANT_CHUNKS_COLLECTION, timeout=_timeout)
+    client.load_collection(target_collection, timeout=_timeout)
 
 
 def _collection_schema():
@@ -426,7 +445,7 @@ def search_hybrid(
 def _single_vector_search(mode: SearchMode, query: str, limit: int, metadata_filter: str):
     _require_search_ready()
     return get_milvus_client().search(
-        QDRANT_CHUNKS_COLLECTION,
+        _chunks_collection(),
         data=[_query_data_for_mode(mode, query)],
         anns_field=_vector_field_for_mode(mode),
         search_params=_search_params_for_mode(mode),
@@ -463,7 +482,7 @@ def _hybrid_search(
         ),
     ]
     return get_milvus_client().hybrid_search(
-        QDRANT_CHUNKS_COLLECTION,
+        _chunks_collection(),
         reqs=reqs,
         ranker=WeightedRanker(
             float(dense_weight),
@@ -483,7 +502,7 @@ def add_file_chunks(chunks: list[dict], file_id: str) -> int:
     _require_search_ready()
     delete_file_chunks(file_id)
     get_milvus_client().insert(
-        collection_name=QDRANT_CHUNKS_COLLECTION,
+        collection_name=_chunks_collection(),
         data=_to_file_rows(chunks, file_id),
         timeout=_timeout,
     )
@@ -500,20 +519,32 @@ def get_total_chunks(file_ids: list[str] | None = None) -> int:
 
 def get_search_documents(metadata_filter: str) -> list[dict]:
     rows = get_milvus_client().query(
-        collection_name=QDRANT_CHUNKS_COLLECTION,
+        collection_name=_chunks_collection(),
         filter=metadata_filter,
         output_fields=["*"],
         timeout=_timeout,
     )
-    results = []
-    for row in rows:
-        metadata = _metadata_from_row(row)
-        results.append({
-            "id": str(row.get("pk") or metadata.get("id", "")),
-            "content": row.get("text") or "",
-            "metadata": metadata,
-        })
-    return results
+    return [_row_to_document(row) for row in rows]
+
+
+def list_chunks(file_ids: list[str] | None = None, limit: int = 50, cursor: str | None = None) -> dict:
+    if limit <= 0:
+        raise ValueError("limit must be greater than 0")
+    limit = min(limit, 200)
+    start = int(cursor) if cursor else 0
+    rows = get_milvus_client().query(
+        collection_name=_chunks_collection(),
+        filter=build_file_filter(file_ids),
+        output_fields=["*"],
+        timeout=_timeout,
+        limit=limit + 1,
+        offset=start,
+    )
+    return {
+        "documents": [_row_to_document(row) for row in rows[:limit]],
+        "next_cursor": str(start + limit) if len(rows) > limit else None,
+        "has_more": len(rows) > limit,
+    }
 
 
 def build_file_filter(file_ids: list[str] | None = None) -> str:
@@ -522,6 +553,15 @@ def build_file_filter(file_ids: list[str] | None = None) -> str:
     if not file_ids:
         raise ValueError("file_ids cannot be empty")
     return _file_payload_filter(file_ids)
+
+
+def _row_to_document(row: dict) -> dict:
+    metadata = _metadata_from_row(row)
+    return {
+        "id": str(row.get("pk") or metadata.get("id", "")),
+        "content": row.get("text") or "",
+        "metadata": metadata,
+    }
 
 
 def _to_file_rows(chunks: list[dict], file_id: str) -> list[dict]:
@@ -566,16 +606,21 @@ def _file_payload_filter(file_ids: list[str]) -> str:
 
 
 def _delete_by_filter(metadata_filter: str) -> int:
+    collection_name = _chunks_collection()
     rows = get_milvus_client().query(
-        collection_name=QDRANT_CHUNKS_COLLECTION,
+        collection_name=collection_name,
         filter=metadata_filter,
         output_fields=["pk"],
         timeout=_timeout,
     )
     ids = [row["pk"] for row in rows]
     if ids:
-        get_milvus_client().delete(QDRANT_CHUNKS_COLLECTION, ids=ids, timeout=_timeout)
+        get_milvus_client().delete(collection_name, ids=ids, timeout=_timeout)
     return len(ids)
+
+
+def _chunks_collection() -> str:
+    return current_collection()
 
 
 def _metadata_from_row(row: dict) -> dict:

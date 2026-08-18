@@ -10,6 +10,7 @@ from typing import Literal
 
 from fastapi import HTTPException, Request
 
+from app_registry import AppRegistry
 from schema import AuthConfig
 
 
@@ -44,7 +45,9 @@ def verify_token(config: AuthConfig, token: str) -> Principal:
         raise HTTPException(401, "invalid token") from exc
     principal_type = payload.get("type")
     app_id = payload.get("app_id")
-    if principal_type not in ("admin", "app") or not isinstance(app_id, str) or not app_id:
+    if principal_type not in ("admin", "app") or not isinstance(app_id, str):
+        raise HTTPException(401, "invalid token")
+    if principal_type == "app" and not app_id:
         raise HTTPException(401, "invalid token")
     return Principal(type=principal_type, app_id=app_id)
 
@@ -54,7 +57,7 @@ def authenticate_password(config: AuthConfig, username: str | None, password: st
         raise HTTPException(401, "invalid username or password")
     if not hmac.compare_digest(password or "", config.admin.password):
         raise HTTPException(401, "invalid username or password")
-    return Principal(type="admin", app_id=config.app.app_id)
+    return Principal(type="admin", app_id="")
 
 
 def authenticate_client_signature(config: AuthConfig, request: Request, body: bytes) -> Principal:
@@ -64,10 +67,11 @@ def authenticate_client_signature(config: AuthConfig, request: Request, body: by
     signature = request.headers.get("x-signature", "")
     if not all((app_id, access_key, timestamp, signature)):
         raise HTTPException(401, "missing signature headers")
-    if app_id != config.app.app_id or access_key != config.app.access_key:
+    credential = _app_credential(config, app_id)
+    if credential is None or access_key != credential.access_key:
         raise HTTPException(401, "invalid access key")
     _validate_timestamp(timestamp)
-    expected = sign_request(config.app.secret_key, request.method.upper(), request.url.path, timestamp, body, app_id)
+    expected = sign_request(credential.secret_key, request.method.upper(), request.url.path, timestamp, body, app_id)
     if not hmac.compare_digest(signature, expected):
         raise HTTPException(401, "invalid signature")
     return Principal(type="app", app_id=app_id)
@@ -98,8 +102,12 @@ def _validate_timestamp(timestamp: str) -> None:
 
 
 def _jwt_secret(config: AuthConfig) -> bytes:
-    value = f"{config.admin.password}\0{config.app.secret_key}".encode("utf-8")
+    value = config.admin.password.encode("utf-8")
     return hashlib.sha256(value).digest()
+
+
+def _app_credential(config: AuthConfig, app_id: str):
+    return AppRegistry(config.registry_file).get_app(app_id)
 
 
 def _b64_json(value: dict) -> str:

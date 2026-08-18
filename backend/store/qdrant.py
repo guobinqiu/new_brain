@@ -10,14 +10,15 @@ from typing import Literal
 
 from config import (
     DENSE_MODEL_DIR,
-    QDRANT_CHUNKS_COLLECTION,
     QDRANT_URL,
 )
 from dense.base import Dense
 from dense.huggingface import HuggingFaceDense
 from qdrant_client import QdrantClient
+from qdrant_client.http.exceptions import UnexpectedResponse
 from qdrant_client.http import models
 from sparse.base import Sparse
+from collection_names import app_collection, collection_name_for_app, current_collection
 from store.files import count_files_from_documents, list_files_from_documents
 from store.startup import run_with_startup_retry
 
@@ -42,13 +43,11 @@ class QdrantStore:
         sparse: Sparse | None = None,
         url: str | None = None,
         timeout: int | None = None,
-        chunks_collection: str | None = None,
     ):
         self.dense = dense or HuggingFaceDense()
         self.sparse = sparse
         self.url = url or QDRANT_URL
         self.timeout = timeout
-        self.chunks_collection = chunks_collection or QDRANT_CHUNKS_COLLECTION
 
     def start(self) -> None:
         init_store(
@@ -56,14 +55,13 @@ class QdrantStore:
             sparse=self.sparse,
             url=self.url,
             timeout=self.timeout,
-            chunks_collection=self.chunks_collection,
         )
 
     def stop(self) -> None:
         close_store()
 
     def drop_collections(self) -> None:
-        _configure_store(self.url, self.chunks_collection, self.timeout)
+        _configure_store(self.url, self.timeout)
         drop_collections()
 
     @property
@@ -82,8 +80,33 @@ class QdrantStore:
     def list_files(self, limit: int = 50, cursor: str | None = None):
         return list_files_from_documents(get_search_documents(None), limit=limit, cursor=cursor)
 
+    def list_chunks(self, file_ids: list[str] | None = None, limit: int = 50, cursor: str | None = None) -> dict:
+        return list_chunks(file_ids=file_ids, limit=limit, cursor=cursor)
+
     def count_files(self) -> int:
         return count_files_from_documents(get_search_documents(None))
+
+    def ensure_app_collection(self, app_id: str) -> str:
+        collection_name = collection_name_for_app(app_id)
+        _configure_store(self.url, self.timeout)
+        run_with_startup_retry(lambda: ensure_collections(collection_name))
+        return collection_name
+
+    def app_collection_exists(self, app_id: str) -> bool:
+        _configure_store(self.url, self.timeout)
+        return get_qdrant_client().collection_exists(collection_name_for_app(app_id))
+
+    def drop_app_collection(self, app_id: str) -> bool:
+        _configure_store(self.url, self.timeout)
+        collection_name = collection_name_for_app(app_id)
+        client = get_qdrant_client()
+        if not client.collection_exists(collection_name):
+            return False
+        client.delete_collection(collection_name)
+        return True
+
+    def app_context(self, app_id: str):
+        return app_collection(app_id)
 
     def get_search_documents(self, metadata_filter: models.Filter) -> list[dict]:
         return get_search_documents(metadata_filter)
@@ -125,8 +148,9 @@ def close_store():
 
 def drop_collections() -> None:
     client = get_qdrant_client()
-    if client.collection_exists(QDRANT_CHUNKS_COLLECTION):
-        client.delete_collection(QDRANT_CHUNKS_COLLECTION)
+    collection_name = _chunks_collection()
+    if client.collection_exists(collection_name):
+        client.delete_collection(collection_name)
 
 
 def init_store(
@@ -134,15 +158,13 @@ def init_store(
     sparse: Sparse | None = None,
     url: str | None = None,
     timeout: int | None = None,
-    chunks_collection: str | None = None,
 ):
     """启动阶段完成存储运行时初始化;请求阶段不做懒初始化。"""
     global _ready
-    _configure_store(url, chunks_collection, timeout)
+    _configure_store(url, timeout)
     _init_dense(dense)
     _init_sparse(sparse)
     _init_dense_vector_size()
-    run_with_startup_retry(ensure_collections)
     _ready = True
 
 
@@ -152,15 +174,12 @@ def init_search():
 
 def _configure_store(
     url: str | None = None,
-    chunks_collection: str | None = None,
     timeout: int | None = None,
 ):
-    global QDRANT_URL, QDRANT_CHUNKS_COLLECTION, _timeout
+    global QDRANT_URL, _timeout
     if url is not None:
         QDRANT_URL = url
     _timeout = timeout
-    if chunks_collection is not None:
-        QDRANT_CHUNKS_COLLECTION = chunks_collection
 
 
 def is_search_ready() -> bool:
@@ -170,6 +189,10 @@ def is_search_ready() -> bool:
 def _require_search_ready():
     if not _ready:
         raise RuntimeError("search is not initialized")
+
+
+def _chunks_collection() -> str:
+    return current_collection()
 
 
 def _init_dense(dense: Dense | None = None) -> Dense:
@@ -229,12 +252,13 @@ def get_qdrant_client() -> QdrantClient:
     return _client
 
 
-def ensure_collections():
+def ensure_collections(collection_name: str | None = None):
     client = get_qdrant_client()
     dense_size = _get_dense_vector_size()
-    if client.collection_exists(QDRANT_CHUNKS_COLLECTION):
-        _ensure_sparse_vector(client, QDRANT_CHUNKS_COLLECTION)
-        ensure_payload_indexes()
+    target_collection = collection_name or _chunks_collection()
+    if client.collection_exists(target_collection):
+        _ensure_sparse_vector(client, target_collection)
+        ensure_payload_indexes(target_collection)
         return
     sparse_vectors_config = (
         {"sparse": models.SparseVectorParams()}
@@ -242,14 +266,14 @@ def ensure_collections():
         else None
     )
     client.create_collection(
-        collection_name=QDRANT_CHUNKS_COLLECTION,
+        collection_name=target_collection,
         vectors_config={
             "dense": models.VectorParams(size=dense_size, distance=models.Distance.COSINE),
         },
         sparse_vectors_config=sparse_vectors_config,
     )
-    _wait_collection_ready(client, QDRANT_CHUNKS_COLLECTION)
-    ensure_payload_indexes()
+    _wait_collection_ready(client, target_collection)
+    ensure_payload_indexes(target_collection)
 
 
 def _wait_collection_ready(client: QdrantClient, collection_name: str) -> None:
@@ -258,6 +282,7 @@ def _wait_collection_ready(client: QdrantClient, collection_name: str) -> None:
     while time.monotonic() < deadline:
         try:
             client.get_collection(collection_name)
+            client.count(collection_name=collection_name, exact=True)
             return
         except Exception as exc:
             last_error = exc
@@ -279,9 +304,9 @@ def _ensure_sparse_vector(client: QdrantClient, collection_name: str) -> None:
     )
 
 
-def ensure_payload_indexes():
+def ensure_payload_indexes(collection_name: str | None = None):
     client = get_qdrant_client()
-    _ensure_payload_index(client, QDRANT_CHUNKS_COLLECTION, "metadata.file_id")
+    _ensure_payload_index(client, collection_name or _chunks_collection(), "metadata.file_id")
 
 
 def _ensure_payload_index(client: QdrantClient, collection_name: str, field_name: str):
@@ -321,15 +346,20 @@ def search_hybrid(
 
 def _query_points(query, vector_name: str, limit: int, metadata_filter: models.Filter | None) -> list[dict]:
     _require_search_ready()
-    response = get_qdrant_client().query_points(
-        collection_name=QDRANT_CHUNKS_COLLECTION,
-        query=query,
-        using=vector_name,
-        query_filter=metadata_filter,
-        limit=limit,
-        with_payload=True,
-        with_vectors=False,
-    )
+    try:
+        response = get_qdrant_client().query_points(
+            collection_name=_chunks_collection(),
+            query=query,
+            using=vector_name,
+            query_filter=metadata_filter,
+            limit=limit,
+            with_payload=True,
+            with_vectors=False,
+        )
+    except UnexpectedResponse as exc:
+        if _is_collection_not_found(exc):
+            return []
+        raise
     return [_point_to_item(point) for point in response.points]
 
 
@@ -342,7 +372,7 @@ def add_file_chunks(chunks: list[dict], file_id: str) -> int:
     with _document_lock(file_id):
         delete_file_chunks(file_id)
         get_qdrant_client().upsert(
-            collection_name=QDRANT_CHUNKS_COLLECTION,
+            collection_name=_chunks_collection(),
             points=_to_points(chunks, file_id),
         )
     return len(chunks)
@@ -361,26 +391,47 @@ def get_search_documents(metadata_filter: models.Filter | None) -> list[dict]:
     documents = []
     offset = None
     while True:
-        rows, offset = client.scroll(
-            collection_name=QDRANT_CHUNKS_COLLECTION,
-            scroll_filter=metadata_filter,
-            limit=1000,
-            offset=offset,
-            with_payload=True,
-            with_vectors=False,
-        )
-        for row in rows:
-            payload = row.payload or {}
-            metadata = _metadata_from_payload(payload)
-            content = payload.get("page_content") or payload.get("content") or ""
-            documents.append({
-                "id": str(row.id),
-                "content": content,
-                "metadata": metadata,
-            })
+        try:
+            rows, offset = client.scroll(
+                collection_name=_chunks_collection(),
+                scroll_filter=metadata_filter,
+                limit=1000,
+                offset=offset,
+                with_payload=True,
+                with_vectors=False,
+            )
+        except UnexpectedResponse as exc:
+            if _is_collection_not_found(exc):
+                return []
+            raise
+        documents.extend(_record_to_document(row) for row in rows)
         if offset is None:
             break
     return documents
+
+
+def list_chunks(file_ids: list[str] | None = None, limit: int = 50, cursor: str | None = None) -> dict:
+    if limit <= 0:
+        raise ValueError("limit must be greater than 0")
+    limit = min(limit, 200)
+    try:
+        rows, offset = get_qdrant_client().scroll(
+            collection_name=_chunks_collection(),
+            scroll_filter=build_file_filter(file_ids),
+            limit=limit,
+            offset=cursor,
+            with_payload=True,
+            with_vectors=False,
+        )
+    except UnexpectedResponse as exc:
+        if _is_collection_not_found(exc):
+            return {"documents": [], "next_cursor": None, "has_more": False}
+        raise
+    return {
+        "documents": [_record_to_document(row) for row in rows],
+        "next_cursor": str(offset) if offset is not None else None,
+        "has_more": offset is not None,
+    }
 
 
 def build_file_filter(file_ids: list[str] | None = None) -> models.Filter | None:
@@ -389,6 +440,17 @@ def build_file_filter(file_ids: list[str] | None = None) -> models.Filter | None
     if not file_ids:
         raise ValueError("file_ids cannot be empty")
     return _file_payload_filter(file_ids=file_ids)
+
+
+def _record_to_document(row) -> dict:
+    payload = row.payload or {}
+    metadata = _metadata_from_payload(payload)
+    content = payload.get("page_content") or payload.get("content") or ""
+    return {
+        "id": str(row.id),
+        "content": content,
+        "metadata": metadata,
+    }
 
 
 def _to_points(chunks: list[dict], file_id: str) -> list[models.PointStruct]:
@@ -439,14 +501,28 @@ def _delete_by_filter(metadata_filter: models.Filter) -> int:
     client = get_qdrant_client()
     before = _count_documents(metadata_filter)
     if before:
-        client.delete(collection_name=QDRANT_CHUNKS_COLLECTION, points_selector=models.FilterSelector(filter=metadata_filter))
+        try:
+            client.delete(collection_name=_chunks_collection(), points_selector=models.FilterSelector(filter=metadata_filter))
+        except UnexpectedResponse as exc:
+            if _is_collection_not_found(exc):
+                return 0
+            raise
     return before
 
 
 def _count_documents(metadata_filter: models.Filter | None) -> int:
     client = get_qdrant_client()
-    result = client.count(collection_name=QDRANT_CHUNKS_COLLECTION, count_filter=metadata_filter, exact=True)
+    try:
+        result = client.count(collection_name=_chunks_collection(), count_filter=metadata_filter, exact=True)
+    except UnexpectedResponse as exc:
+        if _is_collection_not_found(exc):
+            return 0
+        raise
     return int(result.count)
+
+
+def _is_collection_not_found(exc: UnexpectedResponse) -> bool:
+    return getattr(exc, "status_code", None) == 404 or "Collection" in str(exc) and "doesn't exist" in str(exc)
 
 
 def _point_to_item(point) -> dict:

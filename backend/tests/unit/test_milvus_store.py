@@ -148,12 +148,12 @@ def test_milvus_store_initializes_one_native_client_for_store_sparse(monkeypatch
             dense=FakeDense(),
             sparse=FakeStoreSparse(),
             uri="http://localhost:19530",
-            chunks_collection="chunks",
         )
+        milvus.MilvusStore(dense=FakeDense(), sparse=FakeStoreSparse(), uri="http://localhost:19530").ensure_app_collection("imsdom")
 
         assert milvus._sparse_uses_store()
         assert len(FakeMilvusClient.instances) == 1
-        assert FakeMilvusClient.instances[0].created[0]["collection_name"] == "chunks"
+        assert FakeMilvusClient.instances[0].created[0]["collection_name"] == "imsdom_chunks"
     finally:
         milvus.close_store()
 
@@ -170,15 +170,15 @@ def test_milvus_store_passes_timeout_to_native_client(monkeypatch):
             sparse=None,
             uri="http://localhost:19530",
             timeout=30,
-            chunks_collection="chunks",
         )
+        milvus.MilvusStore(dense=FakeDense(), uri="http://localhost:19530", timeout=30).ensure_app_collection("imsdom")
     finally:
         milvus.close_store()
 
     assert FakeMilvusClient.instances[0].timeout == 30
 
 
-def test_milvus_init_store_retries_when_service_is_not_ready(monkeypatch):
+def test_milvus_ensure_app_collection_retries_when_service_is_not_ready(monkeypatch):
     from store import milvus
 
     attempts = {"count": 0}
@@ -199,8 +199,8 @@ def test_milvus_init_store_retries_when_service_is_not_ready(monkeypatch):
             dense=FakeDense(),
             sparse=None,
             uri="http://localhost:19530",
-            chunks_collection="chunks",
         )
+        milvus.MilvusStore(dense=FakeDense(), uri="http://localhost:19530").ensure_app_collection("imsdom")
 
         assert attempts["count"] == 2
         assert sleeps == [1]
@@ -266,12 +266,14 @@ def test_milvus_drop_collections_keeps_local_lite_server_for_following_start(mon
     monkeypatch.setattr(milvus, "_release_lite_server", lambda uri: released.append(uri))
     monkeypatch.setattr("pymilvus.MilvusClient", FakeMilvusClient)
 
-    milvus.drop_collections()
+    with milvus.app_collection("imsdom"):
+        milvus.drop_collections()
 
     assert released == []
 
 
 def test_milvus_search_and_query_use_configured_timeout(monkeypatch):
+    from collection_names import app_collection
     from store import milvus
 
     client = FakeMilvusClient("http://localhost:19530", timeout=30)
@@ -279,13 +281,34 @@ def test_milvus_search_and_query_use_configured_timeout(monkeypatch):
     monkeypatch.setattr(milvus, "_timeout", 30)
     monkeypatch.setattr(milvus, "_dense", FakeDense())
     monkeypatch.setattr(milvus, "_client", client)
-    monkeypatch.setattr(milvus, "QDRANT_CHUNKS_COLLECTION", "chunks")
     monkeypatch.setattr(milvus, "_sparse_uses_store", lambda sparse=None: True)
 
-    milvus.search_dense("query", 5, "file_id in ['file_a']")
-    milvus.get_search_documents("file_id in ['file_a']")
+    with app_collection("imsdom"):
+        milvus.search_dense("query", 5, "file_id in ['file_a']")
+        milvus.get_search_documents("file_id in ['file_a']")
 
     assert client.searches[0][1]["timeout"] == 30
+    assert client.queries[0][1]["timeout"] == 30
+
+
+def test_milvus_list_chunks_uses_query_limit_offset(monkeypatch):
+    from collection_names import app_collection
+    from store import milvus
+
+    client = FakeMilvusClient("http://localhost:19530", timeout=30)
+    monkeypatch.setattr(milvus, "_client", client)
+    monkeypatch.setattr(milvus, "_timeout", 30)
+
+    with app_collection("imsdom"):
+        page = milvus.list_chunks(file_ids=["file-a"], limit=2, cursor="5")
+
+    assert [document["id"] for document in page["documents"]] == ["pk1"]
+    assert page["next_cursor"] is None
+    assert page["has_more"] is False
+    assert client.queries[0][0] == "imsdom_chunks"
+    assert client.queries[0][1]["filter"] == "file_id in ['file-a']"
+    assert client.queries[0][1]["limit"] == 3
+    assert client.queries[0][1]["offset"] == 5
     assert client.queries[0][1]["timeout"] == 30
 
 
@@ -381,7 +404,7 @@ def test_milvus_standalone_uses_explicit_native_index_params(monkeypatch):
     assert milvus._index_params_for_mode("dense") == {"metric_type": "L2", "index_type": "AUTOINDEX", "params": {}}
 
 
-def test_milvus_store_creates_collection_without_placeholder_documents(monkeypatch):
+def test_milvus_ensure_app_collection_creates_collection_without_placeholder_documents(monkeypatch):
     from store import milvus
 
     FakeMilvusClient.instances = []
@@ -391,18 +414,19 @@ def test_milvus_store_creates_collection_without_placeholder_documents(monkeypat
         milvus.init_store(
             dense=FakeDense(),
             uri="http://localhost:19530",
-            chunks_collection="chunks",
         )
+        milvus.MilvusStore(dense=FakeDense(), uri="http://localhost:19530").ensure_app_collection("imsdom")
 
         client = FakeMilvusClient.instances[0]
-        assert client.collections == {"chunks"}
-        assert client.created[0]["collection_name"] == "chunks"
+        assert client.collections == {"imsdom_chunks"}
+        assert client.created[0]["collection_name"] == "imsdom_chunks"
         assert client.inserted == []
     finally:
         milvus.close_store()
 
 
 def test_milvus_add_file_chunks_inserts_native_rows(monkeypatch):
+    from collection_names import app_collection
     from store import milvus
 
     client = FakeMilvusClient("http://localhost:19530")
@@ -410,14 +434,14 @@ def test_milvus_add_file_chunks_inserts_native_rows(monkeypatch):
     monkeypatch.setattr(milvus, "_client", client)
     monkeypatch.setattr(milvus, "_dense", FakeDense())
     monkeypatch.setattr(milvus, "_sparse", None)
-    monkeypatch.setattr(milvus, "QDRANT_CHUNKS_COLLECTION", "chunks")
 
-    count = milvus.add_file_chunks([
-        {"id": "chunk-a", "content": "hello", "metadata": {"filename": "a.txt", "chunk_index": 0}},
-    ], "file1")
+    with app_collection("imsdom"):
+        count = milvus.add_file_chunks([
+            {"id": "chunk-a", "content": "hello", "metadata": {"filename": "a.txt", "chunk_index": 0}},
+        ], "file1")
 
     assert count == 1
-    assert client.inserted[0][0] == "chunks"
+    assert client.inserted[0][0] == "imsdom_chunks"
     assert client.inserted[0][1][0]["pk"] == milvus._point_id("chunk-a")
     assert client.inserted[0][1][0]["text"] == "hello"
     assert client.inserted[0][1][0]["file_id"] == "file1"

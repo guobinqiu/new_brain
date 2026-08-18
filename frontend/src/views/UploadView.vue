@@ -1,0 +1,202 @@
+<template>
+  <main class="upload-view">
+    <div class="upload-card">
+      <el-upload
+        ref="uploadRef"
+        drag
+        multiple
+        :auto-upload="false"
+        :show-file-list="false"
+        accept=".pdf,.txt,.md,.docx,.png,.jpg,.jpeg,.webp,.bmp"
+        :on-change="onFileChange"
+      >
+        <div @dragover.prevent @drop.prevent="onDrop">
+          <div class="upload-icon">
+            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          </div>
+          <p class="upload-title">{{ selectedFiles.length ? selectedFiles.map(file => file.name).join('、') : t('upload.choose') }}</p>
+          <p class="upload-hint">{{ t('upload.hint') }}</p>
+        </div>
+      </el-upload>
+      <div class="upload-options">
+        <div class="upload-actions">
+          <el-button type="primary" :disabled="!databaseAppId || selectedFiles.length === 0 || uploading" :loading="uploading" @click="uploadSelectedFiles">{{ uploading ? t('upload.uploading') : t('upload.submit') }}</el-button>
+        </div>
+      </div>
+    </div>
+
+    <div class="files-card">
+      <div class="docs-head">
+        <h2>{{ t('upload.files') }}</h2>
+        <span class="docs-count">{{ files.length }}{{ filesHasMore ? '+' : '' }}</span>
+      </div>
+      <div v-if="files.length === 0 && !filesLoading" class="docs-empty">{{ t('upload.empty') }}</div>
+      <template v-else>
+        <el-table
+          ref="filesTableRef"
+          :data="files"
+          style="width: 100%"
+          max-height="360"
+          v-loading="filesLoading"
+          @scroll="onFilesScroll"
+        >
+          <el-table-column label="file_id" min-width="240" show-overflow-tooltip>
+            <template #default="{ row }">
+              <span class="chunk-id" :title="row.id">{{ row.id }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="filename" label="filename" min-width="220" show-overflow-tooltip />
+          <el-table-column label="s3_url" min-width="260" show-overflow-tooltip>
+            <template #default="{ row }">
+              <span class="chunk-id" :title="row.s3_url">{{ row.s3_url }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="created_at" min-width="160">
+            <template #default="{ row }">{{ shortTime(row.created_at) }}</template>
+          </el-table-column>
+          <el-table-column prop="size" label="size" width="100" />
+          <el-table-column :label="t('common.actions')" width="100">
+            <template #default="{ row }">
+              <el-button type="danger" size="small" :disabled="deletingFileId === row.id" @click="deleteFile(row)">{{ deletingFileId === row.id ? t('common.deleting') : t('common.delete') }}</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+        <el-button v-if="filesHasMore && !filesLoading" class="docs-more" @click="fetchNextFiles">{{ t('common.loadMore') }}</el-button>
+      </template>
+    </div>
+  </main>
+</template>
+
+<script setup>
+import { ref, onMounted } from 'vue'
+import { storeToRefs } from 'pinia'
+import { useI18n } from 'vue-i18n'
+import axios from '../utils/api'
+import { useDatabaseStore } from '../stores/database'
+import { showToast } from '../utils/toast'
+import { shortTime } from '../utils/format'
+
+const API = '/api'
+const { t } = useI18n()
+const databaseStore = useDatabaseStore()
+const { databaseAppId } = storeToRefs(databaseStore)
+
+const selectedFiles = ref([])
+const uploading = ref(false)
+const files = ref([])
+const filesCursor = ref(null)
+const filesHasMore = ref(false)
+const filesLoading = ref(false)
+const deletingFileId = ref(null)
+const uploadRef = ref(null)
+const filesTableRef = ref(null)
+
+// el-upload on-change：(uploadFile, uploadFiles)，uploadFiles 为 UploadFile 数组，raw 为原始 File
+function onFileChange(file, fileList) {
+  selectedFiles.value = fileList.map(item => item.raw).filter(Boolean)
+}
+
+// el-upload 在 2.14 无 on-drop prop，拖拽由内部 dragger 触发 on-change；
+// 此处保留原模板的原生 drop 兜底（dataTransfer.files）
+async function onDrop(e) {
+  const files = e.dataTransfer.files
+  selectedFiles.value = files.length ? Array.from(files) : []
+}
+
+async function uploadSelectedFiles() {
+  if (!databaseStore.databaseAppId) {
+    showToast('error', t('upload.selectApp'))
+    return
+  }
+  if (!selectedFiles.value.length || uploading.value) return
+  uploading.value = true
+  try {
+    const uploaded = await uploadFiles(selectedFiles.value)
+    if (uploaded) {
+      selectedFiles.value = []
+      // 清空 el-upload 内部列表，避免下次 on-change 携带已上传的旧文件
+      uploadRef.value?.clearFiles()
+    }
+  } finally {
+    uploading.value = false
+  }
+}
+
+async function uploadFiles(files) {
+  let submitted = 0
+  for (const file of files) {
+    const form = new FormData()
+    form.append('file', file)
+    form.append('app_id', databaseStore.databaseAppId)
+    try {
+      const uploadRes = await axios.post(`${API}/admin/upload`, form)
+      const presignRes = await axios.post(`${API}/admin/presign`, { s3_url: uploadRes.data.s3_url })
+      await axios.post(`${API}/admin/index/jobs`, {
+        app_id: databaseStore.databaseAppId,
+        file_id: uploadRes.data.file_id,
+        presigned_url: presignRes.data.presigned_url,
+        s3_url: uploadRes.data.s3_url,
+      })
+      submitted++
+    } catch (err) {
+      showToast('error', `${file.name}: ${err.response?.data?.detail || err.message}`)
+    }
+  }
+  await fetchFiles()
+  if (submitted > 0) {
+    showToast('success', t('upload.indexSubmitted', { count: submitted }))
+  }
+  return submitted > 0
+}
+
+async function fetchFiles() {
+  files.value = []
+  filesCursor.value = null
+  filesHasMore.value = false
+  await fetchNextFiles()
+}
+
+async function fetchNextFiles() {
+  if (filesLoading.value) return
+  filesLoading.value = true
+  try {
+    const params = { limit: 50 }
+    if (filesCursor.value) params.cursor = filesCursor.value
+    if (databaseStore.databaseAppId) params.app_id = databaseStore.databaseAppId
+    const res = await axios.get(`${API}/admin/files`, { params })
+    files.value = files.value.concat(res.data.files || [])
+    filesCursor.value = res.data.next_cursor || null
+    filesHasMore.value = Boolean(res.data.has_more)
+  }
+  catch (err) { console.error(err) }
+  finally { filesLoading.value = false }
+}
+
+async function deleteFile(file) {
+  if (!file?.id || deletingFileId.value) return
+  deletingFileId.value = file.id
+  try {
+    const params = {}
+    if (databaseStore.databaseAppId) params.app_id = databaseStore.databaseAppId
+    await axios.delete(`${API}/admin/files/${encodeURIComponent(file.id)}`, { params })
+    showToast('success', t('upload.deletedFile', { name: file.filename }))
+    await fetchFiles()
+  } catch (err) {
+    showToast('error', `${file.filename}: ${err.response?.data?.detail || err.message}`)
+  } finally {
+    deletingFileId.value = null
+  }
+}
+
+function onFilesScroll(event) {
+  // 同 DatabaseView：el-table scroll 事件 payload 为 { scrollTop, scrollLeft }
+  const wrap = filesTableRef.value?.scrollBarRef?.wrapRef
+  if (!wrap) return
+  const scrollTop = event?.scrollTop ?? wrap.scrollTop
+  if (scrollTop + wrap.clientHeight >= wrap.scrollHeight - 24 && filesHasMore.value) {
+    fetchNextFiles()
+  }
+}
+
+onMounted(fetchFiles)
+</script>

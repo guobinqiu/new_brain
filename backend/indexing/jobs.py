@@ -13,20 +13,24 @@ _application: Application | None = None
 _application_lock = threading.Lock()
 
 
-def index_object_job(*, file_id: str, presigned_url: str, s3_url: str, filename: str | None = None) -> dict:
+def index_object_job(*, app_id: str, file_id: str, presigned_url: str, s3_url: str, filename: str | None = None) -> dict:
     application = _worker_application()
-    count = index_presigned_object(application, file_id, presigned_url, s3_url, filename)
+    if not application.store.app_collection_exists(app_id):
+        raise ValueError("app database is not initialized")
+    with application.store.app_context(app_id):
+        count = index_presigned_object(application, file_id, presigned_url, s3_url, filename)
     logger.info(
         "Object indexed",
         extra={
             "event": "object_indexed",
+            "app_id": app_id,
             "file_id": file_id,
             "document_filename": filename,
             "s3_url": s3_url,
             "chunk_count": count,
         },
     )
-    return {"file_id": file_id, "chunk_count": count}
+    return {"app_id": app_id, "file_id": file_id, "chunk_count": count}
 
 
 def _worker_application() -> Application:

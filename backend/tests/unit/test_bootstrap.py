@@ -88,8 +88,6 @@ sparse:
 store:
   type: qdrant
   url: http://localhost:6333
-  collections:
-    chunks: chunks
 search:
   default_mode: hybrid
 rerank:
@@ -116,7 +114,6 @@ def test_application_passes_store_config_to_qdrant_store():
 
     assert application.store.url == application.config.store.url
     assert application.store.timeout == application.config.store.timeout
-    assert application.store.chunks_collection == application.config.store.collections.chunks
 
 
 def test_application_reads_config_name_from_explicit_yaml(monkeypatch):
@@ -132,18 +129,17 @@ def test_application_reads_config_name_from_explicit_yaml(monkeypatch):
 
 def test_build_dense_rejects_unsupported_dense_type():
     import container
-    from schema import AdminAuthConfig, AppAuthConfig, AppConfig, AuthConfig, DenseConfig, OCRConfig, RerankConfig, SearchConfig, SparseConfig, StoreCollectionsConfig, StoreConfig
+    from schema import AdminAuthConfig, AppConfig, AuthConfig, DenseConfig, OCRConfig, RerankConfig, SearchConfig, SparseConfig, StoreConfig
 
     config = AppConfig(
         dense=DenseConfig(name="unknown", model_path="/models/dense"),
         sparse=SparseConfig(name="bm25", tokenizer="jieba"),
-        store=StoreConfig(type="qdrant", url="http://localhost:6333", collections=StoreCollectionsConfig(chunks="chunks")),
+        store=StoreConfig(type="qdrant", url="http://localhost:6333"),
         search=SearchConfig(),
         rerank=RerankConfig(name="bge_reranker_base", model_path="/models/rerank"),
         ocr=OCRConfig(name="rapidocr", model_path="/models/ocr"),
         auth=AuthConfig(
             admin=AdminAuthConfig(username="admin", password="admin123"),
-            app=AppAuthConfig(app_id="imsdom", access_key="access", secret_key="secret"),
         ),
     )
 

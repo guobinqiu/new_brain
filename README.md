@@ -2,22 +2,30 @@
 
 ## Native 启动
 
-Native 方式只把后端和前端跑在宿主机上，默认仍使用 Docker 启动 Qdrant 和 MinIO。
+Native 方式只把后端、前端和索引 worker 跑在宿主机上，默认仍使用 Docker 启动 Qdrant、MinIO 和 Redis。
 
-1. 启动 Qdrant 和 MinIO：
+1. 启动 Qdrant、MinIO 和 Redis：
 
 ```bash
-docker compose -f deploy/cpu/docker-compose.yml up -d qdrant minio
+docker compose -f deploy/cpu/docker-compose.yml up -d qdrant minio redis
 ```
 
 2. 启动后端：
 
 ```bash
 cd backend
-S3_ENDPOINT_URL=http://localhost:19000 CONFIG_FILE=local.yaml .venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8000
+S3_ENDPOINT_URL=http://localhost:19000 REDIS_URL=redis://localhost:16379/0 CONFIG_FILE=local.yaml .venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
-3. 启动前端：
+3. 处理异步索引任务：
+
+```bash
+just worker
+```
+
+Native worker 使用 RQ Worker 常驻运行，前端上传文件后会自动消费异步索引任务。
+
+4. 启动前端：
 
 ```bash
 cd frontend
@@ -94,32 +102,156 @@ http://<服务器地址>:28000
 
 上游系统真正需要调用的业务入口是索引和搜索；鉴权是调用前置步骤。完整接口说明见 [API 文档](docs/api.md)。
 
-鉴权前置：
-
-| 方法 | 路径 | 说明 |
-|---|---|---|
-| `POST` | `/api/auth/token` | 外部系统 access_key/secret_key 换取 Service JWT |
-
-同步接口：
+总览：
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | `POST` | `/api/index` | 同步索引对象存储文件，完成后返回 `file_id` |
-
-异步接口：
-
-| 方法 | 路径 | 说明 |
-|---|---|---|
-| `POST` | `/api/index/jobs` | 创建异步索引任务，返回 `job_id` |
-| `GET` | `/api/index/jobs/{job_id}` | 查询异步索引任务状态，完成后返回 `file_id` |
-
-查询接口：
-
-| 方法 | 路径 | 说明 |
-|---|---|---|
+| `POST` | `/api/index/jobs` | 创建异步索引任务，立即返回 `job_id` |
+| `POST` | `/api/index/jobs/status` | 批量查询异步索引任务状态 |
 | `POST` | `/api/search` | 按 `query` 和可选 `file_ids` 搜索知识库 |
+| `DELETE` | `/api/files/{file_id}` | 删除当前应用向量库中的索引文件 |
 
-上游如果已经有自己的队列、限流和重试机制，可以调用同步索引；否则建议调用异步索引并轮询任务状态。异步索引完成后，上游需要在自己的文件表或映射表里保存 `file_id`，后续搜索指定文件范围时传回该值。索引接口接收 `presigned_url`、`s3_url` 和可选 `filename`，`file_id` 由 RAG 生成。搜索时不传 `file_ids` 表示全库搜索。
+上游如果已经有自己的队列、限流和重试机制，可以调用同步索引；否则建议调用异步索引并轮询任务状态。索引接口接收 `presigned_url`、`s3_url`、可选 `filename` 和可选 `file_id`。上游传 `file_id` 时必须是 UUID；不传时由 RAG 生成。异步任务创建后只返回 `job_id`；任务完成后通过 `POST /api/index/jobs/status` 查看 `file_id`、状态和错误。搜索时不传 `file_ids` 表示全库搜索。
+
+上游系统使用的 `app_id`、`access_key` 和 `secret_key` 由管理台创建。每个 `app_id` 对应独立 collection，业务接口根据 AK/SK 签名里的 `app_id` 自动选择当前应用的数据范围。索引前需要先在管理台为该 `app_id` 初始化数据库。
+
+异步索引任务状态保存在 Redis RQ 中。Docker 默认保留成功任务 7 天、失败任务 30 天，可通过 `INDEX_JOB_RESULT_TTL_SECONDS` 和 `INDEX_JOB_FAILURE_TTL_SECONDS` 覆盖。
+
+业务接口每次请求都带 AK/SK 签名：
+
+请求头：
+
+| Header | 说明 |
+|---|---|
+| `X-App-Id` | 调用方应用 ID |
+| `X-Access-Key` | 管理台创建的 access_key |
+| `X-Timestamp` | Unix 秒级时间戳 |
+| `X-Signature` | HMAC-SHA256 签名 hex |
+
+签名算法见 [API 文档](docs/api.md)。
+
+### POST /api/index
+
+同步索引对象存储文件。接口返回时，文件已经完成下载、解析、OCR、embedding 并写入向量库。
+
+请求：
+
+```json
+{
+  "file_id": "550e8400-e29b-41d4-a716-446655440000",
+  "presigned_url": "https://example.com/presigned",
+  "s3_url": "s3://bucket/path/to/example.pdf",
+  "filename": "example.pdf"
+}
+```
+
+响应：
+
+```json
+{
+  "file_id": "550e8400e29b41d4a716446655440000"
+}
+```
+
+### POST /api/index/jobs
+
+创建异步索引任务。接口只入队，真正的下载、解析、OCR、embedding 和向量库写入由后台 worker 执行。
+
+请求：
+
+```json
+{
+  "file_id": "550e8400-e29b-41d4-a716-446655440000",
+  "presigned_url": "https://example.com/presigned",
+  "s3_url": "s3://bucket/path/to/example.pdf",
+  "filename": "example.pdf"
+}
+```
+
+响应：
+
+```json
+{
+  "job_id": "a3f47d1b05a944d4927e0c87531f9c2a"
+}
+```
+
+### POST /api/index/jobs/status
+
+批量查询异步索引任务状态。
+
+`queued` / `started`：任务已接受或正在处理。
+
+`finished`：索引已写入向量库，响应里包含 `file_id`。
+
+`failed`：索引失败，响应里包含 `error`。
+
+`not_found`：任务不存在或状态已过期。
+
+请求：
+
+```json
+{
+  "job_ids": ["a3f47d1b05a944d4927e0c87531f9c2a"]
+}
+```
+
+响应：
+
+```json
+{
+  "jobs": [
+    {
+      "job_id": "a3f47d1b05a944d4927e0c87531f9c2a",
+      "file_id": "550e8400e29b41d4a716446655440000",
+      "status": "finished",
+      "chunk_count": 12,
+      "error": null,
+      "created_at": "2026-08-17T09:00:00+08:00",
+      "ended_at": "2026-08-17T09:00:18+08:00"
+    }
+  ]
+}
+```
+
+### POST /api/search
+
+按问题搜索知识库。`file_ids` 可省略，省略时搜索当前 `app_id` 对应 app 的整个 collection。
+
+请求：
+
+```json
+{
+  "query": "要查询的问题",
+  "mode": "hybrid",
+  "top_k": 20,
+  "file_ids": ["550e8400e29b41d4a716446655440000"]
+}
+```
+
+响应：
+
+```json
+{
+  "results": [
+    {
+      "content": "命中的 chunk 文本",
+      "score": 0.82,
+      "file_id": "550e8400e29b41d4a716446655440000",
+      "filename": "example.pdf",
+      "chunk_index": 3
+    }
+  ],
+  "mode": "hybrid",
+  "rerank": true,
+  "fetch_k": 50,
+  "dense_weight": 0.5,
+  "sparse_weight": 0.5,
+  "rrf_k": 60,
+  "elapsed_ms": 271.7
+}
+```
 
 ## 配置文件
 
@@ -137,21 +269,21 @@ Docker 运行使用前面的 `just deploy cpu ...` 或 `just deploy gpu ...` 命
 
 | 文件 | 用途 | 说明 |
 |---|---|---|
-| `local.yaml` | native 默认入口 | 连接 `http://localhost:6333`，collection 固定为 `knowledge_chunks`，默认启用 `bge_base` dense、`bm25` sparse（`tokenizer=jieba`），不加载 rerank。 |
+| `local.yaml` | native 默认入口 | 连接 `http://localhost:6333`，默认启用 `bge_base` dense、`bm25` sparse（`tokenizer=jieba`），不加载 rerank。 |
 | `docker-cpu.yaml` | Docker CPU 入口 | 连接 Docker Compose 内的 Qdrant 服务名 `qdrant`，默认启用 `bge_base` dense、`bm25` sparse（`tokenizer=jieba`），不加载 rerank。 |
 | `docker-gpu.yaml` | Docker GPU 入口 | 连接 Docker Compose 内的 Qdrant 服务名 `qdrant`，默认启用 `bge_m3` dense、`bge_m3` sparse、`bge_reranker_v2_m3` rerank。 |
-| `qdrant-bge-base.yaml` | Qdrant 评估入口 | 固定 BGE-base dense + app BM25，collection 为 `qdrant_bge_base_knowledge_chunks`。 |
-| `qdrant-bge-m3.yaml` | Qdrant 评估入口 | 固定 BGE-M3 dense + BGE-M3 sparse，collection 为 `qdrant_bge_m3_knowledge_chunks`。 |
-| `chroma-bge-base.yaml` | Chroma 评估入口 | 固定 BGE-base dense + app BM25，collection 为 `chroma_bge_base_knowledge_chunks`。 |
-| `chroma-bge-m3.yaml` | Chroma 评估入口 | 固定 BGE-M3 dense + app BM25，collection 为 `chroma_bge_m3_knowledge_chunks`。Chroma local 不启用 vector sparse。 |
-| `milvus-bge-base.yaml` | Milvus 评估入口 | 固定 BGE-base dense + app BM25，collection 为 `milvus_bge_base_knowledge_chunks`。 |
-| `milvus-bge-m3.yaml` | Milvus 评估入口 | 固定 BGE-M3 dense + BGE-M3 sparse，collection 为 `milvus_bge_m3_knowledge_chunks`。 |
-| `milvus-builtin-bm25.yaml` | Milvus 评估入口 | 固定 BGE-base dense + Milvus built-in BM25 sparse，collection 为 `milvus_builtin_bm25_knowledge_chunks`。 |
-| `milvus-lite-bge-base.yaml` | Milvus Lite 评估入口 | 固定 BGE-base dense + app BM25，collection 为 `milvus_lite_bge_base_knowledge_chunks`。 |
-| `milvus-lite-bge-m3.yaml` | Milvus Lite 评估入口 | 固定 BGE-M3 dense + BGE-M3 sparse，collection 为 `milvus_lite_bge_m3_knowledge_chunks`。 |
-| `milvus-lite-builtin-bm25.yaml` | Milvus Lite 评估入口 | 固定 BGE-base dense + Milvus built-in BM25 sparse，collection 为 `milvus_lite_builtin_bm25_knowledge_chunks`。 |
+| `qdrant-bge-base.yaml` | Qdrant 评估入口 | 固定 BGE-base dense + app BM25。 |
+| `qdrant-bge-m3.yaml` | Qdrant 评估入口 | 固定 BGE-M3 dense + BGE-M3 sparse。 |
+| `chroma-bge-base.yaml` | Chroma 评估入口 | 固定 BGE-base dense + app BM25。 |
+| `chroma-bge-m3.yaml` | Chroma 评估入口 | 固定 BGE-M3 dense + app BM25。Chroma local 不启用 vector sparse。 |
+| `milvus-bge-base.yaml` | Milvus 评估入口 | 固定 BGE-base dense + app BM25。 |
+| `milvus-bge-m3.yaml` | Milvus 评估入口 | 固定 BGE-M3 dense + BGE-M3 sparse。 |
+| `milvus-builtin-bm25.yaml` | Milvus 评估入口 | 固定 BGE-base dense + Milvus built-in BM25 sparse。 |
+| `milvus-lite-bge-base.yaml` | Milvus Lite 评估入口 | 固定 BGE-base dense + app BM25。 |
+| `milvus-lite-bge-m3.yaml` | Milvus Lite 评估入口 | 固定 BGE-M3 dense + BGE-M3 sparse。 |
+| `milvus-lite-builtin-bm25.yaml` | Milvus Lite 评估入口 | 固定 BGE-base dense + Milvus built-in BM25 sparse。 |
 
-配置文件固定会影响索引结构的内容：向量库、dense 模型、sparse 类型和 collection 名。`rerank`、`ocr` 可以在配置文件内用 `enable` 切换；`sparse` 不做运行时切换，需要换配置文件并重建对应 collection。
+配置文件固定会影响索引结构的内容：向量库、dense 模型和 sparse 类型。collection 名由 `app_id` 生成。`rerank`、`ocr` 可以在配置文件内用 `enable` 切换；`sparse` 不做运行时切换，需要换配置文件并重建对应 collection。
 
 本地 native 切换配置示例：
 
