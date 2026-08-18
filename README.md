@@ -135,6 +135,15 @@ http://<服务器地址>:28000
 
 同步索引对象存储文件。接口返回时，文件已经完成下载、解析、OCR、embedding 并写入向量库。
 
+请求字段：
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `presigned_url` | string | 是 | RAG 下载文件用的预签名 URL |
+| `s3_url` | string | 是 | 稳定对象存储地址，写入 chunk metadata 用于追溯 |
+| `filename` | string | 否 | 展示文件名；不传时从 `s3_url` 推导 |
+| `file_id` | string | 否 | 上游指定的文件 ID，必须是 UUID；不传时由 RAG 生成 |
+
 请求：
 
 ```json
@@ -158,6 +167,15 @@ http://<服务器地址>:28000
 
 创建异步索引任务。接口只入队，真正的下载、解析、OCR、embedding 和向量库写入由后台 worker 执行。
 
+请求字段：
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `presigned_url` | string | 是 | RAG 下载文件用的预签名 URL |
+| `s3_url` | string | 是 | 稳定对象存储地址，写入 chunk metadata 用于追溯 |
+| `filename` | string | 否 | 展示文件名；不传时从 `s3_url` 推导 |
+| `file_id` | string | 否 | 上游指定的文件 ID，必须是 UUID；不传时由 RAG 生成 |
+
 请求：
 
 ```json
@@ -180,6 +198,12 @@ http://<服务器地址>:28000
 ### POST /api/index/jobs/status
 
 批量查询异步索引任务状态。
+
+请求字段：
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `job_ids` | string[] | 是 | `/api/index/jobs` 返回的任务 ID 列表 |
 
 `queued` / `started`：任务已接受或正在处理。
 
@@ -218,6 +242,20 @@ http://<服务器地址>:28000
 ### POST /api/search
 
 按问题搜索知识库。`file_ids` 可省略，省略时搜索当前 `app_id` 对应 app 的整个 collection。
+
+请求字段：
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `query` | string | 是 | 搜索问题 |
+| `mode` | string | 否 | `dense` / `sparse` / `hybrid`，不传使用服务默认值 |
+| `top_k` | integer | 否 | 最多返回条数，不传使用服务默认值 |
+| `fetch_k` | integer | 否 | 检索候选数量，不传使用服务默认值 |
+| `rerank` | boolean | 否 | 是否启用重排，不传使用服务默认值 |
+| `dense_weight` | number | 否 | hybrid 模式 dense 权重，不传使用服务默认值 |
+| `sparse_weight` | number | 否 | hybrid 模式 sparse 权重，不传使用服务默认值 |
+| `rrf_k` | integer | 否 | RRF 融合参数，不传使用服务默认值 |
+| `file_ids` | string[] | 否 | 文件 ID 过滤；不传表示搜索当前 app 的整个 collection |
 
 请求：
 
