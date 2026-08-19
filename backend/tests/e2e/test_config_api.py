@@ -6,8 +6,8 @@ pytestmark = pytest.mark.e2e
 
 class TestConfigAPI:
     def test_get_config(self, api_client):
-        """``GET /api/admin/config`` returns the search configuration."""
-        resp = api_client.get("/api/admin/config")
+        """``GET /api/config`` returns the search configuration."""
+        resp = api_client.get("/api/config")
         assert resp.status_code == 200
         cfg = resp.json()
         for key in ("default_mode", "top_k", "rerank", "rerank_available", "fetch_k", "dense_weight", "sparse_weight", "rrf_k"):
@@ -15,8 +15,8 @@ class TestConfigAPI:
         assert cfg["sparse"]["name"] == "bm25"
 
     def test_get_config_includes_components(self, api_client):
-        """``GET /api/admin/config`` returns the active component profile."""
-        resp = api_client.get("/api/admin/config")
+        """``GET /api/config`` returns the active component profile."""
+        resp = api_client.get("/api/config")
         assert resp.status_code == 200
         cfg = resp.json()
 
@@ -31,8 +31,8 @@ class TestConfigAPI:
         assert cfg["ocr"]["name"]
 
     def test_get_config_includes_runtime_switchable_components(self, api_client):
-        """``GET /api/admin/config`` returns runtime-switchable component candidates."""
-        resp = api_client.get("/api/admin/config")
+        """``GET /api/config`` returns runtime-switchable component candidates."""
+        resp = api_client.get("/api/config")
         assert resp.status_code == 200
         available = resp.json()["available_components"]
 
@@ -40,9 +40,9 @@ class TestConfigAPI:
         assert all("active" in item for item in available["rerank"])
 
     def test_put_config_not_available(self, api_client):
-        """``PUT /api/admin/config`` is not part of the production API."""
+        """``PUT /api/config`` is not part of the production API."""
         resp = api_client.put(
-            "/api/admin/config",
+            "/api/config",
             json={"dense_weight": 0.8, "sparse_weight": 0.2},
         )
         assert resp.status_code == 405
@@ -50,12 +50,12 @@ class TestConfigAPI:
 
 class TestMonitorAPI:
     def test_monitor_returns_runtime_data_and_index_contract(self, app_api_client, api_client, test_txt_path, monkeypatch):
-        """``GET /api/admin/monitor`` returns read-only runtime state."""
+        """``GET /api/monitor`` returns read-only runtime state."""
         from tests.e2e.test_search_api import _index_ready_file
 
         _index_ready_file(app_api_client, test_txt_path, monkeypatch)
 
-        resp = api_client.get("/api/admin/monitor")
+        resp = api_client.get("/api/monitor")
 
         assert resp.status_code == 200
         monitor = resp.json()
@@ -78,16 +78,16 @@ class TestMonitorAPI:
         assert monitor["capabilities"]["restart"] is False
 
     def test_traces_returns_search_trace_list_after_search(self, app_api_client, api_client, test_txt_path, monkeypatch):
-        """``GET /api/admin/traces`` exposes recent search traces for diagnostics."""
+        """``GET /api/traces`` exposes recent search traces for diagnostics."""
         from tests.e2e.test_search_api import _index_ready_file
 
         file_id = _index_ready_file(app_api_client, test_txt_path, monkeypatch)
         app_api_client.post(
-            "/api/search",
+            "/api/open/search",
             json={"query": "人工智能", "mode": "hybrid", "top_k": 5, "file_ids": [file_id]},
         )
 
-        resp = api_client.get("/api/admin/traces", params={"app_id": "imsdom"})
+        resp = api_client.get("/api/traces", params={"app_id": "imsdom"})
 
         assert resp.status_code == 200
         traces = resp.json()["traces"]

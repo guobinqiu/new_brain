@@ -32,7 +32,40 @@ def test_application_starts_public_components_in_order():
     )
     application.start()
 
-    assert calls == ["dense", "sparse", "store", "search", "rerank", "ocr"]
+    assert calls == ["dense", "sparse", "rerank", "ocr", "store", "search"]
+    assert application.ready is True
+
+
+def test_application_splits_model_loading_from_runtime_connections():
+    import bootstrap
+
+    calls = []
+
+    class FakeComponent:
+        def __init__(self, name):
+            self.name = name
+            self.ready = False
+
+        def start(self):
+            calls.append(self.name)
+            self.ready = True
+
+        def stop(self):
+            self.ready = False
+
+    application = bootstrap.Application(
+        dense=FakeComponent("dense"),
+        sparse=FakeComponent("sparse"),
+        store=FakeComponent("store"),
+        search=FakeComponent("search"),
+        rerank=FakeComponent("rerank"),
+        ocr=FakeComponent("ocr"),
+    )
+
+    application.load_models()
+    application.init_connections()
+
+    assert calls == ["dense", "sparse", "rerank", "ocr", "store", "search"]
     assert application.ready is True
 
 

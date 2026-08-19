@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 import time
+from datetime import datetime, timezone
+from typing import Any
 
 
 INDEX_QUEUE_NAME = "index"
@@ -19,31 +21,26 @@ class IndexQueueUnavailable(Exception):
 def enqueue_index_job(*, job_id: str, app_id: str, file_id: str, presigned_url: str, s3_url: str, filename: str | None):
     from redis import Redis
     from redis.exceptions import RedisError
-    from rq import Queue, Retry
 
     redis = Redis.from_url(_redis_url())
-    queue = Queue(
-        os.getenv("INDEX_QUEUE_NAME", INDEX_QUEUE_NAME),
-        connection=redis,
-    )
+    queue_name = os.getenv("INDEX_QUEUE_NAME", INDEX_QUEUE_NAME)
+    repository = IndexJobRepository(redis, queue_name)
     try:
-        _enforce_queue_limits(redis, queue)
-        job = queue.enqueue(
-            "indexing.jobs.index_object_job",
-            app_id=app_id,
-            file_id=file_id,
-            presigned_url=presigned_url,
-            s3_url=s3_url,
-            filename=filename,
-            job_id=job_id,
-            meta={"app_id": app_id, "file_id": file_id, "filename": filename, "s3_url": s3_url},
-            job_timeout=int(os.getenv("INDEX_JOB_TIMEOUT_SECONDS", "1800")),
-            result_ttl=_job_result_ttl(),
-            failure_ttl=_job_failure_ttl(),
-            retry=Retry(max=int(os.getenv("INDEX_JOB_RETRY_MAX", "2"))),
+        _enforce_queue_limits(redis, queue_name)
+        repository.record_job(job_id, app_id=app_id, file_id=file_id, filename=filename, s3_url=s3_url)
+        return _celery_app().send_task(
+            "indexing.tasks.index_object_task",
+            kwargs={
+                "app_id": app_id,
+                "file_id": file_id,
+                "presigned_url": presigned_url,
+                "s3_url": s3_url,
+                "filename": filename,
+            },
+            task_id=job_id,
+            queue=queue_name,
+            retry=True,
         )
-        _record_app_job(redis, queue.name, app_id, job.id)
-        return job
     except RedisError as exc:
         raise IndexQueueUnavailable("index queue is unavailable") from exc
 
@@ -51,14 +48,15 @@ def enqueue_index_job(*, job_id: str, app_id: str, file_id: str, presigned_url: 
 def get_index_job(job_id: str):
     from redis import Redis
     from redis.exceptions import RedisError
-    from rq.job import Job
-    from rq.exceptions import NoSuchJobError
 
     redis = Redis.from_url(_redis_url())
+    repository = IndexJobRepository(redis, os.getenv("INDEX_QUEUE_NAME", INDEX_QUEUE_NAME))
     try:
-        return Job.fetch(job_id, connection=redis)
-    except NoSuchJobError:
-        return None
+        metadata = repository.get_metadata(job_id)
+        result = _celery_app().AsyncResult(job_id)
+        if result.status == "PENDING" and not metadata:
+            return None
+        return CeleryJobAdapter(result, metadata)
     except RedisError as exc:
         raise IndexQueueUnavailable("index queue is unavailable") from exc
 
@@ -66,115 +64,108 @@ def get_index_job(job_id: str):
 def list_index_jobs(*, limit: int = 50, cursor: str | None = None, app_id: str | None = None) -> dict:
     from redis import Redis
     from redis.exceptions import RedisError
-    from rq import Queue
-    from rq.job import Job
-    from rq.registry import FailedJobRegistry, FinishedJobRegistry, StartedJobRegistry
 
     if limit <= 0:
         raise ValueError("limit must be greater than 0")
     limit = min(limit, 200)
     start = int(cursor) if cursor else 0
     redis = Redis.from_url(_redis_url())
-    queue = Queue(os.getenv("INDEX_QUEUE_NAME", INDEX_QUEUE_NAME), connection=redis)
-    if app_id:
-        try:
-            return _list_app_index_jobs(redis, queue.name, app_id, limit=limit, start=start)
-        except RedisError as exc:
-            raise IndexQueueUnavailable("index queue is unavailable") from exc
-    started_registry = StartedJobRegistry(queue=queue)
-    finished_registry = FinishedJobRegistry(queue=queue)
-    failed_registry = FailedJobRegistry(queue=queue)
+    queue_name = os.getenv("INDEX_QUEUE_NAME", INDEX_QUEUE_NAME)
+    repository = IndexJobRepository(redis, queue_name)
     try:
-        job_ids = _job_id_page(
-            (
-                (queue.count, lambda offset, length: queue.get_job_ids(offset=offset, length=length)),
-                (started_registry.count, lambda offset, length: started_registry.get_job_ids(start=offset, end=offset + length - 1, desc=True)),
-                (finished_registry.count, lambda offset, length: finished_registry.get_job_ids(start=offset, end=offset + length - 1, desc=True)),
-                (failed_registry.count, lambda offset, length: failed_registry.get_job_ids(start=offset, end=offset + length - 1, desc=True)),
-            ),
-            start=start,
-            limit=limit + 1,
-        )
+        page = repository.list_jobs(limit=limit, start=start, app_id=app_id)
+        celery = _celery_app()
+        jobs = []
+        for item in page["jobs"]:
+            result = celery.AsyncResult(item["job_id"])
+            if result.status == "PENDING" and not item["metadata"]:
+                continue
+            jobs.append(CeleryJobAdapter(result, item["metadata"]))
+        return {**page, "jobs": jobs}
     except RedisError as exc:
         raise IndexQueueUnavailable("index queue is unavailable") from exc
-    jobs, _ = _fetch_jobs(Job, job_ids[:limit], redis)
-    next_index = start + limit
-    return {
-        "jobs": jobs,
-        "next_cursor": str(next_index) if len(job_ids) > limit else None,
-        "has_more": len(job_ids) > limit,
-    }
 
 
-def _job_id_page(groups, *, start: int, limit: int) -> list[str]:
-    ids = []
-    offset = start
-    for count, loader in groups:
-        if offset >= count:
-            offset -= count
-            continue
-        remaining = limit - len(ids)
-        if remaining <= 0:
-            break
-        ids.extend(loader(offset, remaining))
-        offset = 0
-    return _unique_job_ids(ids)
+class IndexJobRepository:
+    def __init__(self, redis, queue_name: str):
+        self.redis = redis
+        self.queue_name = queue_name
+
+    def record_job(self, job_id: str, *, app_id: str, file_id: str, filename: str | None, s3_url: str) -> None:
+        self.update_metadata(
+            job_id,
+            app_id=app_id,
+            file_id=file_id,
+            filename=filename or "",
+            s3_url=s3_url,
+            created_at=datetime.now(timezone.utc).isoformat(),
+        )
+        self._record_app_job(app_id, job_id)
+
+    def get_metadata(self, job_id: str) -> dict[str, Any]:
+        return _decode_hash(self.redis.hgetall(_job_metadata_key(self.queue_name, job_id)))
+
+    def update_metadata(self, job_id: str, **values) -> None:
+        self.redis.hset(_job_metadata_key(self.queue_name, job_id), mapping=values)
+        ttl = max(_job_result_ttl(), _job_failure_ttl())
+        if ttl > 0:
+            self.redis.expire(_job_metadata_key(self.queue_name, job_id), ttl)
+
+    def list_jobs(self, *, limit: int, start: int, app_id: str | None = None) -> dict:
+        key = _app_jobs_key(self.queue_name, app_id) if app_id else _all_jobs_key(self.queue_name)
+        self._prune_job_index(key)
+        ids = self.redis.zrevrange(key, start, start + limit)
+        job_ids = [item.decode("utf-8") if isinstance(item, bytes) else str(item) for item in ids]
+        next_index = start + limit
+        return {
+            "jobs": [{"job_id": job_id, "metadata": self.get_metadata(job_id)} for job_id in job_ids[:limit]],
+            "next_cursor": str(next_index) if len(job_ids) > limit else None,
+            "has_more": len(job_ids) > limit,
+        }
+
+    def _record_app_job(self, app_id: str, job_id: str) -> None:
+        score = time.time()
+        app_key = _app_jobs_key(self.queue_name, app_id)
+        all_key = _all_jobs_key(self.queue_name)
+        self.redis.zadd(app_key, {job_id: score})
+        self.redis.zadd(all_key, {job_id: score})
+        self._prune_job_index(app_key)
+        self._prune_job_index(all_key)
+
+    def _prune_job_index(self, key: str) -> None:
+        ttl = max(_job_result_ttl(), _job_failure_ttl())
+        if ttl > 0:
+            self.redis.zremrangebyscore(key, 0, time.time() - ttl)
 
 
-def _unique_job_ids(group: list[str]) -> list[str]:
-    seen = set()
-    result = []
-    for job_id in group:
-        if job_id in seen:
-            continue
-        seen.add(job_id)
-        result.append(job_id)
-    return result
+def update_index_job_metadata(job_id: str, **values) -> None:
+    from redis import Redis
 
-
-def _list_app_index_jobs(redis, queue_name: str, app_id: str, *, limit: int, start: int) -> dict:
-    from rq.job import Job
-
-    key = _app_jobs_key(queue_name, app_id)
-    _prune_app_job_index(redis, key)
-    ids = redis.zrevrange(key, start, start + limit)
-    job_ids = [item.decode("utf-8") if isinstance(item, bytes) else str(item) for item in ids]
-    jobs, stale_job_ids = _fetch_jobs(Job, job_ids[:limit], redis)
-    if stale_job_ids:
-        redis.zrem(key, *stale_job_ids)
-    next_index = start + limit
-    return {
-        "jobs": jobs,
-        "next_cursor": str(next_index) if len(job_ids) > limit else None,
-        "has_more": len(job_ids) > limit,
-    }
-
-
-def _fetch_jobs(job_class, job_ids: list[str], redis) -> tuple[list, list[str]]:
-    jobs = []
-    stale_job_ids = []
-    for job_id, job in zip(job_ids, job_class.fetch_many(job_ids, connection=redis), strict=False):
-        if job is None:
-            stale_job_ids.append(job_id)
-            continue
-        jobs.append(job)
-    return jobs, stale_job_ids
-
-
-def _record_app_job(redis, queue_name: str, app_id: str, job_id: str) -> None:
-    key = _app_jobs_key(queue_name, app_id)
-    redis.zadd(key, {job_id: time.time()})
-    _prune_app_job_index(redis, key)
-
-
-def _prune_app_job_index(redis, key: str) -> None:
-    ttl = max(_job_result_ttl(), _job_failure_ttl())
-    if ttl > 0:
-        redis.zremrangebyscore(key, 0, time.time() - ttl)
+    redis = Redis.from_url(_redis_url())
+    IndexJobRepository(redis, os.getenv("INDEX_QUEUE_NAME", INDEX_QUEUE_NAME)).update_metadata(job_id, **values)
 
 
 def _app_jobs_key(queue_name: str, app_id: str) -> str:
     return f"rag:index:jobs:{queue_name}:app:{app_id}"
+
+
+def _all_jobs_key(queue_name: str) -> str:
+    return f"rag:index:jobs:{queue_name}:all"
+
+
+def _job_metadata_key(queue_name: str, job_id: str) -> str:
+    return f"rag:index:job:{queue_name}:{job_id}"
+
+
+def _decode_hash(values: dict) -> dict[str, Any]:
+    decoded = {}
+    for key, value in values.items():
+        if isinstance(key, bytes):
+            key = key.decode("utf-8")
+        if isinstance(value, bytes):
+            value = value.decode("utf-8")
+        decoded[str(key)] = value
+    return decoded
 
 
 def _redis_url() -> str:
@@ -189,16 +180,58 @@ def _job_failure_ttl() -> int:
     return int(os.getenv("INDEX_JOB_FAILURE_TTL_SECONDS", "-1"))
 
 
-def _enforce_queue_limits(redis, queue) -> None:
+def _enforce_queue_limits(redis, queue_name) -> None:
     max_pending = int(os.getenv("INDEX_MAX_PENDING_JOBS", "200"))
-    if queue.count >= max_pending:
+    if redis.llen(queue_name) >= max_pending:
         raise IndexQueueRejected(f"index queue pending jobs exceeds max limit: {max_pending}")
 
     per_minute = int(os.getenv("INDEX_RATE_LIMIT_PER_MINUTE", "30"))
     minute = int(time.time() // 60)
-    key = f"rag:index:rate:{queue.name}:{minute}"
+    key = f"rag:index:rate:{queue_name}:{minute}"
     count = redis.incr(key)
     if count == 1:
         redis.expire(key, 120)
     if count > per_minute:
         raise IndexQueueRejected(f"index rate limit exceeds max limit: {per_minute}/minute")
+
+
+class CeleryJobAdapter:
+    def __init__(self, result, metadata: dict[str, Any]):
+        self._result = result
+        self.id = result.id
+        self.meta = metadata
+        self.result = result.result if isinstance(result.result, dict) else None
+        self.exc_info = getattr(result, "traceback", None)
+        self.created_at = _parse_datetime(metadata.get("created_at"))
+        self.enqueued_at = self.created_at
+        self.started_at = _parse_datetime(metadata.get("started_at"))
+        self.ended_at = getattr(result, "date_done", None)
+
+    def get_status(self, refresh: bool = True) -> str:
+        return _celery_status(getattr(self._result, "status", "PENDING"))
+
+
+def _celery_status(status: str) -> str:
+    return {
+        "PENDING": "queued",
+        "RECEIVED": "queued",
+        "STARTED": "started",
+        "RETRY": "queued",
+        "SUCCESS": "finished",
+        "FAILURE": "failed",
+        "REVOKED": "failed",
+    }.get(str(status).upper(), str(status).lower())
+
+
+def _parse_datetime(value):
+    if not value:
+        return None
+    if not isinstance(value, str):
+        return value
+    return datetime.fromisoformat(value)
+
+
+def _celery_app():
+    from indexing.celery_app import celery_app
+
+    return celery_app

@@ -92,7 +92,7 @@ def test_admin_index_jobs_status_requires_jwt(monkeypatch, tmp_path):
     monkeypatch.setattr(main, "STARTUP_IN_BACKGROUND", False)
 
     with TestClient(main.app) as client:
-        response = client.post("/api/admin/index/jobs/status", json={"job_ids": ["job-1"]})
+        response = client.post("/api/index/jobs/status", json={"job_ids": ["job-1"]})
 
     assert response.status_code == 401
 

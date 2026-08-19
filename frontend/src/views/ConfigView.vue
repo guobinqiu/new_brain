@@ -62,7 +62,7 @@ function configComponentModel(item) {
 
 async function fetchConfig() {
   try {
-    const res = await axios.get(`${API}/admin/config`)
+    const res = await axios.get(`${API}/config`)
     configView.value = res.data
   } catch (err) { console.error(err) }
 }

@@ -172,7 +172,7 @@ sequenceDiagram
   participant Parser as DocumentParser
   participant Store as Store
   participant DB as 向量库
-  participant Redis as Redis Queue
+  participant Redis as Redis / Celery
   participant Worker as Index Worker
 
   Client->>Entry: 上传文件到对象存储
@@ -199,9 +199,9 @@ sequenceDiagram
   Entry-->>Client: 返回 queued/started/finished/failed，完成时包含 file_id
 ```
 
-写入入口可以同步执行索引，也可以创建异步任务。两种入口都接收 `presigned_url + s3_url`，并允许外部系统传入 UUID 格式的 `file_id`；不传时由 RAG 生成。管理台本地上传链路先通过上传接口生成 `file_id` 并写入对象存储路径，再调用 `/api/admin/index/jobs`，因此管理台异步索引必须传入上传阶段返回的 `file_id`。文件名默认可从对象存储地址推导，也允许调用方指定展示名。同步索引成功返回代表已经写入向量库。异步索引创建任务后立即返回 `job_id`，后台 `index-worker` 完成下载、解析、切分、embedding 并写入向量库。调用方用 `job_id` 查询任务状态；只有状态为 `finished` 后才能保证 `file_id` 在向量库里已经可查。同步入口和异步 worker 复用同一套索引执行逻辑。对象存储索引使用 `presigned_url` 做一次性下载，不把临时下载 URL 写入 chunk metadata；稳定的 `s3_url` 会写入 chunk metadata 用于追溯。文件和 chunk 的 `created_at` 在索引写入时生成并写入 chunk metadata；异步任务的 `created_at`、`enqueued_at`、`started_at`、`ended_at` 来自 RQ Job 生命周期记录。存储层统一保存 UTC 时间，对外返回前再转换成本机或容器时区。
+写入入口可以同步执行索引，也可以创建异步任务。两种入口都接收 `presigned_url + s3_url`，并允许外部系统传入 UUID 格式的 `file_id`；不传时由 RAG 生成。管理台本地上传链路先通过上传接口生成 `file_id` 并写入对象存储路径，再调用 `/api/index/jobs`，因此管理台异步索引必须传入上传阶段返回的 `file_id`。文件名默认可从对象存储地址推导，也允许调用方指定展示名。同步索引成功返回代表已经写入向量库。异步索引创建任务后立即返回 `job_id`，后台 `index-worker` 完成下载、解析、切分、embedding 并写入向量库。调用方用 `job_id` 查询任务状态；只有状态为 `finished` 后才能保证 `file_id` 在向量库里已经可查。同步入口和异步 worker 复用同一套索引执行逻辑。对象存储索引使用 `presigned_url` 做一次性下载，不把临时下载 URL 写入 chunk metadata；稳定的 `s3_url` 会写入 chunk metadata 用于追溯。文件和 chunk 的 `created_at` 在索引写入时生成并写入 chunk metadata；异步任务时间来自 Celery result backend 和 RAG 自维护的 job metadata。存储层统一保存 UTC 时间，对外返回前再转换成本机或容器时区。
 
-异步索引任务使用 Redis Queue 存储，Redis 开启 AOF 持久化。任务入队成功代表任务已被接受；worker 不在线时，任务留在 Redis 中等待消费；任务成功或失败后的状态记录不设置过期时间，正常重启后仍可查询。RAG 不假设所有上游系统都有自己的队列、限流和重试能力；内部队列是 RAG 服务的资源保护边界，用来削峰并控制 OCR、embedding 和向量库写入并发。异步任务状态包含处理中、成功和失败信息。异步入队前会检查单位时间提交数量和队列积压数量，超过限制时拒绝任务。实际索引并发由 worker 数量控制。Native、Docker 和生产部署都使用 RQ Worker 常驻运行，并由进程管理器或容器重启策略托管。每个 `app_id` 对应独立 collection，外部系统只要按 UUID 规约生成 `file_id`，就不会和其他 app 的同名文件发生跨系统冲突。
+异步索引任务使用 Celery + Redis 存储，Redis 开启 AOF 持久化。任务入队成功代表任务已被接受；worker 不在线时，任务留在 Redis 中等待消费；任务成功或失败后的状态记录按配置保留，正常重启后仍可查询。RAG 不假设所有上游系统都有自己的队列、限流和重试能力；内部队列是 RAG 服务的资源保护边界，用来削峰并控制 OCR、embedding 和向量库写入并发。异步任务状态包含处理中、成功和失败信息。异步入队前会检查单位时间提交数量和队列积压数量，超过限制时拒绝任务。实际索引并发由 Celery worker 并发数控制。每个 `app_id` 对应独立 collection，外部系统只要按 UUID 规约生成 `file_id`，就不会和其他 app 的同名文件发生跨系统冲突。
 
 Docker 开发环境使用 MinIO 模拟 S3。MinIO 提供本地 bucket 和对象下载能力，服务入口可以在本地联调时根据 `s3_url` 生成后端可访问的短期下载地址。生产环境里，重签通常由业务系统或对象存储网关完成，RAG 仍只消费 `presigned_url + s3_url`。
 
@@ -243,6 +243,113 @@ flowchart TB
 模型切换属于配置管理能力，不属于运行监控能力。
 
 向量数据查看能力直接分页读取向量库 chunk 数据，展示 chunk 主键、`file_id`、`s3_url`、`filename`、`chunk_index` 和完整 chunk 文本。管理台文件列表从 MinIO/S3 按 `uploads/{app_id}/` 前缀分页读取原始上传文件，文件 ID 来自对象路径 `uploads/{app_id}/{file_id}/{filename}`。管理台按 `file_id` 删除文件时同时删除向量库 chunks 和该 MinIO/S3 前缀下的对象；上游删除文件接口只删除向量库 chunks。
+
+### 2.7 Celery 索引 Worker
+
+异步索引由 Celery worker 消费。Celery 负责 broker 消费、任务状态、失败重试和 worker 进程管理；`IndexJobRepository` 维护业务侧 job 索引，用于按 app 分页查询任务列表和补充展示元数据。
+
+| 边界 | 实现 |
+|---|---|
+| 入队 | `indexing.queue.enqueue_index_job()` 调用 Celery `send_task()` |
+| 消费 | `indexing.tasks.index_object_task` |
+| broker | Redis，默认 `REDIS_URL` |
+| result backend | Redis，默认 `REDIS_URL` |
+| 业务 job 索引 | `IndexJobRepository` |
+| app 任务列表 | `IndexJobRepository` 写入 Redis ZSet：`rag:index:jobs:{queue}:app:{app_id}` |
+| 全局任务列表 | `IndexJobRepository` 写入 Redis ZSet：`rag:index:jobs:{queue}:all` |
+| 任务展示元数据 | `IndexJobRepository` 写入 Redis Hash：`rag:index:job:{queue}:{job_id}` |
+
+Docker Celery worker 使用 prefork pool，默认并发为 1：
+
+```text
+celery -A indexing.celery_app:celery_app worker \
+  --pool=prefork \
+  --concurrency=1 \
+  --queues index \
+  --loglevel=INFO
+```
+
+Native Celery worker 使用 `solo` pool：
+
+```text
+celery -A indexing.celery_app:celery_app worker \
+  --pool=solo \
+  --concurrency=1 \
+  --queues index \
+  --loglevel=INFO
+```
+
+Docker 使用 prefork 是常驻子进程模型，不是每个任务 fork 一次。worker 主进程只创建基础配置和日志，不加载模型、不建立 Redis/Qdrant/MinIO 连接。每个子进程启动后执行模型加载和连接初始化，后续任务复用该子进程内同一份 `Application`，不会每个任务重复加载模型。Native 使用 `solo` 避免 macOS 上 native 模型 runtime、OCR runtime、gRPC 或底层数值库在 fork 子进程中崩溃；任务在同一个 worker 进程内串行执行并复用同一份 `Application`。CPU 和 GPU profile 默认 `concurrency=1`，Docker 可以通过 `INDEX_WORKER_CONCURRENCY` 调整。
+
+#### 2.7.1 Application 两阶段启动
+
+`Application` 拆为模型阶段和运行连接阶段：
+
+```python
+def load_models(self):
+    dense.start()
+    sparse.start()
+    rerank.start()  # profile 启用时
+    ocr.start()
+
+def init_connections(self):
+    store.start()
+    search.start()
+
+def start(self):
+    load_models()
+    init_connections()
+```
+
+`load_models()` 只负责模型、分词器和 OCR runtime；`init_connections()` 负责向量库连接、collection 检查和搜索 pipeline 运行绑定。Docker Celery worker 在子进程内按顺序执行 `load_models()` 和 `init_connections()`，避免 fork 前持有模型 runtime、Redis/Qdrant/MinIO fd 或第三方后台线程。Native Celery worker 在 solo 进程内按需执行同样的初始化流程。API 进程继续调用 `Application.start()`，保持一个兼容入口。
+
+#### 2.7.2 任务状态与列表
+
+任务创建时：
+
+1. API 检查队列积压和速率限制。
+2. 写入 `rag:index:job:{queue}:{job_id}`，保存 `app_id`、`file_id`、`filename`、`s3_url`、`created_at`。
+3. 写入 app ZSet 和全局 ZSet。
+4. 通过 Celery `send_task()` 入队。
+
+任务状态查询通过 Celery `AsyncResult` 获取状态和结果，再合并 `IndexJobRepository` 里的展示元数据，返回给 `_index_job_record()`。状态映射：
+
+| Celery 状态 | API 状态 |
+|---|---|
+| `PENDING` / `RECEIVED` / `RETRY` | `queued` |
+| `STARTED` | `started` |
+| `SUCCESS` | `finished` |
+| `FAILURE` / `REVOKED` | `failed` |
+
+任务列表分页只读取 `IndexJobRepository` 的 ZSet，不扫描 Celery 内部结构。任务详情读取 Celery result backend。成功结果返回 `{"app_id", "file_id", "chunk_count"}`；失败错误读取 Celery traceback。
+
+#### 2.7.3 重试与错误处理
+
+任务执行异常时按 `INDEX_JOB_RETRY_MAX` 判断是否交给 Celery retry。业务不可恢复错误直接失败；临时基础设施异常可以重试。重试间隔使用 Celery 当前默认策略。
+
+| 错误 | 处理 |
+|---|---|
+| app database 未初始化 | 业务错误，直接失败 |
+| 文件格式不支持 | 业务错误，直接失败 |
+| Redis broker/backend 不可用 | Celery/redis client 负责重连；API 入队失败返回 503 |
+| Qdrant/MinIO 临时不可用 | 任务重试，超过重试次数后失败 |
+| 模型/OCR 运行异常 | 任务失败或按配置重试 |
+
+#### 2.7.4 限流与保留
+
+入队限流仍在 API 进程执行：
+
+- `INDEX_RATE_LIMIT_PER_MINUTE` 控制单位时间入队数量。
+- `INDEX_MAX_PENDING_JOBS` 使用 Redis broker 中当前等待队列长度控制积压。
+- `INDEX_JOB_RESULT_TTL_SECONDS` 和 `INDEX_JOB_FAILURE_TTL_SECONDS` 控制任务状态和列表索引保留时间。
+
+任务列表 ZSet 的保留时间不参与 pending 判断，避免历史成功/失败任务影响新任务入队。
+
+#### 2.7.5 进程生命周期
+
+Docker Celery 主进程负责 fork 和监督 worker 子进程。主进程通过 `worker_init` 创建基础 `Application` 对象；子进程通过 `worker_process_init` 加载模型、初始化运行连接，并在后续任务中复用。Native solo worker 不 fork 子进程，任务在 worker 进程内直接执行。worker 退出、信号处理、崩溃重启、任务确认由 Celery 管理；Docker 和进程管理器负责容器级重启。
+
+worker 与 API 进程各自常驻一份模型，这是当前部署约定。后续如果内存成为瓶颈，再评估独立模型服务或只让 worker 持有模型、API 进程不预加载模型的形态。
 
 ---
 
@@ -399,7 +506,7 @@ ocr = container.ocr()
 
 `container.py` 使用 DI 容器组装组件。配置里的组件名映射到容器 provider，provider 负责创建实现并注入依赖。`bootstrap.py` 只管理 Application 生命周期。FastAPI 启动后由后台线程初始化 Application；如果数据库暂时不可用，后端进程不退出，后台线程按退避间隔继续重试。搜索流程只依赖组件能力，不直接依赖实现类。
 
-`Application.start()` 是唯一的组件启动入口，按固定顺序启动：dense、sparse、store、search、rerank、ocr。其中 `rerank` 只有在 profile 启用时才启动。`Application.stop()` 按反向顺序停止组件。
+`Application` 使用两阶段启动：`load_models()` 启动 dense、sparse、rerank、ocr；`init_connections()` 启动 store、search。`Application.start()` 是兼容入口，顺序等同于先加载模型再初始化运行连接。其中 `rerank` 只有在 profile 启用时才启动。`Application.stop()` 按反向顺序停止组件。
 
 Store 和 Search 不负责偷偷启动 dense 或 sparse，只校验依赖组件已经 ready。这样初始化和查询严格分离：模型只在启动阶段加载，查询阶段不会懒加载模型。启动某个组件失败时，`Application` 会记录对应的 `component_errors`，监控状态把组件标成 `error`。
 

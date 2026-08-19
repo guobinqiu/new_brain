@@ -186,7 +186,7 @@ async def require_aksk(request: Request) -> Principal:
     return authenticate_client_signature(application.config.auth, request, await request.body())
 
 
-@app.post("/api/admin/login")
+@app.post("/api/login")
 def login(req: LoginRequest):
     principal = authenticate_password(application.config.auth, req.username, req.password)
     return {
@@ -195,7 +195,7 @@ def login(req: LoginRequest):
     }
 
 
-@app.get("/api/admin/apps")
+@app.get("/api/apps")
 def list_apps(_: Principal = Depends(require_jwt)):
     registry = AppRegistry(application.config.auth.registry_file)
     return {
@@ -210,7 +210,7 @@ def list_apps(_: Principal = Depends(require_jwt)):
     }
 
 
-@app.post("/api/admin/apps", status_code=201)
+@app.post("/api/apps", status_code=201)
 def create_app(req: AppCreateRequest, _: Principal = Depends(require_jwt)):
     registry = AppRegistry(application.config.auth.registry_file)
     try:
@@ -226,7 +226,7 @@ def create_app(req: AppCreateRequest, _: Principal = Depends(require_jwt)):
     }
 
 
-@app.delete("/api/admin/apps/{app_id}")
+@app.delete("/api/apps/{app_id}")
 def delete_app(app_id: str, _: Principal = Depends(require_jwt)):
     registry = AppRegistry(application.config.auth.registry_file)
     try:
@@ -238,7 +238,7 @@ def delete_app(app_id: str, _: Principal = Depends(require_jwt)):
     return {"deleted": True}
 
 
-@app.post("/api/admin/apps/{app_id}/database")
+@app.post("/api/apps/{app_id}/database")
 def initialize_app_database(app_id: str, _: Principal = Depends(require_jwt)):
     _require_ready()
     try:
@@ -248,13 +248,13 @@ def initialize_app_database(app_id: str, _: Principal = Depends(require_jwt)):
     return {"app_id": app_id, "initialized": True}
 
 
-@app.get("/api/admin/apps/{app_id}/database")
+@app.get("/api/apps/{app_id}/database")
 def app_database_status(app_id: str, _: Principal = Depends(require_jwt)):
     _require_ready()
     return _app_database_status(app_id)
 
 
-@app.delete("/api/admin/apps/{app_id}/database")
+@app.delete("/api/apps/{app_id}/database")
 def delete_app_database(app_id: str, _: Principal = Depends(require_jwt)):
     _require_ready()
     status = _app_database_status(app_id)
@@ -266,7 +266,7 @@ def delete_app_database(app_id: str, _: Principal = Depends(require_jwt)):
     return {"app_id": app_id, "deleted": deleted}
 
 
-@app.get("/api/admin/config")
+@app.get("/api/config")
 def get_config(_: Principal = Depends(require_jwt)):
     cfg = dict(SEARCH_CONFIG)
     cfg["config_name"] = application.config_name
@@ -278,7 +278,7 @@ def get_config(_: Principal = Depends(require_jwt)):
     cfg["available_components"] = application.config.available_components
     return cfg
 
-@app.get("/api/admin/monitor")
+@app.get("/api/monitor")
 def monitor(_: Principal = Depends(require_jwt)):
     return {
         "ready": application.ready,
@@ -289,7 +289,7 @@ def monitor(_: Principal = Depends(require_jwt)):
     }
 
 
-@app.get("/api/admin/traces")
+@app.get("/api/traces")
 def traces(limit: int = 50, app_id: str | None = None, principal: Principal = Depends(require_jwt)):
     try:
         return _recent_search_traces(limit=limit, app_id=_app_filter(principal, app_id))
@@ -297,7 +297,7 @@ def traces(limit: int = 50, app_id: str | None = None, principal: Principal = De
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@app.get("/api/admin/logs")
+@app.get("/api/logs")
 async def logs(request: Request, _: Principal = Depends(require_jwt)):
     async def stream():
         initial_events, last_seq = _initial_log_events()
@@ -324,7 +324,7 @@ def index_chunks(
     return {"file_id": file_id}
 
 
-@app.post("/api/admin/upload")
+@app.post("/api/upload")
 async def upload_file(
     file: UploadFile = File(...),
     app_id: str = Form(...),
@@ -353,12 +353,12 @@ async def upload_file(
         raise HTTPException(500, str(e))
 
 
-@app.post("/api/index")
+@app.post("/api/open/index")
 def client_index_object(req: ObjectIndexRequest, principal: Principal = Depends(require_aksk)):
     return _index_object(req, principal)
 
 
-@app.post("/api/admin/index")
+@app.post("/api/index")
 def index_object(req: ObjectIndexRequest, principal: Principal = Depends(require_jwt)):
     return _index_object(req, principal)
 
@@ -394,12 +394,12 @@ def _index_object(req: ObjectIndexRequest, principal: Principal):
         raise HTTPException(500, str(e))
 
 
-@app.post("/api/index/jobs", status_code=202)
+@app.post("/api/open/index/jobs", status_code=202)
 def client_create_index_job(req: ObjectIndexRequest, principal: Principal = Depends(require_aksk)):
     return _create_index_job(req, principal)
 
 
-@app.post("/api/admin/index/jobs", status_code=202)
+@app.post("/api/index/jobs", status_code=202)
 def create_index_job(req: AdminIndexJobRequest, principal: Principal = Depends(require_jwt)):
     return _create_index_job(req, principal)
 
@@ -439,7 +439,7 @@ def _create_index_job(req: ObjectIndexRequest, principal: Principal):
         raise HTTPException(500, str(e))
 
 
-@app.get("/api/admin/index/jobs")
+@app.get("/api/index/jobs")
 def index_jobs(limit: int = 50, cursor: str | None = None, app_id: str | None = None, principal: Principal = Depends(require_jwt)):
     selected_app_id = _app_filter(principal, app_id)
     try:
@@ -455,17 +455,17 @@ def index_jobs(limit: int = 50, cursor: str | None = None, app_id: str | None = 
     }
 
 
-@app.post("/api/index/jobs/status")
+@app.post("/api/open/index/jobs/status")
 def client_index_jobs_status(req: IndexJobsStatusRequest, principal: Principal = Depends(require_aksk)):
     return _index_jobs_status(req, principal)
 
 
-@app.post("/api/admin/index/jobs/status")
+@app.post("/api/index/jobs/status")
 def admin_index_jobs_status(req: IndexJobsStatusRequest, principal: Principal = Depends(require_jwt)):
     return _index_jobs_status(req, principal)
 
 
-@app.get("/api/admin/index/jobs/{job_id}")
+@app.get("/api/index/jobs/{job_id}")
 def index_job_status(job_id: str, principal: Principal = Depends(require_jwt)):
     return _index_job_status(job_id, principal)
 
@@ -489,7 +489,7 @@ def _index_job_status(job_id: str, principal: Principal):
     return _index_job_record(job)
 
 
-@app.post("/api/admin/presign")
+@app.post("/api/presign")
 def presign_object(req: PresignRequest, _: Principal = Depends(require_jwt)):
     bucket, object_name = _parse_s3_url(req.s3_url)
     client = _minio_client()
@@ -505,12 +505,12 @@ def presign_object(req: PresignRequest, _: Principal = Depends(require_jwt)):
     return {"presigned_url": url}
 
 
-@app.post("/api/search")
+@app.post("/api/open/search")
 def client_search(req: SearchRequest, principal: Principal = Depends(require_aksk)):
     return _search(req, principal)
 
 
-@app.post("/api/admin/search")
+@app.post("/api/search")
 def search(req: SearchRequest, principal: Principal = Depends(require_jwt)):
     return _search(req, principal)
 
@@ -715,7 +715,7 @@ def _start_application_until_ready(stop_event: threading.Event):
             stop_event.wait(retry_seconds)
             retry_seconds = min(retry_seconds * 2, STARTUP_RETRY_MAX_INTERVAL_SECONDS)
 
-@app.get("/api/admin/files")
+@app.get("/api/files")
 def files(limit: int = 50, cursor: str | None = None, app_id: str | None = None, principal: Principal = Depends(require_jwt)):
     _require_ready()
     try:
@@ -725,7 +725,7 @@ def files(limit: int = 50, cursor: str | None = None, app_id: str | None = None,
     return page
 
 
-@app.post("/api/admin/chunks")
+@app.post("/api/chunks")
 def chunks(req: ChunksQueryRequest, principal: Principal = Depends(require_jwt)):
     _require_ready()
     try:
@@ -740,12 +740,12 @@ def chunks(req: ChunksQueryRequest, principal: Principal = Depends(require_jwt))
     }
 
 
-@app.delete("/api/files/{file_id}")
+@app.delete("/api/open/files/{file_id}")
 def client_delete_file(file_id: str, principal: Principal = Depends(require_aksk)):
     return _delete_index_file(file_id, principal)
 
 
-@app.delete("/api/admin/files/{file_id}")
+@app.delete("/api/files/{file_id}")
 def delete_file(file_id: str, app_id: str | None = None, principal: Principal = Depends(require_jwt)):
     effective_principal = _database_principal(principal, app_id)
     result = _delete_index_file(file_id, effective_principal)

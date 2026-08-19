@@ -20,7 +20,7 @@
       </el-upload>
       <div class="upload-options">
         <div class="upload-actions">
-          <el-button type="primary" :disabled="!databaseAppId || selectedFiles.length === 0 || uploading" :loading="uploading" @click="uploadSelectedFiles">{{ uploading ? t('upload.uploading') : t('upload.submit') }}</el-button>
+          <el-button type="primary" :disabled="!appId || selectedFiles.length === 0 || uploading" :loading="uploading" @click="uploadSelectedFiles">{{ uploading ? t('upload.uploading') : t('upload.submit') }}</el-button>
         </div>
       </div>
     </div>
@@ -72,14 +72,14 @@ import { ref, onMounted } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import axios from '../utils/api'
-import { useDatabaseStore } from '../stores/database'
+import { useActiveAppStore } from '../stores/activeApp'
 import { showToast } from '../utils/toast'
 import { shortTime } from '../utils/format'
 
 const API = '/api'
 const { t } = useI18n()
-const databaseStore = useDatabaseStore()
-const { databaseAppId } = storeToRefs(databaseStore)
+const activeAppStore = useActiveAppStore()
+const { appId } = storeToRefs(activeAppStore)
 
 const selectedFiles = ref([])
 const uploading = ref(false)
@@ -104,7 +104,7 @@ async function onDrop(e) {
 }
 
 async function uploadSelectedFiles() {
-  if (!databaseStore.databaseAppId) {
+  if (!activeAppStore.appId) {
     showToast('error', t('upload.selectApp'))
     return
   }
@@ -127,12 +127,12 @@ async function uploadFiles(files) {
   for (const file of files) {
     const form = new FormData()
     form.append('file', file)
-    form.append('app_id', databaseStore.databaseAppId)
+    form.append('app_id', activeAppStore.appId)
     try {
-      const uploadRes = await axios.post(`${API}/admin/upload`, form)
-      const presignRes = await axios.post(`${API}/admin/presign`, { s3_url: uploadRes.data.s3_url })
-      await axios.post(`${API}/admin/index/jobs`, {
-        app_id: databaseStore.databaseAppId,
+      const uploadRes = await axios.post(`${API}/upload`, form)
+      const presignRes = await axios.post(`${API}/presign`, { s3_url: uploadRes.data.s3_url })
+      await axios.post(`${API}/index/jobs`, {
+        app_id: activeAppStore.appId,
         file_id: uploadRes.data.file_id,
         presigned_url: presignRes.data.presigned_url,
         s3_url: uploadRes.data.s3_url,
@@ -162,8 +162,8 @@ async function fetchNextFiles() {
   try {
     const params = { limit: 50 }
     if (filesCursor.value) params.cursor = filesCursor.value
-    if (databaseStore.databaseAppId) params.app_id = databaseStore.databaseAppId
-    const res = await axios.get(`${API}/admin/files`, { params })
+    if (activeAppStore.appId) params.app_id = activeAppStore.appId
+    const res = await axios.get(`${API}/files`, { params })
     files.value = files.value.concat(res.data.files || [])
     filesCursor.value = res.data.next_cursor || null
     filesHasMore.value = Boolean(res.data.has_more)
@@ -177,8 +177,8 @@ async function deleteFile(file) {
   deletingFileId.value = file.id
   try {
     const params = {}
-    if (databaseStore.databaseAppId) params.app_id = databaseStore.databaseAppId
-    await axios.delete(`${API}/admin/files/${encodeURIComponent(file.id)}`, { params })
+    if (activeAppStore.appId) params.app_id = activeAppStore.appId
+    await axios.delete(`${API}/files/${encodeURIComponent(file.id)}`, { params })
     showToast('success', t('upload.deletedFile', { name: file.filename }))
     await fetchFiles()
   } catch (err) {

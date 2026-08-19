@@ -31,14 +31,14 @@ def test_app_registry_creates_persistent_credentials_and_authenticates(monkeypat
     body = json.dumps({"query": "hello", "mode": "sparse"}, separators=(",", ":")).encode("utf-8")
     timestamp = str(int(time.time()))
     body_sha256 = hashlib.sha256(body).hexdigest()
-    string_to_sign = "\n".join(["POST", "/api/search", timestamp, body_sha256, "tenant_a"])
+    string_to_sign = "\n".join(["POST", "/api/open/search", timestamp, body_sha256, "tenant_a"])
     signature = hmac.new(credential.secret_key.encode("utf-8"), string_to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
 
     class Request:
         method = "POST"
 
         class url:
-            path = "/api/search"
+            path = "/api/open/search"
 
         headers = {
             "x-app-id": "tenant_a",
@@ -82,7 +82,7 @@ def test_create_app_api_generates_credentials(monkeypatch, tmp_path):
 
     with TestClient(main.app) as client:
         response = client.post(
-            "/api/admin/apps",
+            "/api/apps",
             json={"app_id": "tenant_a"},
             headers={"Authorization": f"Bearer {token}"},
         )
@@ -93,7 +93,7 @@ def test_create_app_api_generates_credentials(monkeypatch, tmp_path):
     assert body["access_key"]
     assert body["secret_key"]
 
-    list_response = client.get("/api/admin/apps", headers={"Authorization": f"Bearer {token}"})
+    list_response = client.get("/api/apps", headers={"Authorization": f"Bearer {token}"})
 
     assert list_response.status_code == 200
     apps = list_response.json()["apps"]
@@ -130,7 +130,7 @@ def test_delete_app_api_removes_credentials(monkeypatch, tmp_path):
     token = issue_token(auth_config, Principal(type="admin", app_id="admin"))
 
     with TestClient(main.app) as client:
-        response = client.delete("/api/admin/apps/tenant_a", headers={"Authorization": f"Bearer {token}"})
+        response = client.delete("/api/apps/tenant_a", headers={"Authorization": f"Bearer {token}"})
 
     assert response.status_code == 200
     assert response.json() == {"deleted": True}
@@ -178,8 +178,8 @@ def test_app_database_status_and_empty_delete(monkeypatch, tmp_path):
     token = issue_token(auth_config, Principal(type="admin", app_id="admin"))
 
     with TestClient(main.app) as client:
-        status = client.get("/api/admin/apps/tenant_a/database", headers={"Authorization": f"Bearer {token}"})
-        deleted = client.delete("/api/admin/apps/tenant_a/database", headers={"Authorization": f"Bearer {token}"})
+        status = client.get("/api/apps/tenant_a/database", headers={"Authorization": f"Bearer {token}"})
+        deleted = client.delete("/api/apps/tenant_a/database", headers={"Authorization": f"Bearer {token}"})
 
     assert status.status_code == 200
     assert status.json() == {"app_id": "tenant_a", "exists": True, "chunk_count": 0, "empty": True}
@@ -223,7 +223,7 @@ def test_app_database_delete_rejects_non_empty_database(monkeypatch, tmp_path):
     token = issue_token(auth_config, Principal(type="admin", app_id="admin"))
 
     with TestClient(main.app) as client:
-        response = client.delete("/api/admin/apps/tenant_a/database", headers={"Authorization": f"Bearer {token}"})
+        response = client.delete("/api/apps/tenant_a/database", headers={"Authorization": f"Bearer {token}"})
 
     assert response.status_code == 409
     assert response.json()["detail"] == "app database is not empty"

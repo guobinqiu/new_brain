@@ -52,7 +52,7 @@ function componentModelText(item) {
 
 async function fetchMonitor() {
   try {
-    const res = await axios.get(`${API}/admin/monitor`)
+    const res = await axios.get(`${API}/monitor`)
     monitorState.value = res.data
   } catch (err) { console.error(err) }
 }

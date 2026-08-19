@@ -1,19 +1,19 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import axios from '../utils/api'
-import { useDatabaseStore } from './database'
+import { useActiveAppStore } from './activeApp'
 
 export const useAppsStore = defineStore('apps', () => {
   const apps = ref([])
 
   async function fetchApps() {
     try {
-      const res = await axios.get('/api/admin/apps')
+      const res = await axios.get('/api/apps')
       apps.value = res.data.apps || []
-      const databaseStore = useDatabaseStore()
-      if (databaseStore.databaseAppId && !apps.value.some(app => app.app_id === databaseStore.databaseAppId)) {
-        databaseStore.databaseAppId = ''
-        databaseStore.databaseStatus = null
+      const activeAppStore = useActiveAppStore()
+      if (activeAppStore.appId && !apps.value.some(app => app.app_id === activeAppStore.appId)) {
+        activeAppStore.appId = ''
+        activeAppStore.databaseStatus = null
       }
     } catch (err) { console.error(err) }
   }

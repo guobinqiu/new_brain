@@ -161,7 +161,7 @@ def test_admin_index_job_requires_file_id():
         )
 
 
-def test_index_jobs_status_returns_rq_jobs(monkeypatch):
+def test_index_jobs_status_returns_index_jobs(monkeypatch):
     import main
     from auth import Principal
 
@@ -231,7 +231,7 @@ def test_index_jobs_status_matches_multiple_job_ids(monkeypatch):
     assert all(job["status"] == "finished" for job in result["jobs"])
 
 
-def test_index_jobs_status_normalizes_rq_status_enum(monkeypatch):
+def test_index_jobs_status_normalizes_job_status_enum(monkeypatch):
     import main
     from auth import Principal
 
@@ -402,41 +402,39 @@ def test_index_queue_rejects_when_pending_jobs_exceed_limit(monkeypatch):
     from indexing.queue import IndexQueueRejected, _enforce_queue_limits
 
     class FakeRedis:
+        def llen(self, key):
+            return 2
+
         def incr(self, key):
             return 1
 
         def expire(self, key, seconds):
             pass
 
-    class FakeQueue:
-        name = "index"
-        count = 2
-
     monkeypatch.setenv("INDEX_MAX_PENDING_JOBS", "2")
 
     with pytest.raises(IndexQueueRejected, match="pending jobs"):
-        _enforce_queue_limits(FakeRedis(), FakeQueue())
+        _enforce_queue_limits(FakeRedis(), "index")
 
 
 def test_index_queue_rejects_when_rate_limit_exceeds(monkeypatch):
     from indexing.queue import IndexQueueRejected, _enforce_queue_limits
 
     class FakeRedis:
+        def llen(self, key):
+            return 0
+
         def incr(self, key):
             return 31
 
         def expire(self, key, seconds):
             pass
 
-    class FakeQueue:
-        name = "index"
-        count = 0
-
     monkeypatch.setenv("INDEX_MAX_PENDING_JOBS", "200")
     monkeypatch.setenv("INDEX_RATE_LIMIT_PER_MINUTE", "30")
 
     with pytest.raises(IndexQueueRejected, match="rate limit"):
-        _enforce_queue_limits(FakeRedis(), FakeQueue())
+        _enforce_queue_limits(FakeRedis(), "index")
 
 
 def test_generated_file_id_is_uuid_hex_without_prefix_or_dash():
@@ -479,7 +477,7 @@ def test_presign_route_is_admin_api_endpoint():
 
     paths = {route.path for route in main.app.routes}
 
-    assert "/api/admin/presign" in paths
+    assert "/api/presign" in paths
 
 
 def test_sync_and_async_index_routes_are_separate():
@@ -487,12 +485,12 @@ def test_sync_and_async_index_routes_are_separate():
 
     routes = [(route.path, route.methods) for route in main.app.routes if hasattr(route, "methods")]
 
+    assert any(path == "/api/open/index" and "POST" in methods for path, methods in routes)
+    assert any(path == "/api/open/index/jobs" and "POST" in methods for path, methods in routes)
+    assert any(path == "/api/open/index/jobs/status" and "POST" in methods for path, methods in routes)
     assert any(path == "/api/index" and "POST" in methods for path, methods in routes)
     assert any(path == "/api/index/jobs" and "POST" in methods for path, methods in routes)
-    assert any(path == "/api/index/jobs/status" and "POST" in methods for path, methods in routes)
-    assert any(path == "/api/admin/index" and "POST" in methods for path, methods in routes)
-    assert any(path == "/api/admin/index/jobs" and "POST" in methods for path, methods in routes)
-    assert any(path == "/api/admin/index/jobs/{job_id}" and "GET" in methods for path, methods in routes)
+    assert any(path == "/api/index/jobs/{job_id}" and "GET" in methods for path, methods in routes)
 
 
 def test_upload_file_to_storage_puts_object_in_bucket(monkeypatch):

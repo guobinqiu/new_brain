@@ -28,7 +28,7 @@ def test_lifespan_keeps_process_healthy_when_application_start_fails(monkeypatch
 
     with TestClient(main.app) as client:
         health_resp = client.get("/api/health")
-        search_resp = client.post("/api/admin/search", json={"query": "test", "app_id": "imsdom"}, headers={"Authorization": f"Bearer {token}"})
+        search_resp = client.post("/api/search", json={"query": "test", "app_id": "imsdom"}, headers={"Authorization": f"Bearer {token}"})
 
     assert health_resp.status_code == 200
     assert health_resp.json() == {"status": "ok"}

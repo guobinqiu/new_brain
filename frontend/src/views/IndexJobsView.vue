@@ -1,6 +1,6 @@
 <template>
   <main class="monitor-view">
-    <div v-if="!databaseAppId" class="trace-empty">{{ t('monitor.noAppSelected') }}</div>
+    <div v-if="!appId" class="trace-empty">{{ t('monitor.noAppSelected') }}</div>
     <template v-else>
     <div class="monitor-section">
       <div class="monitor-block trace-block">
@@ -56,13 +56,13 @@ import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import axios from '../utils/api'
 import { shortTime, jobStatusClass } from '../utils/format'
-import { useDatabaseStore } from '../stores/database'
+import { useActiveAppStore } from '../stores/activeApp'
 
 const API = '/api'
 const { t } = useI18n()
 
-const databaseStore = useDatabaseStore()
-const { databaseAppId } = storeToRefs(databaseStore)
+const activeAppStore = useActiveAppStore()
+const { appId } = storeToRefs(activeAppStore)
 
 const indexJobs = ref([])
 const indexJobsCursor = ref(null)
@@ -95,9 +95,9 @@ async function fetchNextIndexJobs() {
   indexJobsLoading.value = true
   try {
     const params = { limit: 50 }
-    if (databaseAppId.value) params.app_id = databaseAppId.value
+    if (appId.value) params.app_id = appId.value
     if (indexJobsCursor.value) params.cursor = indexJobsCursor.value
-    const res = await axios.get(`${API}/admin/index/jobs`, { params })
+    const res = await axios.get(`${API}/index/jobs`, { params })
     indexJobs.value = indexJobs.value.concat(res.data.jobs || [])
     indexJobsCursor.value = res.data.next_cursor || null
     indexJobsHasMore.value = Boolean(res.data.has_more)

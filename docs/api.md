@@ -46,7 +46,7 @@ Authorization: Bearer <access_token>
 ### 管理台登录
 
 ```http
-POST /api/admin/login
+POST /api/login
 Content-Type: application/json
 ```
 
@@ -75,7 +75,7 @@ Content-Type: application/json
 ### 创建应用
 
 ```http
-POST /api/admin/apps
+POST /api/apps
 Content-Type: application/json
 ```
 
@@ -102,7 +102,7 @@ Content-Type: application/json
 ### 查询应用列表
 
 ```http
-GET /api/admin/apps
+GET /api/apps
 ```
 
 响应：
@@ -122,7 +122,7 @@ GET /api/admin/apps
 ### 删除应用凭证
 
 ```http
-DELETE /api/admin/apps/{app_id}
+DELETE /api/apps/{app_id}
 ```
 
 只删除该应用的 AK/SK，不删除向量库数据。
@@ -138,7 +138,7 @@ DELETE /api/admin/apps/{app_id}
 ### 初始化应用数据库
 
 ```http
-POST /api/admin/apps/{app_id}/database
+POST /api/apps/{app_id}/database
 ```
 
 初始化该应用对应的 chunks collection。重复调用是幂等操作。
@@ -155,7 +155,7 @@ POST /api/admin/apps/{app_id}/database
 ### 查询应用数据库状态
 
 ```http
-GET /api/admin/apps/{app_id}/database
+GET /api/apps/{app_id}/database
 ```
 
 响应：
@@ -172,7 +172,7 @@ GET /api/admin/apps/{app_id}/database
 ### 删除应用数据库
 
 ```http
-DELETE /api/admin/apps/{app_id}/database
+DELETE /api/apps/{app_id}/database
 ```
 
 只允许删除空数据库。数据库内已有 chunk 时返回 `app database is not empty`。
@@ -194,7 +194,7 @@ DELETE /api/admin/apps/{app_id}/database
 ### 同步索引对象存储文件
 
 ```http
-POST /api/index
+POST /api/open/index
 Content-Type: application/json
 ```
 
@@ -231,11 +231,11 @@ Content-Type: application/json
 ### 创建异步索引任务
 
 ```http
-POST /api/index/jobs
+POST /api/open/index/jobs
 Content-Type: application/json
 ```
 
-请求字段与 `POST /api/index` 相同。管理台上传后的 `/api/admin/index/jobs` 必须传 `file_id`，也就是 `/api/admin/upload` 返回的文件 ID。
+请求字段与 `POST /api/open/index` 相同。管理台上传后的 `/api/index/jobs` 必须传 `file_id`，也就是 `/api/upload` 返回的文件 ID。
 
 响应：
 
@@ -250,7 +250,7 @@ Content-Type: application/json
 ### 查询异步索引任务
 
 ```http
-POST /api/index/jobs/status
+POST /api/open/index/jobs/status
 Content-Type: application/json
 ```
 
@@ -295,7 +295,7 @@ Content-Type: application/json
 ## 搜索
 
 ```http
-POST /api/search
+POST /api/open/search
 Content-Type: application/json
 ```
 
@@ -347,7 +347,7 @@ Content-Type: application/json
 ### 上传文件到对象存储
 
 ```http
-POST /api/admin/upload
+POST /api/upload
 Content-Type: multipart/form-data
 ```
 
@@ -369,7 +369,7 @@ Content-Type: multipart/form-data
 ### 生成短期下载地址
 
 ```http
-POST /api/admin/presign
+POST /api/presign
 Content-Type: application/json
 ```
 
@@ -391,7 +391,7 @@ Content-Type: application/json
 ### 运行监控
 
 ```http
-GET /api/admin/monitor
+GET /api/monitor
 ```
 
 响应字段：
@@ -404,12 +404,12 @@ GET /api/admin/monitor
 | `capabilities` | 服务能力，包括搜索模式、是否支持配置写入和重启 |
 | `index_contract` | 索引与存储诊断信息，包括 collection、dense 和 sparse 配置等 |
 
-`/api/admin/monitor` 是轻量状态接口，不读取向量 chunk，不统计文件数或 chunk 数。
+`/api/monitor` 是轻量状态接口，不读取向量 chunk，不统计文件数或 chunk 数。
 
 ### 搜索 Trace
 
 ```http
-GET /api/admin/traces?limit=200
+GET /api/traces?limit=200
 ```
 
 返回最近搜索请求的链路耗时。后端只保留最近 200 条内存 trace，接口不用于长期历史查询。
@@ -417,7 +417,7 @@ GET /api/admin/traces?limit=200
 ### 运行日志
 
 ```http
-GET /api/admin/logs
+GET /api/logs
 ```
 
 返回 `text/event-stream`。连接建立后先输出最近日志 ring buffer，再持续输出实时运行日志。
@@ -425,7 +425,7 @@ GET /api/admin/logs
 ### 上传文件列表
 
 ```http
-GET /api/admin/files?limit=50&cursor=...&app_id=<app_id>
+GET /api/files?limit=50&cursor=...&app_id=<app_id>
 ```
 
 从 MinIO/S3 按当前 app 前缀分页列出原始上传文件。返回的 `id` 是 `file_id`，MinIO key 固定为 `uploads/{app_id}/{file_id}/{filename}`。
@@ -451,7 +451,7 @@ GET /api/admin/files?limit=50&cursor=...&app_id=<app_id>
 ### 向量数据列表
 
 ```http
-POST /api/admin/chunks
+POST /api/chunks
 ```
 
 请求：
@@ -470,7 +470,7 @@ POST /api/admin/chunks
 ### 删除索引文件
 
 ```http
-DELETE /api/admin/files/{file_id}
+DELETE /api/files/{file_id}
 ```
 
 管理台删除文件会同时删除当前 app 向量库里的 chunks，以及 MinIO/S3 中 `uploads/{app_id}/{file_id}/` 前缀下的原始上传对象。
@@ -486,7 +486,7 @@ DELETE /api/admin/files/{file_id}
 上游系统删除索引文件：
 
 ```http
-DELETE /api/files/{file_id}
+DELETE /api/open/files/{file_id}
 ```
 
 上游接口只删除当前 app 向量库里的 chunks，不删除对象存储中的原始文件。

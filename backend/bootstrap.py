@@ -34,16 +34,24 @@ class Application:
         self.ocr = ocr or self.container.ocr()
         self.search_trace = None
         self.component_errors: dict[str, str] = {}
+        self.models_loaded = False
         self.ready = False
 
     def start(self):
+        self.load_models()
+        self.init_connections()
+
+    def load_models(self):
         self._start_component("dense", self.dense)
         self._start_component("sparse", self.sparse)
-        self._start_component("store", self.store)
-        self._start_component("search", self.search)
         if self.rerank is not None:
             self._start_component("rerank", self.rerank)
         self._start_component("ocr", self.ocr)
+        self.models_loaded = True
+
+    def init_connections(self):
+        self._start_component("store", self.store)
+        self._start_component("search", self.search)
         self.ready = True
 
     def _start_component(self, name: str, component):
@@ -62,4 +70,5 @@ class Application:
         self.store.stop()
         self.sparse.stop()
         self.dense.stop()
+        self.models_loaded = False
         self.ready = False

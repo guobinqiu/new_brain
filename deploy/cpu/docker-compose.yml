@@ -96,7 +96,7 @@ services:
         APT_SECURITY_MIRROR: ${APT_SECURITY_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/debian-security}
         UV_DEFAULT_INDEX_CN: ${UV_DEFAULT_INDEX_CN:-https://pypi.tuna.tsinghua.edu.cn/simple}
     container_name: rag-index-worker
-    command: ["/app/.venv/bin/rq", "worker", "--url", "redis://redis:6379/0", "--with-scheduler", "index"]
+    command: ["/app/.venv/bin/celery", "-A", "indexing.celery_app:celery_app", "worker", "--pool=prefork", "--concurrency=${INDEX_WORKER_CONCURRENCY:-1}", "--queues", "index", "--loglevel=INFO"]
     environment:
       TZ: ${TZ:-Asia/Shanghai}
       CONFIG_FILE: ${CONFIG_FILE:-docker-cpu.yaml}

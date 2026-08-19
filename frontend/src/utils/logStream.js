@@ -13,7 +13,7 @@ export async function startLogStream() {
   logStreamController = new AbortController()
   try {
     const token = localStorage.getItem('rag_token') || ''
-    const response = await fetch(`${API}/admin/logs`, {
+    const response = await fetch(`${API}/logs`, {
       headers: { Authorization: `Bearer ${token}` },
       signal: logStreamController.signal,
     })

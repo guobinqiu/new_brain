@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 
 import device
-from progress import disable_model_progress_bars
 
 logger = logging.getLogger("rag.app")
 
@@ -39,7 +38,6 @@ class BGEM3LexicalEncoder:
         return [_normalize_lexical_weights(weights) for weights in output["lexical_weights"]]
 
     def _load_model(self):
-        disable_model_progress_bars()
         from FlagEmbedding import BGEM3FlagModel
 
         return BGEM3FlagModel(self.model_name, use_fp16=device.auto_device() == "cuda")

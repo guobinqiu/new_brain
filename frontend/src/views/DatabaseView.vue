@@ -1,10 +1,10 @@
 <template>
   <main class="database-view">
-    <div v-if="databaseAppId && databaseStatus && !databaseStatus.exists" class="database-empty-state">
+    <div v-if="appId && databaseStatus && !databaseStatus.exists" class="database-empty-state">
       <el-button type="primary" size="large" class="database-create-btn" @click="initializeDatabase">{{ t('database.initialize') }}</el-button>
     </div>
 
-    <div v-else-if="databaseAppId && databaseStatus?.exists" class="chunks-card">
+    <div v-else-if="appId && databaseStatus?.exists" class="chunks-card">
       <div class="docs-head">
         <div class="docs-title">
           <h2>{{ t('database.chunks') }}</h2>
@@ -15,7 +15,7 @@
       <div class="chunk-filter">
         <span>File IDs</span>
         <el-input v-model.trim="databaseFileIdsText" :placeholder="t('database.fileIdsPlaceholder')" @keyup.enter="fetchChunks" />
-        <el-button :disabled="!databaseAppId || chunksLoading" @click="fetchChunks">{{ t('database.query') }}</el-button>
+        <el-button :disabled="!appId || chunksLoading" @click="fetchChunks">{{ t('database.query') }}</el-button>
       </div>
       <div v-if="chunks.length === 0 && !chunksLoading" class="docs-empty">{{ t('database.empty') }}</div>
       <template v-else>
@@ -70,14 +70,14 @@ import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { ElMessageBox } from 'element-plus'
 import axios from '../utils/api'
-import { useDatabaseStore } from '../stores/database'
+import { useActiveAppStore } from '../stores/activeApp'
 import { showToast } from '../utils/toast'
 import { copyText, shortTime, parseFileIds } from '../utils/format'
 
 const API = '/api'
 const { t } = useI18n()
-const databaseStore = useDatabaseStore()
-const { databaseAppId, databaseStatus } = storeToRefs(databaseStore)
+const activeAppStore = useActiveAppStore()
+const { appId, databaseStatus } = storeToRefs(activeAppStore)
 
 const databaseFileIdsText = ref('')
 const databaseAppliedFileIdsText = ref('')
@@ -88,24 +88,24 @@ const chunksLoading = ref(false)
 const chunksTableRef = ref(null)
 
 async function fetchDatabaseStatus() {
-  if (!databaseStore.databaseAppId) {
-    databaseStore.databaseStatus = null
+  if (!activeAppStore.appId) {
+    activeAppStore.databaseStatus = null
     return
   }
   try {
-    const res = await axios.get(`${API}/admin/apps/${encodeURIComponent(databaseStore.databaseAppId)}/database`)
-    databaseStore.databaseStatus = res.data
+    const res = await axios.get(`${API}/apps/${encodeURIComponent(activeAppStore.appId)}/database`)
+    activeAppStore.databaseStatus = res.data
   } catch (err) {
-    databaseStore.databaseStatus = null
+    activeAppStore.databaseStatus = null
     showToast('error', err.response?.data?.detail || err.message)
   }
 }
 
 async function initializeDatabase() {
-  if (!databaseStore.databaseAppId) return
+  if (!activeAppStore.appId) return
   try {
-    await axios.post(`${API}/admin/apps/${encodeURIComponent(databaseStore.databaseAppId)}/database`)
-    showToast('success', t('database.initialized', { appId: databaseStore.databaseAppId }))
+    await axios.post(`${API}/apps/${encodeURIComponent(activeAppStore.appId)}/database`)
+    showToast('success', t('database.initialized', { appId: activeAppStore.appId }))
     await fetchDatabaseStatus()
     await fetchChunks()
   } catch (err) {
@@ -114,15 +114,15 @@ async function initializeDatabase() {
 }
 
 async function deleteDatabase() {
-  if (!databaseStore.databaseAppId || !databaseStore.databaseStatus?.exists || !databaseStore.databaseStatus?.empty) return
+  if (!activeAppStore.appId || !activeAppStore.databaseStatus?.exists || !activeAppStore.databaseStatus?.empty) return
   try {
-    await ElMessageBox.confirm(t('database.deleteConfirm', { appId: databaseStore.databaseAppId }), t('database.delete'), { type: 'warning' })
+    await ElMessageBox.confirm(t('database.deleteConfirm', { appId: activeAppStore.appId }), t('database.delete'), { type: 'warning' })
   } catch {
     return
   }
   try {
-    await axios.delete(`${API}/admin/apps/${encodeURIComponent(databaseStore.databaseAppId)}/database`)
-    showToast('success', t('database.deleted', { appId: databaseStore.databaseAppId }))
+    await axios.delete(`${API}/apps/${encodeURIComponent(activeAppStore.appId)}/database`)
+    showToast('success', t('database.deleted', { appId: activeAppStore.appId }))
     chunks.value = []
     chunksCursor.value = null
     chunksHasMore.value = false
@@ -133,7 +133,7 @@ async function deleteDatabase() {
 }
 
 async function fetchChunks() {
-  if (!databaseStore.databaseAppId) {
+  if (!activeAppStore.appId) {
     chunks.value = []
     chunksCursor.value = null
     chunksHasMore.value = false
@@ -147,16 +147,16 @@ async function fetchChunks() {
 }
 
 async function fetchNextChunks() {
-  if (!databaseStore.databaseAppId) return
+  if (!activeAppStore.appId) return
   if (chunksLoading.value) return
   chunksLoading.value = true
   try {
     const body = { limit: 50 }
     if (chunksCursor.value) body.cursor = chunksCursor.value
-    if (databaseStore.databaseAppId) body.app_id = databaseStore.databaseAppId
+    if (activeAppStore.appId) body.app_id = activeAppStore.appId
     const fileIds = parseFileIds(databaseAppliedFileIdsText.value)
     if (fileIds.length) body.file_ids = fileIds
-    const res = await axios.post(`${API}/admin/chunks`, body)
+    const res = await axios.post(`${API}/chunks`, body)
     chunks.value = chunks.value.concat(res.data.chunks || [])
     chunksCursor.value = res.data.next_cursor || null
     chunksHasMore.value = Boolean(res.data.has_more)
@@ -179,6 +179,6 @@ function onChunksScroll(event) {
 
 onMounted(async () => {
   await fetchDatabaseStatus()
-  if (databaseStore.databaseStatus?.exists) await fetchChunks()
+  if (activeAppStore.databaseStatus?.exists) await fetchChunks()
 })
 </script>

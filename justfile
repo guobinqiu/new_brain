@@ -2,7 +2,7 @@ deploy target="cpu" action="up":
 	@just _deploy_{{target}}_{{action}}
 
 worker:
-	@cd backend && OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES REDIS_URL=${REDIS_URL:-redis://localhost:16379/0} CONFIG_FILE=${CONFIG_FILE:-local.yaml} S3_ENDPOINT_URL=${S3_ENDPOINT_URL:-http://localhost:19000} .venv/bin/rq worker --url ${REDIS_URL:-redis://localhost:16379/0} index
+	@cd backend && REDIS_URL=${REDIS_URL:-redis://localhost:16379/0} CONFIG_FILE=${CONFIG_FILE:-local.yaml} S3_ENDPOINT_URL=${S3_ENDPOINT_URL:-http://localhost:19000} .venv/bin/celery -A indexing.celery_app:celery_app worker --pool=solo --concurrency=1 --queues index --loglevel=INFO
 
 _deploy_cpu_up:
 	@docker compose -f deploy/cpu/docker-compose.yml up -d

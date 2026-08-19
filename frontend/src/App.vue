@@ -68,9 +68,9 @@
         </aside>
 
         <section class="console-main">
-          <div v-if="databaseAppId" class="app-context">
+          <div v-if="appId" class="app-context">
             <span>{{ t('apps.current') }}</span>
-            <strong>{{ databaseAppId }}</strong>
+            <strong>{{ appId }}</strong>
           </div>
 
           <router-view :key="routerViewKey" />
@@ -90,7 +90,7 @@ import zhCn from 'element-plus/es/locale/lang/zh-cn'
 import en from 'element-plus/es/locale/lang/en'
 import { useAuthStore } from './stores/auth'
 import { useThemeStore } from './stores/theme'
-import { useDatabaseStore } from './stores/database'
+import { useActiveAppStore } from './stores/activeApp'
 import { useAppsStore } from './stores/apps'
 import { stopLogStream } from './utils/logStream'
 
@@ -104,8 +104,8 @@ const { authToken } = storeToRefs(authStore)
 const themeStore = useThemeStore()
 const { theme } = storeToRefs(themeStore)
 
-const databaseStore = useDatabaseStore()
-const { databaseAppId } = storeToRefs(databaseStore)
+const activeAppStore = useActiveAppStore()
+const { appId } = storeToRefs(activeAppStore)
 
 const appsStore = useAppsStore()
 const { apps } = storeToRefs(appsStore)
@@ -115,11 +115,11 @@ const epLocale = computed(() => (locale.value === 'zh' ? zhCn : en))
 
 const SUB_PAGES = ['/database', '/upload', '/search', '/index', '/trace']
 
-const routerViewKey = computed(() => (databaseAppId.value ? `${databaseAppId.value}${route.path}` : route.path))
+const routerViewKey = computed(() => (appId.value ? `${appId.value}${route.path}` : route.path))
 
 const activeMenu = computed(() => {
-  if (databaseAppId.value && SUB_PAGES.includes(route.path)) {
-    return `/apps/${databaseAppId.value}${route.path}`
+  if (appId.value && SUB_PAGES.includes(route.path)) {
+    return `/apps/${appId.value}${route.path}`
   }
   return route.path
 })
@@ -131,18 +131,18 @@ function onMenuSelect(index) {
   }
   const parts = index.split('/')          // ['', 'apps', appId, page]
   if (parts.length === 4 && parts[1] === 'apps') {
-    if (databaseStore.databaseAppId !== parts[2]) {
-      databaseStore.databaseAppId = parts[2]
-      databaseStore.databaseStatus = null
+    if (activeAppStore.appId !== parts[2]) {
+      activeAppStore.appId = parts[2]
+      activeAppStore.databaseStatus = null
     }
     router.push('/' + parts[3])
   }
 }
 
 function selectApp(appId) {
-  if (databaseStore.databaseAppId !== appId) {
-    databaseStore.databaseAppId = appId
-    databaseStore.databaseStatus = null
+  if (activeAppStore.appId !== appId) {
+    activeAppStore.appId = appId
+    activeAppStore.databaseStatus = null
   }
   router.push('/database')
 }
@@ -158,8 +158,8 @@ function setTheme(value) {
 
 function logout() {
   stopLogStream()
-  databaseStore.databaseAppId = ''
-  databaseStore.databaseStatus = null
+  activeAppStore.appId = ''
+  activeAppStore.databaseStatus = null
   authStore.clearAuth()
   router.push('/login')
 }

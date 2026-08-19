@@ -79,13 +79,13 @@
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import axios from '../utils/api'
-import { useDatabaseStore } from '../stores/database'
+import { useActiveAppStore } from '../stores/activeApp'
 import { parseFileIds, escapeHtml } from '../utils/format'
 import { showToast } from '../utils/toast'
 
 const API = '/api'
 const { t } = useI18n()
-const databaseStore = useDatabaseStore()
+const activeAppStore = useActiveAppStore()
 
 const query = ref('')
 const mode = ref('hybrid')
@@ -129,10 +129,10 @@ async function doSearch() {
       sparse_weight: searchConfig.value.sparse_weight,
       rrf_k: searchConfig.value.rrf_k,
     }
-    if (databaseStore.databaseAppId) body.app_id = databaseStore.databaseAppId
+    if (activeAppStore.appId) body.app_id = activeAppStore.appId
     if (fileIds.length) body.file_ids = fileIds
     if (rerank.value) body.fetch_k = fetchK.value
-    const res = await axios.post(`${API}/admin/search`, body)
+    const res = await axios.post(`${API}/search`, body)
     searchResults.value = res.data.results
     searchTime.value = res.data.elapsed_ms
     lastSearch.value = {
@@ -153,7 +153,7 @@ async function doSearch() {
 
 async function fetchConfig() {
   try {
-    const res = await axios.get(`${API}/admin/config`)
+    const res = await axios.get(`${API}/config`)
     searchConfig.value = res.data
     mode.value = res.data.default_mode ?? mode.value
     rerankAvailable.value = Boolean(res.data.rerank_available)

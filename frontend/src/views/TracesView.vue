@@ -1,6 +1,6 @@
 <template>
   <main class="monitor-view">
-    <div v-if="!databaseAppId" class="trace-empty">{{ t('monitor.noAppSelected') }}</div>
+    <div v-if="!appId" class="trace-empty">{{ t('monitor.noAppSelected') }}</div>
     <template v-else>
     <div class="monitor-section">
       <div class="monitor-block trace-block">
@@ -61,14 +61,14 @@ import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import axios from '../utils/api'
 import { ms, shortTime } from '../utils/format'
-import { useDatabaseStore } from '../stores/database'
+import { useActiveAppStore } from '../stores/activeApp'
 
 const API = '/api'
 const TRACE_LIMIT = 200
 const { t } = useI18n()
 
-const databaseStore = useDatabaseStore()
-const { databaseAppId } = storeToRefs(databaseStore)
+const activeAppStore = useActiveAppStore()
+const { appId } = storeToRefs(activeAppStore)
 
 const traces = ref([])
 const tracesLoading = ref(false)
@@ -91,8 +91,8 @@ async function fetchTraces() {
   tracesLoading.value = true
   try {
     const params = { limit: TRACE_LIMIT }
-    if (databaseAppId.value) params.app_id = databaseAppId.value
-    const res = await axios.get(`${API}/admin/traces`, { params })
+    if (appId.value) params.app_id = appId.value
+    const res = await axios.get(`${API}/traces`, { params })
     traces.value = res.data.traces || []
   } catch (err) { console.error(err) }
   finally { tracesLoading.value = false }
@@ -107,7 +107,7 @@ onUnmounted(() => {
   if (tracePollTimer) window.clearInterval(tracePollTimer)
 })
 
-watch(databaseAppId, () => {
+watch(appId, () => {
   fetchTraces()
 })
 </script>

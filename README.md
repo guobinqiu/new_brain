@@ -23,7 +23,7 @@ S3_ENDPOINT_URL=http://localhost:19000 REDIS_URL=redis://localhost:16379/0 CONFI
 just worker
 ```
 
-Native worker 使用 RQ Worker 常驻运行，前端上传文件后会自动消费异步索引任务。
+Native worker 使用 Celery `solo` pool 常驻运行，前端上传文件后会自动消费异步索引任务。
 
 4. 启动前端：
 
@@ -106,17 +106,17 @@ http://<服务器地址>:28000
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| `POST` | `/api/index` | 同步索引对象存储文件，完成后返回 `file_id` |
-| `POST` | `/api/index/jobs` | 创建异步索引任务，立即返回 `job_id` |
-| `POST` | `/api/index/jobs/status` | 批量查询异步索引任务状态 |
-| `POST` | `/api/search` | 按 `query` 和可选 `file_ids` 搜索知识库 |
-| `DELETE` | `/api/files/{file_id}` | 删除当前应用向量库中的索引文件 |
+| `POST` | `/api/open/index` | 同步索引对象存储文件，完成后返回 `file_id` |
+| `POST` | `/api/open/index/jobs` | 创建异步索引任务，立即返回 `job_id` |
+| `POST` | `/api/open/index/jobs/status` | 批量查询异步索引任务状态 |
+| `POST` | `/api/open/search` | 按 `query` 和可选 `file_ids` 搜索知识库 |
+| `DELETE` | `/api/open/files/{file_id}` | 删除当前应用向量库中的索引文件 |
 
-上游如果已经有自己的队列、限流和重试机制，可以调用同步索引；否则建议调用异步索引并轮询任务状态。索引接口接收 `presigned_url`、`s3_url`、可选 `filename` 和可选 `file_id`。上游传 `file_id` 时必须是 UUID；不传时由 RAG 生成。异步任务创建后只返回 `job_id`；任务完成后通过 `POST /api/index/jobs/status` 查看 `file_id`、状态和错误。搜索时不传 `file_ids` 表示全库搜索。
+上游如果已经有自己的队列、限流和重试机制，可以调用同步索引；否则建议调用异步索引并轮询任务状态。索引接口接收 `presigned_url`、`s3_url`、可选 `filename` 和可选 `file_id`。上游传 `file_id` 时必须是 UUID；不传时由 RAG 生成。异步任务创建后只返回 `job_id`；任务完成后通过 `POST /api/open/index/jobs/status` 查看 `file_id`、状态和错误。搜索时不传 `file_ids` 表示全库搜索。
 
 上游系统使用的 `app_id`、`access_key` 和 `secret_key` 由管理台创建。每个 `app_id` 对应独立 collection，业务接口根据 AK/SK 签名里的 `app_id` 自动选择当前应用的数据范围。索引前需要先在管理台为该 `app_id` 初始化数据库。
 
-异步索引任务状态保存在 Redis RQ 中。Docker 默认保留成功任务 7 天、失败任务 30 天，可通过 `INDEX_JOB_RESULT_TTL_SECONDS` 和 `INDEX_JOB_FAILURE_TTL_SECONDS` 覆盖。
+异步索引任务由 Celery 和 Redis 处理。Docker 默认保留成功任务 7 天、失败任务 30 天，可通过 `INDEX_JOB_RESULT_TTL_SECONDS` 和 `INDEX_JOB_FAILURE_TTL_SECONDS` 覆盖。
 
 业务接口每次请求都带 AK/SK 签名：
 
@@ -131,7 +131,7 @@ http://<服务器地址>:28000
 
 签名算法见 [API 文档](docs/api.md)。
 
-### POST /api/index
+### POST /api/open/index
 
 同步索引对象存储文件。接口返回时，文件已经完成下载、解析、OCR、embedding 并写入向量库。
 
@@ -163,7 +163,7 @@ http://<服务器地址>:28000
 }
 ```
 
-### POST /api/index/jobs
+### POST /api/open/index/jobs
 
 创建异步索引任务。接口只入队，真正的下载、解析、OCR、embedding 和向量库写入由后台 worker 执行。
 
@@ -195,7 +195,7 @@ http://<服务器地址>:28000
 }
 ```
 
-### POST /api/index/jobs/status
+### POST /api/open/index/jobs/status
 
 批量查询异步索引任务状态。
 
@@ -203,7 +203,7 @@ http://<服务器地址>:28000
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `job_ids` | string[] | 是 | `/api/index/jobs` 返回的任务 ID 列表 |
+| `job_ids` | string[] | 是 | `/api/open/index/jobs` 返回的任务 ID 列表 |
 
 `queued` / `started`：任务已接受或正在处理。
 
@@ -239,7 +239,7 @@ http://<服务器地址>:28000
 }
 ```
 
-### POST /api/search
+### POST /api/open/search
 
 按问题搜索知识库。`file_ids` 可省略，省略时搜索当前 `app_id` 对应 app 的整个 collection。
 

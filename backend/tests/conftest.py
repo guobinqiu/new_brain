@@ -89,7 +89,7 @@ def api_client(store_test_env):
     try:
         with TestClient(main.app) as client:
             resp = client.post(
-                "/api/admin/login",
+                "/api/login",
                 json={
                     "username": "admin",
                     "password": "admin123",
@@ -144,9 +144,9 @@ class AppApiClient:
 
 @pytest.fixture
 def app_api_client(api_client):
-    app_resp = api_client.post("/api/admin/apps", json={"app_id": "imsdom"})
+    app_resp = api_client.post("/api/apps", json={"app_id": "imsdom"})
     assert app_resp.status_code == 201, app_resp.text
-    db_resp = api_client.post("/api/admin/apps/imsdom/database")
+    db_resp = api_client.post("/api/apps/imsdom/database")
     assert db_resp.status_code == 200, db_resp.text
     credential = app_resp.json()
     return AppApiClient(api_client, "imsdom", credential["access_key"], credential["secret_key"])
@@ -262,7 +262,7 @@ def _drop_qdrant_collection(url: str, collection_name: str) -> None:
     try:
         from qdrant_client import QdrantClient
 
-        client = QdrantClient(url=url)
+        client = QdrantClient(url=url, check_compatibility=False)
         if client.collection_exists(collection_name):
             client.delete_collection(collection_name)
         close = getattr(client, "close", None)

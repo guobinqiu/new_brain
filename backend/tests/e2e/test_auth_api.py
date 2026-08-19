@@ -11,7 +11,7 @@ pytestmark = pytest.mark.e2e
 
 def test_login_returns_token(api_client):
     resp = api_client.post(
-        "/api/admin/login",
+        "/api/login",
         json={
             "username": "admin",
             "password": "admin123",
@@ -25,22 +25,22 @@ def test_login_returns_token(api_client):
 
 
 def test_business_api_accepts_client_signature(api_client):
-    credential = api_client.post("/api/admin/apps", json={"app_id": "signed_search"}).json()
-    db_resp = api_client.post("/api/admin/apps/signed_search/database")
+    credential = api_client.post("/api/apps", json={"app_id": "signed_search"}).json()
+    db_resp = api_client.post("/api/apps/signed_search/database")
     assert db_resp.status_code == 200, db_resp.text
     body = json.dumps({"query": "人工智能", "mode": "sparse"}, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
     timestamp = str(int(time.time()))
     signature = _signature(
         secret_key=credential["secret_key"],
         method="POST",
-        path="/api/search",
+        path="/api/open/search",
         timestamp=timestamp,
         body=body,
         app_id="signed_search",
     )
 
     resp = api_client.post(
-        "/api/search",
+        "/api/open/search",
         content=body,
         headers={
             "Authorization": "",
@@ -57,13 +57,13 @@ def test_business_api_accepts_client_signature(api_client):
 
 
 def test_config_requires_bearer_token(anonymous_api_client):
-    resp = anonymous_api_client.get("/api/admin/config")
+    resp = anonymous_api_client.get("/api/config")
 
     assert resp.status_code == 401
 
 
 def test_monitor_reports_sparse_as_one_runtime_component(api_client):
-    resp = api_client.get("/api/admin/monitor")
+    resp = api_client.get("/api/monitor")
 
     assert resp.status_code == 200, resp.text
     components = {item["name"]: item for item in resp.json()["components"]}

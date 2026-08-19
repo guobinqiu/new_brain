@@ -16,7 +16,7 @@ def _index_ready_file(api_client, test_txt_path, monkeypatch, filename="test_ai.
 
     monkeypatch.setattr(main, "index_presigned_object", index_object)
     resp = api_client.post(
-        "/api/index",
+        "/api/open/index",
         json={
             "presigned_url": "https://example.com/presigned",
             "s3_url": s3_url,
@@ -34,10 +34,10 @@ def _index_ready_file(api_client, test_txt_path, monkeypatch, filename="test_ai.
 
 class TestSearchAPI:
     def test_search_sparse_api(self, app_api_client, test_txt_path, monkeypatch):
-        """``POST /api/search`` with ``mode=sparse`` returns results with AGI content."""
+        """``POST /api/open/search`` with ``mode=sparse`` returns results with AGI content."""
         file_id = _index_ready_file(app_api_client, test_txt_path, monkeypatch)
 
-        resp = app_api_client.post("/api/search", json={"query": "agi", "mode": "sparse", "file_ids": [file_id]})
+        resp = app_api_client.post("/api/open/search", json={"query": "agi", "mode": "sparse", "file_ids": [file_id]})
         assert resp.status_code == 200, resp.text
         data = resp.json()
         assert data["mode"] == "sparse"
@@ -46,10 +46,10 @@ class TestSearchAPI:
         assert "AGI" in combined
 
     def test_search_dense_api(self, app_api_client, test_txt_path, monkeypatch):
-        """``POST /api/search`` with ``mode=dense`` returns dense results."""
+        """``POST /api/open/search`` with ``mode=dense`` returns dense results."""
         file_id = _index_ready_file(app_api_client, test_txt_path, monkeypatch)
 
-        resp = app_api_client.post("/api/search", json={"query": "人工智能", "mode": "dense", "top_k": 5, "file_ids": [file_id]})
+        resp = app_api_client.post("/api/open/search", json={"query": "人工智能", "mode": "dense", "top_k": 5, "file_ids": [file_id]})
         assert resp.status_code == 200, resp.text
         data = resp.json()
         assert data["mode"] == "dense"
@@ -58,10 +58,10 @@ class TestSearchAPI:
             assert result["metadata"]["file_id"] == file_id
 
     def test_search_hybrid_api(self, app_api_client, test_txt_path, monkeypatch):
-        """``POST /api/search`` with ``mode=hybrid`` returns hybrid results."""
+        """``POST /api/open/search`` with ``mode=hybrid`` returns hybrid results."""
         file_id = _index_ready_file(app_api_client, test_txt_path, monkeypatch)
 
-        resp = app_api_client.post("/api/search", json={"query": "人工智能", "mode": "hybrid", "top_k": 5, "file_ids": [file_id]})
+        resp = app_api_client.post("/api/open/search", json={"query": "人工智能", "mode": "hybrid", "top_k": 5, "file_ids": [file_id]})
         assert resp.status_code == 200, resp.text
         data = resp.json()
         assert data["mode"] == "hybrid"
@@ -70,7 +70,7 @@ class TestSearchAPI:
             assert result["metadata"]["file_id"] == file_id
 
     def test_search_without_file_ids_searches_all_files(self, app_api_client, test_txt_path, monkeypatch):
-        """``POST /api/search`` without file_ids searches the full index."""
+        """``POST /api/open/search`` without file_ids searches the full index."""
         import main
 
         file_id = _index_ready_file(app_api_client, test_txt_path, monkeypatch)
@@ -80,18 +80,18 @@ class TestSearchAPI:
                 file_id="other-file",
             )
 
-        resp = app_api_client.post("/api/search", json={"query": "人工智能", "mode": "sparse", "top_k": 10})
+        resp = app_api_client.post("/api/open/search", json={"query": "人工智能", "mode": "sparse", "top_k": 10})
 
         assert resp.status_code == 200, resp.text
         assert {result["metadata"]["file_id"] for result in resp.json()["results"]} == {file_id, "other-file"}
 
     def test_search_accepts_per_request_hybrid_weights(self, app_api_client, api_client, test_txt_path, monkeypatch):
-        """``POST /api/search`` accepts hybrid weights without changing global config."""
-        before = api_client.get("/api/admin/config").json()
+        """``POST /api/open/search`` accepts hybrid weights without changing global config."""
+        before = api_client.get("/api/config").json()
         file_id = _index_ready_file(app_api_client, test_txt_path, monkeypatch)
 
         resp = app_api_client.post(
-            "/api/search",
+            "/api/open/search",
             json={
                 "query": "人工智能",
                 "mode": "hybrid",
@@ -107,21 +107,21 @@ class TestSearchAPI:
         assert data["dense_weight"] == 0.4
         assert data["sparse_weight"] == 0.6
         assert data["rrf_k"] == 30
-        after = api_client.get("/api/admin/config").json()
+        after = api_client.get("/api/config").json()
         assert after["dense_weight"] == before["dense_weight"]
         assert after["sparse_weight"] == before["sparse_weight"]
         assert after["rrf_k"] == before["rrf_k"]
 
     def test_search_rejects_empty_file_ids(self, app_api_client):
-        resp = app_api_client.post("/api/search", json={"query": "人工智能", "mode": "dense", "file_ids": []})
+        resp = app_api_client.post("/api/open/search", json={"query": "人工智能", "mode": "dense", "file_ids": []})
 
         assert resp.status_code == 422
 
     def test_search_api_rerank_param(self, app_api_client, test_txt_path, monkeypatch):
-        """``POST /api/search`` with ``rerank=true`` accepts and applies reranking."""
+        """``POST /api/open/search`` with ``rerank=true`` accepts and applies reranking."""
         file_id = _index_ready_file(app_api_client, test_txt_path, monkeypatch)
 
-        resp = app_api_client.post("/api/search", json={"query": "人工智能", "mode": "hybrid", "top_k": 5, "rerank": True, "file_ids": [file_id]})
+        resp = app_api_client.post("/api/open/search", json={"query": "人工智能", "mode": "hybrid", "top_k": 5, "rerank": True, "file_ids": [file_id]})
         assert resp.status_code == 200, resp.text
         data = resp.json()
         assert len(data["results"]) <= 5
@@ -131,23 +131,23 @@ class TestSearchAPI:
             assert result["metadata"]["file_id"] == file_id
 
     def test_search_returns_elapsed_ms(self, app_api_client, api_client, test_txt_path, monkeypatch):
-        """``POST /api/search`` response includes an ``elapsed_ms`` field."""
+        """``POST /api/open/search`` response includes an ``elapsed_ms`` field."""
         file_id = _index_ready_file(app_api_client, test_txt_path, monkeypatch)
 
-        resp = app_api_client.post("/api/search", json={"query": "人工智能", "mode": "hybrid", "top_k": 5, "file_ids": [file_id]})
+        resp = app_api_client.post("/api/open/search", json={"query": "人工智能", "mode": "hybrid", "top_k": 5, "file_ids": [file_id]})
         assert resp.status_code == 200, resp.text
         data = resp.json()
         assert "elapsed_ms" in data
         assert isinstance(data["elapsed_ms"], (int, float))
         assert data["elapsed_ms"] >= 0
-        traces = api_client.get("/api/admin/traces", params={"app_id": "imsdom"}).json()
+        traces = api_client.get("/api/traces", params={"app_id": "imsdom"}).json()
         assert data["elapsed_ms"] == traces["traces"][0]["elapsed_ms"]
 
     def test_search_response_does_not_include_trace(self, app_api_client, test_txt_path, monkeypatch):
-        """``POST /api/search`` is a public API and does not expose diagnostics."""
+        """``POST /api/open/search`` is a public API and does not expose diagnostics."""
         file_id = _index_ready_file(app_api_client, test_txt_path, monkeypatch)
 
-        resp = app_api_client.post("/api/search", json={"query": "人工智能", "mode": "hybrid", "top_k": 5, "file_ids": [file_id]})
+        resp = app_api_client.post("/api/open/search", json={"query": "人工智能", "mode": "hybrid", "top_k": 5, "file_ids": [file_id]})
         assert resp.status_code == 200, resp.text
         assert "trace" not in resp.json()
 
@@ -155,33 +155,33 @@ class TestSearchAPI:
         """``elapsed_ms`` reflects actual query execution time (0 < t < 60000)."""
         file_id = _index_ready_file(app_api_client, test_txt_path, monkeypatch)
 
-        resp = app_api_client.post("/api/search", json={"query": "人工智能", "mode": "hybrid", "top_k": 5, "file_ids": [file_id]})
+        resp = app_api_client.post("/api/open/search", json={"query": "人工智能", "mode": "hybrid", "top_k": 5, "file_ids": [file_id]})
         assert resp.status_code == 200, resp.text
         data = resp.json()
         assert data["elapsed_ms"] > 0
         assert data["elapsed_ms"] < 60000
 
     def test_search_empty_query_returns_error(self, app_api_client):
-        """``POST /api/search`` with an empty query returns 422."""
-        resp = app_api_client.post("/api/search", json={"query": "", "mode": "hybrid"})
+        """``POST /api/open/search`` with an empty query returns 422."""
+        resp = app_api_client.post("/api/open/search", json={"query": "", "mode": "hybrid"})
         assert resp.status_code == 422
 
     def test_search_invalid_mode(self, app_api_client):
-        """``POST /api/search`` with an invalid mode returns 422."""
-        resp = app_api_client.post("/api/search", json={"query": "test", "mode": "invalid"})
+        """``POST /api/open/search`` with an invalid mode returns 422."""
+        resp = app_api_client.post("/api/open/search", json={"query": "test", "mode": "invalid"})
         assert resp.status_code == 422
 
     def test_api_fetch_k_positive_ok(self, app_api_client):
-        """``POST /api/search`` body 中 ``fetch_k=20`` 合法正整数,返回 200。"""
-        resp = app_api_client.post("/api/search", json={"query": "人工智能", "mode": "dense", "fetch_k": 20})
+        """``POST /api/open/search`` body 中 ``fetch_k=20`` 合法正整数,返回 200。"""
+        resp = app_api_client.post("/api/open/search", json={"query": "人工智能", "mode": "dense", "fetch_k": 20})
         assert resp.status_code == 200, resp.text
 
     def test_api_fetch_k_zero_rejected(self, app_api_client):
-        """``POST /api/search`` body 中 ``fetch_k=0`` 被 ge=1 拒绝。"""
-        resp = app_api_client.post("/api/search", json={"query": "人工智能", "mode": "dense", "fetch_k": 0})
+        """``POST /api/open/search`` body 中 ``fetch_k=0`` 被 ge=1 拒绝。"""
+        resp = app_api_client.post("/api/open/search", json={"query": "人工智能", "mode": "dense", "fetch_k": 0})
         assert resp.status_code == 422, f"fetch_k=0 应 422,got {resp.status_code}: {resp.text}"
 
     def test_api_fetch_k_negative_rejected(self, app_api_client):
-        """``POST /api/search`` body 中 ``fetch_k=-5`` 被 ge=1 拒绝。"""
-        resp = app_api_client.post("/api/search", json={"query": "人工智能", "mode": "dense", "fetch_k": -5})
+        """``POST /api/open/search`` body 中 ``fetch_k=-5`` 被 ge=1 拒绝。"""
+        resp = app_api_client.post("/api/open/search", json={"query": "人工智能", "mode": "dense", "fetch_k": -5})
         assert resp.status_code == 422, f"fetch_k=-5 应 422,got {resp.status_code}: {resp.text}"

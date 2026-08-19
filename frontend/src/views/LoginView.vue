@@ -35,7 +35,7 @@ const loginError = ref('')
 async function login() {
   loginError.value = ''
   try {
-    const res = await axios.post(`${API}/admin/login`, {
+    const res = await axios.post(`${API}/login`, {
       username: loginForm.value.username,
       password: loginForm.value.password,
     })

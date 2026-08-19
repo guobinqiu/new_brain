@@ -51,7 +51,7 @@ import { storeToRefs } from 'pinia'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import axios from '../utils/api'
-import { useDatabaseStore } from '../stores/database'
+import { useActiveAppStore } from '../stores/activeApp'
 import { useAppsStore } from '../stores/apps'
 import { showToast } from '../utils/toast'
 import { ElMessageBox } from 'element-plus'
@@ -60,7 +60,7 @@ import { copyText } from '../utils/format'
 const API = '/api'
 const router = useRouter()
 const { t } = useI18n()
-const databaseStore = useDatabaseStore()
+const activeAppStore = useActiveAppStore()
 
 const appsStore = useAppsStore()
 const { apps } = storeToRefs(appsStore)
@@ -72,7 +72,7 @@ async function createApp() {
   if (!newAppId.value || creatingApp.value) return
   creatingApp.value = true
   try {
-    const res = await axios.post(`${API}/admin/apps`, { app_id: newAppId.value })
+    const res = await axios.post(`${API}/apps`, { app_id: newAppId.value })
     showToast('success', t('apps.created', { appId: res.data.app_id }))
     newAppId.value = ''
     await appsStore.fetchApps()
@@ -95,11 +95,11 @@ async function deleteApp(app) {
     return
   }
   try {
-    await axios.delete(`${API}/admin/apps/${encodeURIComponent(app.app_id)}`)
+    await axios.delete(`${API}/apps/${encodeURIComponent(app.app_id)}`)
     showToast('success', t('apps.deleted', { appId: app.app_id }))
-    if (databaseStore.databaseAppId === app.app_id) {
-      databaseStore.databaseAppId = ''
-      databaseStore.databaseStatus = null
+    if (activeAppStore.appId === app.app_id) {
+      activeAppStore.appId = ''
+      activeAppStore.databaseStatus = null
     }
     await appsStore.fetchApps()
   } catch (err) {
@@ -109,7 +109,7 @@ async function deleteApp(app) {
 
 function selectApp(app) {
   if (!app?.app_id) return
-  databaseStore.databaseAppId = app.app_id
+  activeAppStore.appId = app.app_id
   router.push('/database')
 }
 
