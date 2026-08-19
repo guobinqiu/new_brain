@@ -67,9 +67,13 @@ def _index_object(*, app_id: str, file_id: str, presigned_url: str, s3_url: str,
 def _worker_application() -> Application:
     application = _ensure_application()
     if not application.models_loaded:
-        application.load_models()
+        application._start_component("dense", application.dense)
+        application._start_component("sparse", application.sparse)
+        application._start_component("ocr", application.ocr)
+        application.models_loaded = True
     if not application.ready:
-        application.init_connections()
+        application._start_component("store", application.store)
+        application.ready = True
     return application
 
 
@@ -89,8 +93,4 @@ def preload_parent_application(**_kwargs) -> None:
 
 @worker_process_init.connect
 def initialize_child_application(**_kwargs) -> None:
-    application = _ensure_application()
-    if not application.models_loaded:
-        application.load_models()
-    if not application.ready:
-        application.init_connections()
+    _worker_application()
