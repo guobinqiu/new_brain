@@ -1,7 +1,7 @@
-"""In-process index job enqueue (Architecture C, Step 1).
+"""进程内索引入队（架构 C）。
 
-Puts a job dict onto the queue.Queue owned by the registered
-``InlineIndexConsumer``. No broker, no task records, no ``job_id``.
+把 job 字典放入已注册 ``InlineIndexConsumer`` 持有的 queue.Queue。
+没有 broker、没有任务记录、没有 ``job_id``。
 """
 from __future__ import annotations
 
@@ -9,16 +9,16 @@ import queue
 
 
 class IndexQueueRejected(Exception):
-    """Raised when the in-process index queue cannot accept a job (full)."""
+    """进程内索引队列无法接受任务（已满）时抛出。"""
 
 
 def enqueue_index_job(*, app_id, file_id, presigned_url, s3_url, filename) -> dict:
-    """Enqueue an index job onto the live consumer's queue.
+    """把索引任务入队到活消费器的队列。
 
-    Returns ``{"file_id": file_id}``. Raises ``IndexQueueRejected`` when the
-    queue is full (mapped to 429 by the API layer).
+    返回 ``{"file_id": file_id}``。队列已满时抛 ``IndexQueueRejected``
+    （API 层映射为 429）。
     """
-    # Runtime import avoids a circular import with indexing.consumer.
+    # 运行时 import，避免与 indexing.consumer 循环导入。
     from indexing.consumer import index_queue
 
     job = {

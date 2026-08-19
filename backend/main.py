@@ -145,9 +145,8 @@ async def lifespan(app: FastAPI):
         logger.info("Preloading models ...", extra={"event": "startup_preload"})
         application.start()
         logger.info("Startup model preload done", extra={"event": "startup_ready"})
-    # Inline index consumer lives in-process; it idles on queue.get() until the
-    # API enqueues a job (which is guarded by _require_ready), so it is safe to
-    # start before the models finish loading.
+    # 进程内索引消费器随本进程常驻；空转时阻塞在 queue.get() 上，入队端点有
+    # _require_ready 守卫，因此模型加载完成前启动是安全的。
     _index_consumer = InlineIndexConsumer(application)
     await _index_consumer.start()
     yield

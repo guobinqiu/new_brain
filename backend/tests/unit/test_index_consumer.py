@@ -1,32 +1,16 @@
-"""RED tests for indexing.consumer.InlineIndexConsumer (Architecture C, Step 1).
+"""indexing.consumer.InlineIndexConsumer 单元测试（架构 C）。
 
-Contract (docs/architecture-c-inline-index-worker.md §4.2 / §4.4):
+契约来源：docs/architecture-c-inline-index-worker.md §4.2 / §4.4。覆盖：
 
-    class InlineIndexConsumer:
-        __init__(self, application, *, queue=None, timeout=None, retry_max=None)
-        async def start(self)   # create _loop task + _register_consumer(self)
-        async def stop(self)    # stop_event.set(); await task; executor.shutdown()
-        async def _loop(self)   # poll queue.get() (idle timeout 1.0s); call _run_job
-        async def _run_job(self, job)
-            # asyncio.wait_for(run_in_executor(_index_object, application, job), timeout)
-            #   success      -> done
-            #   ValueError    -> drop (non-retryable)
-            #   TimeoutError  -> retry branch
-            #   other Exception -> retry branch
-            # retry branch: if retry_count < retry_max: job.retry_count += 1; queue.put_nowait(job)
-            #               else: drop (index_failed_final)
-            # re-enqueue QueueFull -> swallowed (index_reenqueue_dropped)
-
-    def _index_object(application, job) -> dict  # migrated from tasks.py:47-64
-    def index_queue() -> queue.Queue              # registered consumer's queue
-    def _register_consumer(consumer) -> None     # module singleton setter
-
-Assumptions flagged for coder confirmation:
-- __init__ accepts optional queue/timeout/retry_max for testability (design pseudocode
-  only shows ``application``; env readers are the defaults).
-- ``index_queue()`` returns ``registered_consumer.queue`` (a queue.Queue), not the
-  consumer object itself (design §4.5: ``index_queue().put_nowait(job)``).
-- ``_register_consumer(None)`` clears the singleton (used for test isolation).
+- ``_run_job``：成功即完成；``ValueError`` 不可重试直接丢弃；超时和一般异常
+  进入重试分支，``retry_count`` 小于 ``retry_max`` 时重新入队（计数 +1），
+  达到上限后记日志放弃；重入队遇队列满被静默吞掉。
+- ``_index_object``：进入 app_context 后调用索引服务；app 集合不存在时抛
+  ``ValueError``（从 tasks.py:47-64 迁移）。
+- ``index_queue()`` / ``_register_consumer()``：模块级单例，返回/注册消费器
+  持有的 queue.Queue，传 ``None`` 清空（测试隔离用）。
+- ``ThreadPoolExecutor(max_workers=1)``：索引调用串行执行。
+- ``_loop``：start 后按序消费队列任务；stop 在 stop_event 置位后约 1 秒内退出。
 """
 from __future__ import annotations
 
@@ -42,14 +26,14 @@ from collection_names import collection_name_for_app, current_collection
 
 
 # --------------------------------------------------------------------------- #
-# fakes
+# 测试替身
 # --------------------------------------------------------------------------- #
 
 class FakeStore:
-    """Records app_collection_exists / app_context / add_file_chunks calls.
+    """记录 app_collection_exists / app_context / add_file_chunks 调用。
 
-    ``app_context`` delegates to the REAL ``collection_names.app_collection``
-    contextmanager so ContextVar propagation is exercised faithfully.
+    ``app_context`` 委托给真实的 ``collection_names.app_collection``
+    contextmanager，保证 ContextVar 传播被真实执行。
     """
 
     def __init__(self, *, exists: bool = True) -> None:
@@ -105,7 +89,7 @@ def _clear_consumer_singleton():
 
 
 # --------------------------------------------------------------------------- #
-# _run_job: success
+# _run_job：成功
 # --------------------------------------------------------------------------- #
 
 def test_run_job_success_consumes_without_retry(monkeypatch):
@@ -133,7 +117,7 @@ def test_run_job_success_consumes_without_retry(monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
-# _run_job: non-retryable ValueError
+# _run_job：不可重试的 ValueError
 # --------------------------------------------------------------------------- #
 
 def test_run_job_value_error_is_dropped_not_retried(monkeypatch):
@@ -160,7 +144,7 @@ def test_run_job_value_error_is_dropped_not_retried(monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
-# _run_job: retryable generic exception
+# _run_job：可重试的一般异常
 # --------------------------------------------------------------------------- #
 
 def test_run_job_generic_exception_re_enqueues_with_incremented_retry(monkeypatch):
@@ -209,15 +193,14 @@ def test_run_job_retry_exhausted_drops_job(monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
-# _run_job: timeout (asyncio.wait_for) treated as retryable
+# _run_job：超时（asyncio.wait_for）按可重试处理
 # --------------------------------------------------------------------------- #
 
 def test_run_job_timeout_re_enqueues_with_incremented_retry(monkeypatch):
     done_event = threading.Event()
 
     def slow_index_object(application, job):
-        # Block longer than the injected timeout. The executor thread cannot be
-        # interrupted; we release it via the event after the assertion.
+        # 阻塞时间超过注入的 timeout。executor 线程无法被中断；断言后用 event 释放它。
         done_event.wait(timeout=5.0)
         return {"chunk_count": 0}
 
@@ -269,7 +252,7 @@ def test_run_job_timeout_retry_exhausted_drops_job(monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
-# _run_job: re-enqueue when queue is full is swallowed
+# _run_job：队列满时重入队被静默吞掉
 # --------------------------------------------------------------------------- #
 
 def test_reenqueue_when_queue_full_drops_silently(monkeypatch):
@@ -279,15 +262,15 @@ def test_reenqueue_when_queue_full_drops_silently(monkeypatch):
     monkeypatch.setattr(consumer_mod, "_index_object", failing_index_object)
 
     async def _run():
-        # Queue holds an occupant; re-enqueue of the failing job must be rejected.
+        # 队列里已有占位任务；失败任务的重入队必须被拒绝。
         q = queue.Queue(maxsize=1)
         q.put_nowait(_job(file_id="occupant"))
         c = consumer_mod.InlineIndexConsumer(
             application=FakeApplication(), queue=q, retry_max=5
         )
         try:
-            # failing job passed directly (not from the queue); on failure it
-            # tries to re-enqueue itself, but the queue is full -> swallowed.
+            # 失败任务直接传入（不经过队列）；失败后尝试重入队，
+            # 但队列已满 -> 被静默吞掉。
             await c._run_job(_job(file_id="failing"))
             assert q.qsize() == 1
             assert q.get_nowait()["file_id"] == "occupant"
@@ -298,7 +281,7 @@ def test_reenqueue_when_queue_full_drops_silently(monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
-# app_context propagation (real _index_object + fake application + fake service)
+# app_context 传播（真实 _index_object + 假 application + 假索引服务）
 # --------------------------------------------------------------------------- #
 
 def test_index_object_enters_app_context_for_app(monkeypatch):
@@ -357,7 +340,7 @@ def test_app_context_isolation_between_apps(monkeypatch):
 
 
 def test_index_object_raises_value_error_when_app_collection_missing(monkeypatch):
-    """app_collection_exists False -> ValueError -> _run_job drops (non-retryable)."""
+    """app_collection_exists 为 False -> ValueError -> _run_job 丢弃（不可重试）。"""
     monkeypatch.setattr(
         consumer_mod, "index_presigned_object", lambda *a, **k: pytest.fail("must not be called")
     )
@@ -378,7 +361,7 @@ def test_index_object_raises_value_error_when_app_collection_missing(monkeypatch
 
 
 # --------------------------------------------------------------------------- #
-# serial processing (ThreadPoolExecutor max_workers=1)
+# 串行执行（ThreadPoolExecutor max_workers=1）
 # --------------------------------------------------------------------------- #
 
 def test_serial_processing_no_concurrent_index_calls(monkeypatch):
@@ -403,7 +386,7 @@ def test_serial_processing_no_concurrent_index_calls(monkeypatch):
             await asyncio.gather(c._run_job(_job(file_id="f1")), c._run_job(_job(file_id="f2")))
             assert len(timeline) == 2
             (s1, e1), (s2, e2) = timeline
-            # intervals must not overlap (max_workers=1 serializes executor calls)
+            # 时间区间不得重叠（max_workers=1 串行化 executor 调用）
             assert e1 <= s2 or e2 <= s1
         finally:
             await c.stop()
@@ -412,7 +395,7 @@ def test_serial_processing_no_concurrent_index_calls(monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
-# _loop integration: start consumes from the queue in order; stop is graceful
+# _loop 集成：start 后按序消费队列任务；stop 优雅退出
 # --------------------------------------------------------------------------- #
 
 def test_loop_consumes_jobs_in_order(monkeypatch):
@@ -454,7 +437,7 @@ def test_stop_terminates_loop_gracefully():
             t0 = time.monotonic()
             await asyncio.wait_for(c.stop(), timeout=2.0)
             elapsed = time.monotonic() - t0
-            # design §8.1: _loop exits within ~1s of stop_event being set
+            # 设计 §8.1：stop_event 置位后 _loop 在约 1 秒内退出
             assert elapsed < 1.5
             assert c.task.done()
         except asyncio.TimeoutError:

@@ -197,7 +197,7 @@ sequenceDiagram
 
 写入入口可以同步执行索引，也可以创建异步任务。两种入口都接收 `presigned_url + s3_url`，并允许外部系统传入 UUID 格式的 `file_id`；不传时由 RAG 生成。管理台本地上传链路先通过上传接口生成 `file_id` 并写入对象存储路径，再调用 `/api/index/jobs`，因此管理台异步索引必须传入上传阶段返回的 `file_id`。文件名默认可从对象存储地址推导，也允许调用方指定展示名。同步索引成功返回代表已经写入向量库。异步索引入队后立即返回 `file_id`，backend 进程内的索引消费器后台完成下载、解析、切分、embedding 并写入向量库；没有任务状态查询接口，调用方用 `file_id` 通过搜索接口验证索引就绪。同步入口和异步消费器复用同一套索引执行逻辑。对象存储索引使用 `presigned_url` 做一次性下载，不把临时下载 URL 写入 chunk metadata；稳定的 `s3_url` 会写入 chunk metadata 用于追溯。文件和 chunk 的 `created_at` 在索引写入时生成并写入 chunk metadata。存储层统一保存 UTC 时间，对外返回前再转换成本机或容器时区。
 
-异步索引任务保存在 backend 进程内的 `queue.Queue`（标准库线程安全队列）里，容量上限由 `INDEX_MAX_PENDING_JOBS` 控制。入队端点在请求线程里直接 `put_nowait`，消费器经 `run_in_executor` 在工作线程里取任务，两端跨线程安全。任务入队成功即被接受，由进程内消费器串行消费，实际索引并发固定为 1；队列已满时入队请求返回 429。RAG 不假设所有上游系统都有自己的队列、限流和重试能力；内部队列是 RAG 服务的资源保护边界，用来削峰并控制 OCR、embedding 和向量库写入并发。进程内队列不做持久化，backend 重启后未完成的任务会丢失；原始文件仍在对象存储，可以重新触发索引。每个 `app_id` 对应独立 collection，外部系统只要按 UUID 规约生成 `file_id`，就不会和其他 app 的同名文件发生跨系统冲突。
+异步索引任务保存在 backend 进程内的 `queue.Queue`（标准库线程安全队列）里，容量 10（硬编码默认值，不走环境变量）。入队端点在请求线程里直接 `put_nowait`，消费器经 `run_in_executor` 在工作线程里取任务，两端跨线程安全。任务入队成功即被接受，由进程内消费器串行消费，实际索引并发固定为 1；队列已满时入队请求返回 429。RAG 不假设所有上游系统都有自己的队列、限流和重试能力；内部队列是 RAG 服务的资源保护边界，用来削峰并控制 OCR、embedding 和向量库写入并发。进程内队列不做持久化，backend 重启后未完成的任务会丢失；原始文件仍在对象存储，可以重新触发索引。每个 `app_id` 对应独立 collection，外部系统只要按 UUID 规约生成 `file_id`，就不会和其他 app 的同名文件发生跨系统冲突。
 
 Docker 开发环境使用 MinIO 模拟 S3。MinIO 提供本地 bucket 和对象下载能力，服务入口可以在本地联调时根据 `s3_url` 生成后端可访问的短期下载地址。生产环境里，重签通常由业务系统或对象存储网关完成，RAG 仍只消费 `presigned_url + s3_url`。
 
@@ -245,15 +245,16 @@ flowchart TB
 
 | 边界 | 实现 |
 |---|---|
-| 入队 | `indexing.queue.enqueue_index_job()` 向进程内 `queue.Queue`（`maxsize=INDEX_MAX_PENDING_JOBS`，默认 10）`put_nowait`；同步入队端点直接 put，消费器经 `run_in_executor` 取，线程安全 |
+| 入队 | `indexing.queue.enqueue_index_job()` 向进程内 `queue.Queue`（`maxsize=10`，硬编码）`put_nowait`；同步入队端点直接 put，消费器经 `run_in_executor` 取，线程安全 |
 | 消费 | `InlineIndexConsumer`，lifespan 启动 1 个 asyncio task，并发固定为 1 |
 | 执行 | 专用 `ThreadPoolExecutor(max_workers=1)` + `run_in_executor`，同步 embedding 不阻塞事件循环，任务串行执行 |
-| 超时 | `asyncio.wait_for(..., timeout=INDEX_JOB_TIMEOUT_SECONDS)`，默认 1800 秒；超时按可重试处理 |
-| 重试 | job 字典内 `retry_count`，小于 `INDEX_JOB_RETRY_MAX`（默认 2）时重新入队尾，超过后记日志放弃 |
+| 超时 | `asyncio.wait_for(..., timeout=1800)`，超时 1800 秒（硬编码）；超时按可重试处理 |
+| 重试 | job 字典内 `retry_count`，小于 2 时重新入队尾（最多重试 2 次，硬编码），超过后记日志放弃 |
 | 不可恢复错误 | app 数据库未初始化、文件格式不支持等 `ValueError` 直接丢弃，不重试 |
 | 队列满 | `put_nowait` 抛 `QueueFull`，入队接口返回 429 |
 | 任务记录 / 列表 / 状态 / 事件推送 | 无 job_id、无任务记录、无状态接口、无 SSE；调用方用 `file_id` 通过搜索接口验证索引就绪 |
 | 重启 | 进程内队列随进程清空，接受丢任务；原始文件仍在对象存储，可重新触发索引 |
+| 停止 | lifespan 停止时置位 stop_event、等待循环退出、关闭 executor，并注销模块级单例；此后入队直接抛 `RuntimeError` |
 
 超时后 executor 线程无法被硬中断，孤儿线程会占住唯一 worker 直到当前下载、推理结束；后续任务在 executor 内排队等待，天然串行，不会并发命中同一份模型。`add_file_chunks` 按 `file_id` delete-then-upsert 幂等，重试会覆盖孤儿线程的写入。
 

@@ -107,7 +107,7 @@ http://<服务器地址>:28000
 
 上游系统使用的 `app_id`、`access_key` 和 `secret_key` 由管理台创建。每个 `app_id` 对应独立 collection，业务接口根据 AK/SK 签名里的 `app_id` 自动选择当前应用的数据范围。索引前需要先在管理台为该 `app_id` 初始化数据库。
 
-异步索引由 backend 进程内的 `InlineIndexConsumer` 处理：进程内 `queue.Queue`，并发固定为 1，超时和失败重试在后台静默进行。待处理任务上限由 `INDEX_MAX_PENDING_JOBS` 控制（默认 10），单任务超时由 `INDEX_JOB_TIMEOUT_SECONDS` 控制（默认 1800 秒），最大重试次数由 `INDEX_JOB_RETRY_MAX` 控制（默认 2）。任务不落盘，backend 重启后队列中未完成任务丢失；原始文件仍在对象存储，可以重新提交索引。
+异步索引由 backend 进程内的 `InlineIndexConsumer` 处理：进程内 `queue.Queue`，并发固定为 1，超时和失败重试在后台静默进行，没有独立 worker 进程，也不依赖 Celery/Redis。等待队列容量 10（满了入队端点返回 429），单任务超时 1800 秒，可重试失败最多重入队 2 次，均为硬编码默认值，不提供环境变量配置。任务不落盘，backend 重启后队列中未完成任务丢失；原始文件仍在对象存储，可以重新提交索引。
 
 业务接口每次请求都带 AK/SK 签名：
 

@@ -1,9 +1,8 @@
-"""In-process queue.Queue index consumer (Architecture C).
+"""进程内索引消费器（架构 C）。
 
-Lives in the backend process; owns a single queue.Queue and a single-worker
-ThreadPoolExecutor. ``_index_object`` was migrated from the former
-``indexing/tasks.py`` celery wrapper, which has been removed together with
-``indexing/celery_app.py`` and ``indexing/repository.py``.
+backend 进程内使用 queue.Queue + 单工作线程消费索引任务，替代原 Celery
+index-worker。``_index_object`` 从原 ``indexing/tasks.py`` 的 celery 封装迁移而来；
+该文件连同 ``indexing/celery_app.py``、``indexing/repository.py`` 已一并删除。
 """
 from __future__ import annotations
 
@@ -11,7 +10,6 @@ import asyncio
 import contextvars
 import functools
 import logging
-import os
 import queue as _queue
 from concurrent.futures import ThreadPoolExecutor
 
@@ -19,55 +17,46 @@ from indexing.service import index_presigned_object
 
 logger = logging.getLogger("rag.index_consumer")
 
-# Module-level singleton set by ``InlineIndexConsumer.start``; ``index_queue()``
-# reads it so ``enqueue_index_job`` (in queue.py) can reach the live queue.
+# 模块级单例，由 ``InlineIndexConsumer.start`` 注册；``index_queue()`` 负责读取，
+# enqueue_index_job（queue.py）通过它拿到活队列。
 _consumer = None
 
-
-def _max_pending_jobs() -> int:
-    # max(1, ...) guards against 0 (which would make the queue unbounded and
-    # defeat backpressure) and negative values (which would crash Queue()).
-    return max(1, int(os.getenv("INDEX_MAX_PENDING_JOBS", "10")))
-
-
-def _job_timeout_seconds() -> int:
-    return int(os.getenv("INDEX_JOB_TIMEOUT_SECONDS", "1800"))
-
-
-def _job_retry_max() -> int:
-    return int(os.getenv("INDEX_JOB_RETRY_MAX", "2"))
+# 进程内队列不是真 broker，这三个值不进运维配置面，硬编码默认值。
+_DEFAULT_MAX_PENDING_JOBS = 10      # 等待队列容量：满了入队端点返回 429
+_DEFAULT_JOB_TIMEOUT_SECONDS = 1800 # 单任务 30 分钟超时，超时按可重试失败处理
+_DEFAULT_JOB_RETRY_MAX = 2          # 可重试失败最多重入队 2 次，仍失败则放弃
 
 
 def index_queue() -> _queue.Queue:
-    """Return the queue.Queue owned by the registered consumer."""
+    """返回已注册消费器持有的 queue.Queue。"""
     if _consumer is None:
         raise RuntimeError("no inline index consumer registered")
     return _consumer.queue
 
 
 def _register_consumer(consumer) -> None:
-    """Module-level singleton setter; ``None`` clears it (test isolation)."""
+    """模块级单例注册；传 ``None`` 清空（测试隔离用）。"""
     global _consumer
     _consumer = consumer
 
 
 class InlineIndexConsumer:
-    """Single-worker inline index consumer.
+    """单工作线程的进程内索引消费器。
 
-    ``queue``/``timeout``/``retry_max`` are optional kwargs for testability;
-    when omitted they read ``INDEX_MAX_PENDING_JOBS`` / ``INDEX_JOB_TIMEOUT_SECONDS``
-    / ``INDEX_JOB_RETRY_MAX`` (defaults 10 / 1800 / 2).
+    ``queue``/``timeout``/``retry_max`` 是测试注入用的可选参数；不传时使用
+    模块级硬编码默认值（10 / 1800 / 2）。
     """
 
     def __init__(self, application, *, queue=None, timeout=None, retry_max=None):
         self.application = application
-        self.queue = queue if queue is not None else _queue.Queue(maxsize=_max_pending_jobs())
+        self.queue = (
+            queue if queue is not None else _queue.Queue(maxsize=_DEFAULT_MAX_PENDING_JOBS)
+        )
         self.stop_event = asyncio.Event()
         self.task = None
-        self.timeout = timeout if timeout is not None else _job_timeout_seconds()
-        self.retry_max = retry_max if retry_max is not None else _job_retry_max()
-        # max_workers=1 serializes indexing so a timed-out orphan thread can
-        # never overlap the next job's GPU work (design §4.3).
+        self.timeout = timeout if timeout is not None else _DEFAULT_JOB_TIMEOUT_SECONDS
+        self.retry_max = retry_max if retry_max is not None else _DEFAULT_JOB_RETRY_MAX
+        # max_workers=1 串行化索引，超时后的孤儿线程不会与下一个任务的 GPU 工作重叠（设计 §4.3）。
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="index-worker")
 
     async def start(self) -> None:
@@ -79,9 +68,8 @@ class InlineIndexConsumer:
         if self.task is not None:
             await asyncio.gather(self.task, return_exceptions=True)
         self.executor.shutdown(wait=False)
-        # Symmetric with start()'s registration: clear the singleton so
-        # enqueue_index_job raises RuntimeError instead of silently putting
-        # jobs onto a dead queue after shutdown.
+        # 与 start() 的注册对称：注销单例，让 shutdown 之后的 enqueue_index_job
+        # 抛 RuntimeError，而不是把任务悄悄放进死队列。
         _register_consumer(None)
 
     async def _loop(self) -> None:
@@ -101,8 +89,8 @@ class InlineIndexConsumer:
         filename = job.get("filename")
         retry_count = job.get("retry_count", 0)
         loop = asyncio.get_running_loop()
-        # copy_context() gives this executor run an isolated ContextVar scope;
-        # _index_object also enters app_context itself, so this is defensive.
+        # copy_context() 给这次 executor 调用独立的 ContextVar 作用域；
+        # _index_object 自己也会进 app_context，这里是兜底。
         ctx = contextvars.copy_context()
         try:
             await asyncio.wait_for(
@@ -115,7 +103,7 @@ class InlineIndexConsumer:
             )
             return
         except ValueError as exc:
-            # Non-retryable (app db not initialized, unsupported file type): drop.
+            # 不可重试（app 数据库未初始化、不支持的文件类型）：直接丢弃。
             logger.warning(
                 "Index failed (non-retryable)",
                 exc_info=True,
@@ -129,10 +117,10 @@ class InlineIndexConsumer:
             return
         except asyncio.TimeoutError:
             reason = f"index timeout after {self.timeout}s"
-        except Exception as exc:  # noqa: BLE001 - retryable branch
+        except Exception as exc:  # noqa: BLE001 - 可重试分支
             reason = f"index failed: {exc!r}"
 
-        # Retryable branch: timeout or generic exception.
+        # 可重试分支：超时或一般异常。
         if retry_count < self.retry_max:
             job["retry_count"] = retry_count + 1
             try:
@@ -153,8 +141,8 @@ class InlineIndexConsumer:
                     "event": "index_failed_final",
                     "app_id": app_id,
                     "file_id": file_id,
-                    # "filename" collides with LogRecord.filename (reserved);
-                    # use document_filename like the success-path log.
+                    # "filename" 是 LogRecord 的保留字段，不能用作 extra 键，
+                    # 因此与成功路径日志一致，改用 document_filename。
                     "document_filename": filename,
                     "retry_count": retry_count,
                     "error": reason,
@@ -163,9 +151,9 @@ class InlineIndexConsumer:
 
 
 def _index_object(application, job) -> dict:
-    """Migrated from indexing/tasks.py L47-64; takes the job dict + application.
+    """从 indexing/tasks.py L47-64 迁移而来；入参为 job 字典 + application。
 
-    Raises ``ValueError`` when the app collection is missing (non-retryable).
+    app 集合不存在时抛 ``ValueError``（不可重试）。
     """
     app_id = job["app_id"]
     file_id = job["file_id"]

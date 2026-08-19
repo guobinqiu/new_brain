@@ -1,17 +1,14 @@
-"""RED tests for indexing.queue.enqueue_index_job (Architecture C, Step 1).
+"""indexing.queue.enqueue_index_job 单元测试（架构 C）。
 
-Contract (docs/architecture-c-inline-index-worker.md §4.5):
+契约来源：docs/architecture-c-inline-index-worker.md §4.5：
 
     enqueue_index_job(*, app_id, file_id, presigned_url, s3_url, filename) -> {"file_id": file_id}
 
-- puts a job dict ``{app_id, file_id, presigned_url, s3_url, filename, retry_count: 0}``
-  into the process-wide ``queue.Queue`` registered by ``InlineIndexConsumer``.
-- queue full -> ``IndexQueueRejected`` (mapped to 429 by the API layer).
-- no ``job_id`` (returned shape is ``{file_id}`` only).
-- does NOT import redis / indexing.repository (in-process queue, no broker).
-
-These tests run against the *new* queue.py. Until consumer.py exists and queue.py
-is rewritten they fail to collect (ModuleNotFoundError) — that is the RED signal.
+- 把 ``{app_id, file_id, presigned_url, s3_url, filename, retry_count: 0}``
+  字典放入 ``InlineIndexConsumer`` 注册的进程级 ``queue.Queue``。
+- 队列满 -> ``IndexQueueRejected``（API 层映射为 429）。
+- 无 ``job_id``（返回只有 ``{"file_id"}``）。
+- 不 import redis / indexing.repository（进程内队列，无 broker）。
 """
 from __future__ import annotations
 
@@ -27,10 +24,10 @@ from indexing.queue import IndexQueueRejected, enqueue_index_job
 
 
 class _FakeConsumer:
-    """Minimal stand-in for InlineIndexConsumer.
+    """InlineIndexConsumer 的最小替身。
 
-    ``index_queue()`` is expected to return ``consumer.queue`` (the queue.Queue
-    owned by the registered consumer). This fake only needs that one attribute.
+    ``index_queue()`` 预期返回 ``consumer.queue``（已注册消费器持有的
+    queue.Queue）。这个替身只需要这一个属性。
     """
 
     def __init__(self, maxsize: int = 10) -> None:
@@ -55,7 +52,7 @@ def _clear_consumer_singleton():
 
 
 # --------------------------------------------------------------------------- #
-# job shape
+# job 字典结构
 # --------------------------------------------------------------------------- #
 
 def test_enqueue_puts_job_with_retry_count_zero():
@@ -108,7 +105,7 @@ def test_enqueue_returns_only_file_id_no_job_id():
 
 
 # --------------------------------------------------------------------------- #
-# backpressure
+# 背压
 # --------------------------------------------------------------------------- #
 
 def test_enqueue_full_queue_raises_index_queue_rejected():
@@ -133,7 +130,7 @@ def test_enqueue_full_queue_raises_index_queue_rejected():
 
 
 # --------------------------------------------------------------------------- #
-# singleton wiring
+# 单例接线
 # --------------------------------------------------------------------------- #
 
 def test_enqueue_uses_registered_queue_singleton():
@@ -156,28 +153,13 @@ def test_enqueue_uses_registered_queue_singleton():
 
 
 # --------------------------------------------------------------------------- #
-# no-redis contract
+# 无 redis 契约
 # --------------------------------------------------------------------------- #
 
 def test_enqueue_module_does_not_import_redis_or_repository():
-    """The in-process queue must not depend on redis or the old repository module."""
+    """进程内队列不得依赖 redis 或旧 repository 模块。"""
     source = inspect.getsource(queue_mod)
     lowered = source.lower()
     assert "import redis" not in lowered
     assert "from redis" not in lowered
     assert "repository" not in lowered
-
-
-# --------------------------------------------------------------------------- #
-# maxsize configuration (design §3 key-decision table; §8.1)
-# --------------------------------------------------------------------------- #
-
-def test_consumer_queue_maxsize_reads_env(monkeypatch):
-    from indexing.consumer import InlineIndexConsumer
-
-    monkeypatch.setenv("INDEX_MAX_PENDING_JOBS", "3")
-    consumer = InlineIndexConsumer(application=None)
-    try:
-        assert consumer.queue.maxsize == 3
-    finally:
-        consumer.executor.shutdown(wait=False)
