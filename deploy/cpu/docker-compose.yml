@@ -140,9 +140,9 @@ services:
       - ../../frontend/.node_modules-docker:/app/frontend/node_modules
     restart: unless-stopped
 
-  milvus-etcd:
+  etcd:
     image: quay.io/coreos/etcd:v3.5.25
-    container_name: rag-milvus-etcd
+    container_name: rag-etcd
     profiles:
       - milvus
     environment:
@@ -153,33 +153,16 @@ services:
       ETCD_SNAPSHOT_COUNT: "50000"
     command: >
       etcd
-      -advertise-client-urls=http://milvus-etcd:2379
+      -advertise-client-urls=http://etcd:2379
       -listen-client-urls http://0.0.0.0:2379
       --data-dir /etcd
     volumes:
       - ../../milvus_data/standalone/etcd:/etcd
     restart: unless-stopped
 
-  milvus-minio:
-    image: minio/minio:RELEASE.2024-05-28T17-19-04Z
-    container_name: rag-milvus-minio
-    profiles:
-      - milvus
-    environment:
-      TZ: ${TZ:-Asia/Shanghai}
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
-    command: minio server /minio_data --console-address ":9001"
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-    volumes:
-      - ../../milvus_data/standalone/minio:/minio_data
-    restart: unless-stopped
-
-  milvus-standalone:
+  milvus:
     image: milvusdb/milvus:v2.6.20
-    container_name: rag-milvus-standalone
+    container_name: rag-milvus
     profiles:
       - milvus
     command: ["milvus", "run", "standalone"]
@@ -187,8 +170,10 @@ services:
       - seccomp:unconfined
     environment:
       TZ: ${TZ:-Asia/Shanghai}
-      ETCD_ENDPOINTS: milvus-etcd:2379
-      MINIO_ADDRESS: milvus-minio:9000
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
       MINIO_REGION: us-east-1
     ports:
       - "19530:19530"

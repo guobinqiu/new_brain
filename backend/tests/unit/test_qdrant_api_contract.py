@@ -311,7 +311,7 @@ def test_index_jobs_status_reports_queue_unavailable(monkeypatch):
     assert exc.value.detail == "index queue is unavailable"
 
 
-def test_index_jobs_returns_paginated_job_list(monkeypatch):
+def test_index_jobs_returns_recent_job_list(monkeypatch):
     import main
 
     class FakeJob:
@@ -330,7 +330,7 @@ def test_index_jobs_returns_paginated_job_list(monkeypatch):
     monkeypatch.setattr(
         main,
         "list_index_jobs",
-        lambda limit=50, cursor=None, app_id=None: {"jobs": [FakeJob()], "next_cursor": "50", "has_more": True},
+        lambda limit=50, app_id=None: {"jobs": [FakeJob()]},
     )
 
     result = main.index_jobs(limit=50)
@@ -352,8 +352,6 @@ def test_index_jobs_returns_paginated_job_list(monkeypatch):
                 "ended_at": None,
             }
         ],
-        "next_cursor": "50",
-        "has_more": True,
     }
 
 
@@ -361,7 +359,7 @@ def test_index_jobs_reports_queue_unavailable(monkeypatch):
     import main
     from indexing.queue import IndexQueueUnavailable
 
-    monkeypatch.setattr(main, "list_index_jobs", lambda limit=50, cursor=None, app_id=None: (_ for _ in ()).throw(IndexQueueUnavailable("index queue is unavailable")))
+    monkeypatch.setattr(main, "list_index_jobs", lambda limit=50, app_id=None: (_ for _ in ()).throw(IndexQueueUnavailable("index queue is unavailable")))
 
     with pytest.raises(main.HTTPException) as exc:
         main.index_jobs(limit=50)

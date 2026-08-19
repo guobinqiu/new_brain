@@ -5,10 +5,11 @@ import os
 import threading
 from datetime import datetime, timezone
 
+from celery.exceptions import SoftTimeLimitExceeded
 from celery.signals import worker_init, worker_process_init
 from bootstrap import Application
 from indexing.celery_app import celery_app
-from indexing.queue import update_index_job_metadata
+from indexing.repository import publish_index_job_event, update_index_job_metadata
 from indexing.service import index_presigned_object
 from logging_config import configure_logging
 
@@ -21,13 +22,24 @@ _application_lock = threading.Lock()
 @celery_app.task(name="indexing.tasks.index_object_task", bind=True)
 def index_object_task(self, *, app_id: str, file_id: str, presigned_url: str, s3_url: str, filename: str | None = None) -> dict:
     update_index_job_metadata(self.request.id, started_at=datetime.now(timezone.utc).isoformat())
+    publish_index_job_event(app_id, self.request.id, "started", filename)
     try:
-        return _index_object(app_id=app_id, file_id=file_id, presigned_url=presigned_url, s3_url=s3_url, filename=filename)
+        result = _index_object(app_id=app_id, file_id=file_id, presigned_url=presigned_url, s3_url=s3_url, filename=filename)
+        publish_index_job_event(app_id, self.request.id, "finished", filename)
+        return result
+    except SoftTimeLimitExceeded as exc:
+        max_retries = int(os.getenv("INDEX_JOB_RETRY_MAX", "2"))
+        if self.request.retries >= max_retries:
+            publish_index_job_event(app_id, self.request.id, "failed", filename)
+            raise
+        raise self.retry(exc=exc)
     except ValueError:
+        publish_index_job_event(app_id, self.request.id, "failed", filename)
         raise
     except Exception as exc:
         max_retries = int(os.getenv("INDEX_JOB_RETRY_MAX", "2"))
         if self.request.retries >= max_retries:
+            publish_index_job_event(app_id, self.request.id, "failed", filename)
             raise
         raise self.retry(exc=exc)
 

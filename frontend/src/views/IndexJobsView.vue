@@ -6,15 +6,10 @@
       <div class="monitor-block trace-block">
         <div class="block-title job-title">
           <span>{{ t('monitor.indexJobs') }}</span>
-          <div class="job-filters">
-            <el-radio-group v-model="indexJobFilter" size="small">
-              <el-radio-button v-for="filter in jobFilters" :key="filter" :value="filter">{{ t(`monitor.jobFilter.${filter}`) }}</el-radio-button>
-            </el-radio-group>
-            <el-button size="small" @click="fetchIndexJobs">{{ t('common.refresh') }}</el-button>
-          </div>
+          <span class="trace-note">{{ t('monitor.indexJobsLimitNote', { count: INDEX_JOB_LIMIT }) }}</span>
         </div>
-        <template v-if="filteredIndexJobs.length">
-          <el-table ref="indexJobsTable" :data="filteredIndexJobs" max-height="320" @scroll="onIndexJobsScroll" v-loading="indexJobsLoading">
+        <template v-if="indexJobs.length">
+          <el-table :data="indexJobs" max-height="320" v-loading="indexJobsLoading">
             <el-table-column :label="t('monitor.jobColumns.status')" min-width="82">
               <template #default="{ row }">
                 <span :class="['job-status', jobStatusClass(row.status)]">{{ jobStatusText(row.status) }}</span>
@@ -40,7 +35,6 @@
               <template #default="{ row }">{{ shortTime(row.ended_at) }}</template>
             </el-table-column>
           </el-table>
-          <el-button v-if="indexJobsHasMore && !indexJobsLoading" class="docs-more" @click="fetchNextIndexJobs">{{ t('common.loadMore') }}</el-button>
         </template>
         <div v-else-if="indexJobsError" class="trace-empty error-text">{{ indexJobsError }}</div>
         <div v-else class="trace-empty">{{ t('monitor.noIndexJobs') }}</div>
@@ -51,7 +45,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, onMounted, watch, onUnmounted } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import axios from '../utils/api'
@@ -59,48 +53,28 @@ import { shortTime, jobStatusClass } from '../utils/format'
 import { useActiveAppStore } from '../stores/activeApp'
 
 const API = '/api'
+const INDEX_JOB_LIMIT = 200
 const { t } = useI18n()
 
 const activeAppStore = useActiveAppStore()
 const { appId } = storeToRefs(activeAppStore)
 
 const indexJobs = ref([])
-const indexJobsCursor = ref(null)
-const indexJobsHasMore = ref(false)
 const indexJobsLoading = ref(false)
 const indexJobsError = ref('')
-const indexJobFilter = ref('all')
-const jobFilters = ['all', 'processing', 'finished', 'failed']
-const indexJobsTable = ref(null)
-
-const filteredIndexJobs = computed(() => {
-  if (indexJobFilter.value === 'all') return indexJobs.value
-  return indexJobs.value.filter(job => jobStatusClass(job.status) === indexJobFilter.value)
-})
+let jobStreamController = null
 
 function jobStatusText(status) {
   return t(`monitor.jobStatus.${jobStatusClass(status)}`)
 }
 
 async function fetchIndexJobs() {
-  indexJobs.value = []
-  indexJobsCursor.value = null
-  indexJobsHasMore.value = false
-  indexJobsError.value = ''
-  await fetchNextIndexJobs()
-}
-
-async function fetchNextIndexJobs() {
-  if (indexJobsLoading.value) return
   indexJobsLoading.value = true
   try {
-    const params = { limit: 50 }
+    const params = { limit: INDEX_JOB_LIMIT }
     if (appId.value) params.app_id = appId.value
-    if (indexJobsCursor.value) params.cursor = indexJobsCursor.value
     const res = await axios.get(`${API}/index/jobs`, { params })
-    indexJobs.value = indexJobs.value.concat(res.data.jobs || [])
-    indexJobsCursor.value = res.data.next_cursor || null
-    indexJobsHasMore.value = Boolean(res.data.has_more)
+    indexJobs.value = res.data.jobs || []
     indexJobsError.value = ''
   }
   catch (err) {
@@ -109,15 +83,70 @@ async function fetchNextIndexJobs() {
   finally { indexJobsLoading.value = false }
 }
 
-function onIndexJobsScroll() {
-  const wrap = indexJobsTable.value?.scrollBarRef?.wrapRef
-  if (!wrap) return
-  if (wrap.scrollTop + wrap.clientHeight >= wrap.scrollHeight - 24 && indexJobsHasMore.value) {
-    fetchNextIndexJobs()
+async function startJobStream() {
+  stopJobStream()
+  if (!appId.value) return
+  jobStreamController = new AbortController()
+  try {
+    const token = localStorage.getItem('rag_token') || ''
+    const response = await fetch(`${API}/index/jobs/stream?app_id=${appId.value}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: jobStreamController.signal,
+    })
+    if (!response.ok || !response.body) return
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const parts = buffer.split('\n\n')
+      buffer = parts.pop() || ''
+      for (const part of parts) handleJobEvent(part)
+    }
+  } catch (err) {
+    if (err.name !== 'AbortError') console.error(err)
+  }
+}
+
+function stopJobStream() {
+  if (jobStreamController) {
+    jobStreamController.abort()
+    jobStreamController = null
+  }
+}
+
+function handleJobEvent(eventText) {
+  const line = eventText.split('\n').find(item => item.startsWith('data: '))
+  if (!line) return
+  let row
+  try {
+    row = JSON.parse(line.slice(6))
+  } catch (err) {
+    return
+  }
+  const existing = indexJobs.value.find(job => job.job_id === row.job_id)
+  if (existing) {
+    existing.status = row.status
+  } else {
+    indexJobs.value.unshift({ job_id: row.job_id, status: row.status, filename: row.filename })
+    if (indexJobs.value.length > INDEX_JOB_LIMIT) indexJobs.value.pop()
   }
 }
 
 onMounted(() => {
   fetchIndexJobs()
+  startJobStream()
+})
+
+onUnmounted(() => {
+  stopJobStream()
+})
+
+watch(appId, () => {
+  fetchIndexJobs()
+  stopJobStream()
+  startJobStream()
 })
 </script>

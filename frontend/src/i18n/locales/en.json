@@ -68,6 +68,7 @@
     "title": "Runtime",
     "components": "Components",
     "indexJobs": "Index",
+    "indexJobsLimitNote": "Latest {count} only",
     "traces": "Trace",
     "noIndexJobs": "No index jobs",
     "indexQueueUnavailable": "Index queue unavailable. Start Redis.",
@@ -162,7 +163,8 @@
   "apps": {
     "title": "Apps",
     "desc": "Manage upstream app_id and AK/SK credentials",
-    "appIdPlaceholder": "Enter app_id, e.g. imsdom",
+    "appIdPlaceholder": "Start with a letter. Letters, numbers, underscore only",
+    "appIdRule": "app_id must start with a letter, be 2-64 chars, and contain only letters, numbers, or underscore",
     "create": "Create app",
     "created": "{appId} created",
     "deleted": "{appId} deleted",

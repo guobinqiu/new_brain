@@ -87,7 +87,7 @@ class TestMonitorAPI:
             json={"query": "人工智能", "mode": "hybrid", "top_k": 5, "file_ids": [file_id]},
         )
 
-        resp = api_client.get("/api/traces", params={"app_id": "imsdom"})
+        resp = api_client.get("/api/traces", params={"app_id": app_api_client.app_id})
 
         assert resp.status_code == 200
         traces = resp.json()["traces"]

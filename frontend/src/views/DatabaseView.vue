@@ -93,7 +93,7 @@ async function fetchDatabaseStatus() {
     return
   }
   try {
-    const res = await axios.get(`${API}/apps/${encodeURIComponent(activeAppStore.appId)}/database`)
+    const res = await axios.get(`${API}/apps/${activeAppStore.appId}/database`)
     activeAppStore.databaseStatus = res.data
   } catch (err) {
     activeAppStore.databaseStatus = null
@@ -104,7 +104,7 @@ async function fetchDatabaseStatus() {
 async function initializeDatabase() {
   if (!activeAppStore.appId) return
   try {
-    await axios.post(`${API}/apps/${encodeURIComponent(activeAppStore.appId)}/database`)
+    await axios.post(`${API}/apps/${activeAppStore.appId}/database`)
     showToast('success', t('database.initialized', { appId: activeAppStore.appId }))
     await fetchDatabaseStatus()
     await fetchChunks()
@@ -121,7 +121,7 @@ async function deleteDatabase() {
     return
   }
   try {
-    await axios.delete(`${API}/apps/${encodeURIComponent(activeAppStore.appId)}/database`)
+    await axios.delete(`${API}/apps/${activeAppStore.appId}/database`)
     showToast('success', t('database.deleted', { appId: activeAppStore.appId }))
     chunks.value = []
     chunksCursor.value = null

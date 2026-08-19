@@ -81,7 +81,6 @@ def test_service_database_dirs_are_grouped_by_database():
 
         assert "../../qdrant_data:/qdrant/storage" in compose
         assert "../../milvus_data/standalone/etcd:/etcd" in compose
-        assert "../../milvus_data/standalone/minio:/minio_data" in compose
         assert "../../milvus_data/standalone/milvus:/var/lib/milvus" in compose
 
 

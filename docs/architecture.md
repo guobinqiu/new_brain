@@ -246,24 +246,35 @@ flowchart TB
 
 ### 2.7 Celery 索引 Worker
 
-异步索引由 Celery worker 消费。Celery 负责 broker 消费、任务状态、失败重试和 worker 进程管理；`IndexJobRepository` 维护业务侧 job 索引，用于按 app 分页查询任务列表和补充展示元数据。
+异步索引由 Celery worker 消费。Celery 负责 broker 消费、任务状态、失败重试和 worker 进程管理；`IndexJobRepository` 维护业务侧 job 索引，用于按 app 查询最近任务快照和补充展示元数据。
 
 | 边界 | 实现 |
 |---|---|
-| 入队 | `indexing.queue.enqueue_index_job()` 调用 Celery `send_task()` |
+| 入队 | `indexing.queue.enqueue_index_job()` 调用 Celery `send_task()`，producer retry 使用有界策略 |
 | 消费 | `indexing.tasks.index_object_task` |
 | broker | Redis，默认 `REDIS_URL` |
 | result backend | Redis，默认 `REDIS_URL` |
-| 业务 job 索引 | `IndexJobRepository` |
+| 业务 job 索引 | `IndexJobRepository`，复用进程内 Redis client |
 | app 任务列表 | `IndexJobRepository` 写入 Redis ZSet：`rag:index:jobs:{queue}:app:{app_id}` |
 | 全局任务列表 | `IndexJobRepository` 写入 Redis ZSet：`rag:index:jobs:{queue}:all` |
 | 任务展示元数据 | `IndexJobRepository` 写入 Redis Hash：`rag:index:job:{queue}:{job_id}` |
+| 任务事件推送 | worker 通过 Redis Pub/Sub channel `rag:index:events:{app_id}` 发布任务状态事件 |
 
-Docker Celery worker 使用 prefork pool，默认并发为 1：
+Docker CPU Celery worker 使用 prefork pool，默认并发为 1：
 
 ```text
 celery -A indexing.celery_app:celery_app worker \
   --pool=prefork \
+  --concurrency=1 \
+  --queues index \
+  --loglevel=INFO
+```
+
+Docker GPU Celery worker 使用 `solo` pool，固定单实例并发 1：
+
+```text
+celery -A indexing.celery_app:celery_app worker \
+  --pool=solo \
   --concurrency=1 \
   --queues index \
   --loglevel=INFO
@@ -279,7 +290,11 @@ celery -A indexing.celery_app:celery_app worker \
   --loglevel=INFO
 ```
 
-Docker 使用 prefork 是常驻子进程模型，不是每个任务 fork 一次。worker 主进程只创建基础配置和日志，不加载模型、不建立 Redis/Qdrant/MinIO 连接。每个子进程启动后执行模型加载和连接初始化，后续任务复用该子进程内同一份 `Application`，不会每个任务重复加载模型。Native 使用 `solo` 避免 macOS 上 native 模型 runtime、OCR runtime、gRPC 或底层数值库在 fork 子进程中崩溃；任务在同一个 worker 进程内串行执行并复用同一份 `Application`。CPU 和 GPU profile 默认 `concurrency=1`，Docker 可以通过 `INDEX_WORKER_CONCURRENCY` 调整。
+Docker CPU 使用 prefork 是常驻子进程模型，不是每个任务 fork 一次。worker 主进程只创建基础配置和日志，不加载模型、不建立 Redis/Qdrant/MinIO 连接。每个子进程启动后执行模型加载和连接初始化，后续任务复用该子进程内同一份 `Application`，不会每个任务重复加载模型。CPU 并发可以通过 `INDEX_WORKER_CONCURRENCY` 调整。
+
+Docker GPU 不使用 prefork：CUDA、torch、onnxruntime 在 fork 子进程中初始化容易崩溃；即使 `concurrency=1`，prefork 模式也会 fork 出子进程执行任务。worker 子进程崩溃后 Celery 会拉起新子进程，导致模型反复加载，显存分配和释放都可能出问题。因此 GPU worker 固定使用 `solo` pool 单实例，模型在进程内加载一次并常驻，任务串行消费。GPU 并发扩展不通过 prefork 多进程共享单卡，而是按卡分配独立 worker（`CUDA_VISIBLE_DEVICES`）或采用模型服务化。
+
+Native 使用 `solo` 避免 macOS 上 native 模型 runtime、OCR runtime、gRPC 或底层数值库在 fork 子进程中崩溃；任务在同一个 worker 进程内串行执行并复用同一份 `Application`。
 
 #### 2.7.1 Application 两阶段启动
 
@@ -321,11 +336,13 @@ def start(self):
 | `SUCCESS` | `finished` |
 | `FAILURE` / `REVOKED` | `failed` |
 
-任务列表分页只读取 `IndexJobRepository` 的 ZSet，不扫描 Celery 内部结构。任务详情读取 Celery result backend。成功结果返回 `{"app_id", "file_id", "chunk_count"}`；失败错误读取 Celery traceback。
+任务列表只读取 `IndexJobRepository` 的 ZSet 最近记录，不扫描 Celery 内部结构。任务详情读取 Celery result backend。成功结果返回 `{"app_id", "file_id", "chunk_count"}`；失败错误读取 Celery traceback。`IndexJobRepository` 使用进程内 Redis client 复用，避免每次入队或查询都重新创建 Redis 客户端。
+
+任务事件实时推送链路：worker 在任务开始、成功或失败时调用 `publish_index_job_event()`，向 Redis Pub/Sub channel `rag:index:events:{app_id}` 发布 `{"app_id", "job_id", "status", "filename"}` 事件；API 进程的 SSE 端点 `GET /api/index/jobs/stream` 订阅该 channel，把事件转发给管理台，管理台据此原位更新最近 200 条任务快照。worker 重试产生的中间状态不发事件，只发布 `started` / `finished` / `failed` 三种状态。事件发布失败（RedisError）时静默降级，不影响索引流程本身，管理台通过任务列表接口轮询兜底。
 
 #### 2.7.3 重试与错误处理
 
-任务执行异常时按 `INDEX_JOB_RETRY_MAX` 判断是否交给 Celery retry。业务不可恢复错误直接失败；临时基础设施异常可以重试。重试间隔使用 Celery 当前默认策略。
+任务执行异常时按 `INDEX_JOB_RETRY_MAX` 判断是否交给 Celery retry。业务不可恢复错误直接失败；临时基础设施异常可以重试。API 进程调用 `send_task()` 时使用有界 producer retry 策略，避免 broker 暂时不可用时无限阻塞请求线程；producer retry 次数和间隔由 `INDEX_ENQUEUE_MAX_RETRIES`、`INDEX_ENQUEUE_RETRY_INTERVAL_START`、`INDEX_ENQUEUE_RETRY_INTERVAL_STEP`、`INDEX_ENQUEUE_RETRY_INTERVAL_MAX` 控制。
 
 | 错误 | 处理 |
 |---|---|
@@ -334,6 +351,8 @@ def start(self):
 | Redis broker/backend 不可用 | Celery/redis client 负责重连；API 入队失败返回 503 |
 | Qdrant/MinIO 临时不可用 | 任务重试，超过重试次数后失败 |
 | 模型/OCR 运行异常 | 任务失败或按配置重试 |
+
+任务超时使用三层防护：`task_soft_time_limit`（默认 `INDEX_JOB_TIMEOUT_SECONDS` 1800 秒）到点抛 `SoftTimeLimitExceeded`，任务捕获后按 `INDEX_JOB_RETRY_MAX` 决定重试或失败，正常 ack 不会触发消息重投；`task_time_limit`（软超时 + 300 秒）兜底杀死卡在原生调用（torch/OCR）的任务；`visibility_timeout`（`max(3600, 超时 * 2)`）大于执行窗口，避免正常执行中的任务被重新投递造成重复索引。
 
 #### 2.7.4 限流与保留
 
@@ -347,9 +366,9 @@ def start(self):
 
 #### 2.7.5 进程生命周期
 
-Docker Celery 主进程负责 fork 和监督 worker 子进程。主进程通过 `worker_init` 创建基础 `Application` 对象；子进程通过 `worker_process_init` 加载模型、初始化运行连接，并在后续任务中复用。Native solo worker 不 fork 子进程，任务在 worker 进程内直接执行。worker 退出、信号处理、崩溃重启、任务确认由 Celery 管理；Docker 和进程管理器负责容器级重启。
+Docker Celery 主进程负责 fork 和监督 worker 子进程。主进程通过 `worker_init` 创建基础 `Application` 对象；子进程通过 `worker_process_init` 加载模型、初始化运行连接，并在后续任务中复用。Native solo worker 不 fork 子进程，任务在 worker 进程内直接执行。Docker GPU worker 同样使用 `solo` pool 单实例，模型在进程内加载一次并常驻；GPU 场景不启用 prefork。worker 退出、信号处理、崩溃重启、任务确认由 Celery 管理；Docker 和进程管理器负责容器级重启。
 
-worker 与 API 进程各自常驻一份模型，这是当前部署约定。后续如果内存成为瓶颈，再评估独立模型服务或只让 worker 持有模型、API 进程不预加载模型的形态。
+worker 与 API 进程各自常驻一份模型，这是当前部署约定。API 进程服务同步索引、搜索和管理台能力；worker 进程服务异步索引任务。两边各持有一份模型内存，换取进程职责清晰和故障隔离。后续如果内存成为瓶颈，再评估独立模型服务或只让 worker 持有模型、API 进程不预加载模型的形态。
 
 ---
 
@@ -978,6 +997,8 @@ deploy:
           count: all
           capabilities: [gpu]
 ```
+
+GPU profile 的 index worker 使用 `solo` pool 单实例，不使用 prefork；原因和并发扩展方向见 2.7。
 
 Docker Compose 默认设置 `TZ=Asia/Shanghai`，对外展示时间和日志时间会按该时区输出。存储层仍保存 UTC 时间；部署到其他时区时通过外部 `TZ` 环境变量覆盖展示时区。
 

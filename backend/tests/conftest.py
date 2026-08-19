@@ -13,6 +13,7 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 os.environ.setdefault("CONFIG_FILE", str(BACKEND_DIR / "config" / "local.yaml"))
+TEST_APP_ID = "test_imsdom"
 
 
 @pytest.fixture(autouse=True)
@@ -38,7 +39,7 @@ def store_test_env(request, tmp_path):
 
     st.close_store()
     search_module._default_store = None
-    app_chunks_collection = "imsdom_chunks"
+    app_chunks_collection = f"{TEST_APP_ID}_chunks"
     _drop_qdrant_collection(cf.QDRANT_URL, app_chunks_collection)
     test_config_path = tmp_path / "qdrant_test.yaml"
     test_config_path.write_text(
@@ -144,12 +145,12 @@ class AppApiClient:
 
 @pytest.fixture
 def app_api_client(api_client):
-    app_resp = api_client.post("/api/apps", json={"app_id": "imsdom"})
+    app_resp = api_client.post("/api/apps", json={"app_id": TEST_APP_ID})
     assert app_resp.status_code == 201, app_resp.text
-    db_resp = api_client.post("/api/apps/imsdom/database")
+    db_resp = api_client.post(f"/api/apps/{TEST_APP_ID}/database")
     assert db_resp.status_code == 200, db_resp.text
     credential = app_resp.json()
-    return AppApiClient(api_client, "imsdom", credential["access_key"], credential["secret_key"])
+    return AppApiClient(api_client, TEST_APP_ID, credential["access_key"], credential["secret_key"])
 
 
 def json_dumps(value) -> str:

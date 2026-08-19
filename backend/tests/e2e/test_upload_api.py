@@ -12,17 +12,17 @@ class TestUploadAPI:
 
         uploaded = []
         monkeypatch.setattr(main, "create_file_id", lambda: "abc123")
-        monkeypatch.setattr(main, "_upload_file_to_storage", lambda app_id, file_id, filename, content, content_type: uploaded.append((app_id, file_id, filename, content, content_type)) or "s3://rag-dev/uploads/imsdom/abc123/test_ai.txt", raising=False)
+        monkeypatch.setattr(main, "_upload_file_to_storage", lambda app_id, file_id, filename, content, content_type: uploaded.append((app_id, file_id, filename, content, content_type)) or f"s3://rag-dev/uploads/{app_api_client.app_id}/abc123/test_ai.txt", raising=False)
 
         with open(test_txt_path, "rb") as f:
             resp = api_client.post(
-                "/api/upload", data={"app_id": "imsdom"}, files={"file": ("test_ai.txt", f, "text/plain")}
+                "/api/upload", data={"app_id": app_api_client.app_id}, files={"file": ("test_ai.txt", f, "text/plain")}
             )
         assert resp.status_code == 200, resp.text
         data = resp.json()
-        assert data == {"file_id": "abc123", "s3_url": "s3://rag-dev/uploads/imsdom/abc123/test_ai.txt", "filename": "test_ai.txt"}
+        assert data == {"file_id": "abc123", "s3_url": f"s3://rag-dev/uploads/{app_api_client.app_id}/abc123/test_ai.txt", "filename": "test_ai.txt"}
         assert uploaded
-        assert uploaded[0][0] == "imsdom"
+        assert uploaded[0][0] == app_api_client.app_id
         assert uploaded[0][1] == "abc123"
         assert uploaded[0][2] == "test_ai.txt"
 
@@ -32,7 +32,7 @@ class TestUploadAPI:
         bad.write_text("content")
         with open(bad, "rb") as f:
             resp = api_client.post(
-                "/api/upload", data={"app_id": "imsdom"}, files={"file": ("data.xyz", f, "application/octet-stream")}
+                "/api/upload", data={"app_id": app_api_client.app_id}, files={"file": ("data.xyz", f, "application/octet-stream")}
             )
         assert resp.status_code == 400
         assert "Unsupported file type" in resp.text
@@ -42,15 +42,15 @@ class TestUploadAPI:
         import main
 
         monkeypatch.setattr(main, "create_file_id", lambda: "img123")
-        monkeypatch.setattr(main, "_upload_file_to_storage", lambda app_id, file_id, filename, content, content_type: "s3://rag-dev/uploads/imsdom/img123/test_ocr.png", raising=False)
+        monkeypatch.setattr(main, "_upload_file_to_storage", lambda app_id, file_id, filename, content, content_type: f"s3://rag-dev/uploads/{app_api_client.app_id}/img123/test_ocr.png", raising=False)
 
         with open(test_img_path, "rb") as f:
             resp = api_client.post(
-                "/api/upload", data={"app_id": "imsdom"}, files={"file": ("test_ocr.png", f, "image/png")}
+                "/api/upload", data={"app_id": app_api_client.app_id}, files={"file": ("test_ocr.png", f, "image/png")}
             )
         assert resp.status_code == 200, resp.text
         data = resp.json()
-        assert data == {"file_id": "img123", "s3_url": "s3://rag-dev/uploads/imsdom/img123/test_ocr.png", "filename": "test_ocr.png"}
+        assert data == {"file_id": "img123", "s3_url": f"s3://rag-dev/uploads/{app_api_client.app_id}/img123/test_ocr.png", "filename": "test_ocr.png"}
 
     def test_upload_no_filename(self, app_api_client, api_client, tmp_path):
         """Uploading a file with no filename returns a client error."""
@@ -58,7 +58,7 @@ class TestUploadAPI:
         bad.write_text("content")
         with open(bad, "rb") as f:
             resp = api_client.post(
-                "/api/upload", data={"app_id": "imsdom"}, files={"file": ("", f, "text/plain")}
+                "/api/upload", data={"app_id": app_api_client.app_id}, files={"file": ("", f, "text/plain")}
             )
         assert resp.status_code in (400, 422), (
             f"Expected 400 or 422, got {resp.status_code}: {resp.text}"
@@ -222,7 +222,7 @@ class TestUploadAPI:
 def _uploaded_file(api_client, file_id: str) -> dict:
     import main
 
-    with main.application.store.app_context("imsdom"):
+    with main.application.store.app_context(api_client.app_id):
         documents = main.application.store.get_search_documents(main.application.store.build_file_filter([file_id]))
     document = next((item for item in documents if (item.get("metadata") or {}).get("file_id") == file_id), None)
     assert document is not None

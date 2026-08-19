@@ -235,7 +235,7 @@ POST /api/open/index/jobs
 Content-Type: application/json
 ```
 
-请求字段与 `POST /api/open/index` 相同。管理台上传后的 `/api/index/jobs` 必须传 `file_id`，也就是 `/api/upload` 返回的文件 ID。
+请求字段与 `POST /api/open/index` 相同。管理台使用 User JWT 调用 `POST /api/index/jobs` 创建任务时必须传 `file_id`，也就是 `/api/upload` 返回的文件 ID。
 
 响应：
 
@@ -417,10 +417,66 @@ GET /api/traces?limit=200
 ### 运行日志
 
 ```http
-GET /api/logs
+GET /api/logs/stream
 ```
 
 返回 `text/event-stream`。连接建立后先输出最近日志 ring buffer，再持续输出实时运行日志。
+
+### 索引任务列表
+
+```http
+GET /api/index/jobs?limit=200&app_id=<app_id>
+```
+
+管理台任务列表接口，User JWT 鉴权。`app_id` 传入时按该应用过滤；`limit` 默认 50，必须大于 0，上限 200。接口返回最近 `limit` 条任务快照，没有 cursor 分页，不用于全量历史查询。
+
+响应：
+
+```json
+{
+  "jobs": [
+    {
+      "app_id": "imsdom",
+      "file_id": "550e8400e29b41d4a716446655440000",
+      "job_id": "a3f47d1b05a944d4927e0c87531f9c2a",
+      "status": "finished",
+      "filename": "example.pdf",
+      "s3_url": "s3://bucket/path/to/example.pdf",
+      "chunk_count": 12,
+      "error": null,
+      "created_at": "2026-08-17T09:00:00+08:00",
+      "enqueued_at": "2026-08-17T09:00:00+08:00",
+      "started_at": "2026-08-17T09:00:02+08:00",
+      "ended_at": "2026-08-17T09:00:18+08:00"
+    }
+  ]
+}
+```
+
+任务列表用于管理台展示最近任务快照；任务详情和状态语义见"查询异步索引任务"。
+
+### 索引任务事件流
+
+```http
+GET /api/index/jobs/stream?app_id=<app_id>
+```
+
+管理台实时任务事件接口，User JWT 鉴权，`app_id` 必填。返回 `text/event-stream`。任务开始、成功或失败时，worker 通过 Redis Pub/Sub 发布事件，API 进程订阅并转发为 SSE 帧：
+
+```text
+data: {"app_id": "imsdom", "job_id": "a3f47d1b05a944d4927e0c87531f9c2a", "status": "started", "filename": "example.pdf"}
+```
+
+事件字段：
+
+| 字段 | 说明 |
+|---|---|
+| `app_id` | 应用 ID |
+| `job_id` | 任务 ID |
+| `status` | `started` / `finished` / `failed`；worker 重试的中间状态不发事件 |
+| `filename` | 展示文件名，可能为 `null` |
+
+事件发布失败（Redis 不可用）时索引流程不受影响，管理台通过索引任务列表接口轮询兜底。
 
 ### 上传文件列表
 

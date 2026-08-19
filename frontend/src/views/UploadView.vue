@@ -178,7 +178,7 @@ async function deleteFile(file) {
   try {
     const params = {}
     if (activeAppStore.appId) params.app_id = activeAppStore.appId
-    await axios.delete(`${API}/files/${encodeURIComponent(file.id)}`, { params })
+    await axios.delete(`${API}/files/${file.id}`, { params })
     showToast('success', t('upload.deletedFile', { name: file.filename }))
     await fetchFiles()
   } catch (err) {

@@ -26,7 +26,7 @@ def _index_ready_file(api_client, test_txt_path, monkeypatch, filename="test_ai.
     assert resp.status_code == 200, resp.text
     file_id = resp.json()["file_id"]
     assert resp.json() == {"file_id": file_id}
-    with main.application.store.app_context("imsdom"):
+    with main.application.store.app_context(api_client.app_id):
         documents = main.application.store.get_search_documents(main.application.store.build_file_filter([file_id]))
     assert documents
     return file_id
@@ -74,7 +74,7 @@ class TestSearchAPI:
         import main
 
         file_id = _index_ready_file(app_api_client, test_txt_path, monkeypatch)
-        with main.application.store.app_context("imsdom"):
+        with main.application.store.app_context(app_api_client.app_id):
             main.application.store.add_file_chunks(
                 [{"id": "other-file-chunk", "content": "人工智能 other file", "metadata": {"filename": "other.txt", "chunk_index": 0}}],
                 file_id="other-file",
@@ -140,7 +140,7 @@ class TestSearchAPI:
         assert "elapsed_ms" in data
         assert isinstance(data["elapsed_ms"], (int, float))
         assert data["elapsed_ms"] >= 0
-        traces = api_client.get("/api/traces", params={"app_id": "imsdom"}).json()
+        traces = api_client.get("/api/traces", params={"app_id": app_api_client.app_id}).json()
         assert data["elapsed_ms"] == traces["traces"][0]["elapsed_ms"]
 
     def test_search_response_does_not_include_trace(self, app_api_client, test_txt_path, monkeypatch):

@@ -20,7 +20,7 @@ def test_load_app_config_loads_local_config(monkeypatch):
     assert config.store.type == "qdrant"
     assert config.store.url == "http://localhost:6333"
     assert config.logging.level == "INFO"
-    assert config.logging.file is None
+    assert config.logging.file == "logs/rag.log"
     assert config.logging.max_bytes == 10485760
     assert config.logging.backup_count == 5
     assert config.logging.search_trace is True

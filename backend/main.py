@@ -2,6 +2,7 @@ import os
 import asyncio
 import logging
 import threading
+import time
 import json
 import uuid
 from io import BytesIO
@@ -21,7 +22,8 @@ from app_registry import AppRegistry
 from auth import Principal, authenticate_client_signature, authenticate_password, issue_token, principal_from_authorization
 from bootstrap import Application
 from indexing import create_file_id, enqueue_index_job, index_file, index_presigned_object
-from indexing.queue import IndexQueueRejected, IndexQueueUnavailable, get_index_job, list_index_jobs, _redis_url
+from indexing.queue import IndexQueueRejected, IndexQueueUnavailable, get_index_job, list_index_jobs
+from indexing.repository import redis_url, _index_events_channel
 from indexing.service import SUPPORTED_FILE_EXTENSIONS, filename_from_s3_url, parse_s3_url, validate_supported_file_extension
 from log_buffer import logs_after, recent_logs
 from search import SearchPlan, _SearchExecutor
@@ -297,8 +299,8 @@ def traces(limit: int = 50, app_id: str | None = None, principal: Principal = De
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@app.get("/api/logs")
-async def logs(request: Request, _: Principal = Depends(require_jwt)):
+@app.get("/api/logs/stream")
+async def logs_stream(request: Request, _: Principal = Depends(require_jwt)):
     async def stream():
         initial_events, last_seq = _initial_log_events()
         for event in initial_events:
@@ -440,19 +442,56 @@ def _create_index_job(req: ObjectIndexRequest, principal: Principal):
 
 
 @app.get("/api/index/jobs")
-def index_jobs(limit: int = 50, cursor: str | None = None, app_id: str | None = None, principal: Principal = Depends(require_jwt)):
+def index_jobs(limit: int = 50, app_id: str | None = None, principal: Principal = Depends(require_jwt)):
     selected_app_id = _app_filter(principal, app_id)
     try:
-        page = list_index_jobs(limit=limit, cursor=cursor, app_id=selected_app_id)
+        page = list_index_jobs(limit=limit, app_id=selected_app_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except IndexQueueUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    return {
-        "jobs": [_index_job_record(job) for job in page["jobs"]],
-        "next_cursor": page["next_cursor"],
-        "has_more": page["has_more"],
-    }
+    return {"jobs": [_index_job_record(job) for job in page["jobs"]]}
+
+
+@app.get("/api/index/jobs/stream")
+async def index_jobs_stream(request: Request, app_id: str, principal: Principal = Depends(require_jwt)):
+    selected_app_id = _app_filter(principal, app_id)
+    if not selected_app_id:
+        raise HTTPException(status_code=400, detail="app_id is required")
+
+    def _listen(pubsub, queue):
+        try:
+            while True:
+                msg = pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+                if msg and msg.get("type") == "message":
+                    queue.put_nowait(msg["data"])
+                else:
+                    time.sleep(0.1)
+        except Exception:
+            pass  # pubsub.close() 后 get_message 可能抛 Bad file descriptor / I/O on closed file，静默退出
+
+    async def stream():
+        from redis import Redis
+        redis_conn = Redis.from_url(redis_url())
+        pubsub = redis_conn.pubsub()
+        pubsub.subscribe(_index_events_channel(selected_app_id))
+        queue = asyncio.Queue()
+        thread = threading.Thread(target=_listen, args=(pubsub, queue), daemon=True)
+        thread.start()
+        try:
+            while not await request.is_disconnected():
+                try:
+                    data = await asyncio.wait_for(queue.get(), timeout=1.0)
+                    if isinstance(data, bytes):
+                        data = data.decode("utf-8")
+                    yield f"data: {data}\n\n"
+                except asyncio.TimeoutError:
+                    continue
+        finally:
+            pubsub.close()
+            redis_conn.close()
+
+    return StreamingResponse(stream(), media_type="text/event-stream")
 
 
 @app.post("/api/open/index/jobs/status")
@@ -623,7 +662,7 @@ def _components() -> list[dict[str, Any]]:
         {
             "name": "Redis",
             "status": "ready" if _redis_ready() else "error",
-            "model": _redis_url(),
+            "model": redis_url(),
         },
         {
             "name": "Dense",
@@ -672,7 +711,7 @@ def _redis_ready() -> bool:
     try:
         from redis import Redis
 
-        Redis.from_url(_redis_url(), socket_connect_timeout=0.2, socket_timeout=0.2).ping()
+        Redis.from_url(redis_url(), socket_connect_timeout=0.2, socket_timeout=0.2).ping()
         return True
     except Exception:
         return False

@@ -68,6 +68,7 @@
     "title": "监控",
     "components": "组件",
     "indexJobs": "索引",
+    "indexJobsLimitNote": "仅显示最近 {count} 条",
     "traces": "链路",
     "noIndexJobs": "暂无索引任务",
     "indexQueueUnavailable": "索引队列不可用，请启动 Redis",
@@ -162,7 +163,8 @@
   "apps": {
     "title": "应用",
     "desc": "管理上游系统的 app_id 和 AK/SK",
-    "appIdPlaceholder": "输入 app_id，例如 imsdom",
+    "appIdPlaceholder": "字母开头，仅支持字母、数字、下划线",
+    "appIdRule": "app_id 必须字母开头，长度 2-64，只能包含字母、数字、下划线",
     "create": "新建应用",
     "created": "{appId} 已创建",
     "deleted": "{appId} 已删除",

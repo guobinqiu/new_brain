@@ -65,11 +65,16 @@ const activeAppStore = useActiveAppStore()
 const appsStore = useAppsStore()
 const { apps } = storeToRefs(appsStore)
 
+const APP_ID_PATTERN = /^[A-Za-z][A-Za-z0-9_]{1,63}$/
 const newAppId = ref('')
 const creatingApp = ref(false)
 
 async function createApp() {
   if (!newAppId.value || creatingApp.value) return
+  if (!APP_ID_PATTERN.test(newAppId.value)) {
+    showToast('error', t('apps.appIdRule'))
+    return
+  }
   creatingApp.value = true
   try {
     const res = await axios.post(`${API}/apps`, { app_id: newAppId.value })
@@ -95,7 +100,7 @@ async function deleteApp(app) {
     return
   }
   try {
-    await axios.delete(`${API}/apps/${encodeURIComponent(app.app_id)}`)
+    await axios.delete(`${API}/apps/${app.app_id}`)
     showToast('success', t('apps.deleted', { appId: app.app_id }))
     if (activeAppStore.appId === app.app_id) {
       activeAppStore.appId = ''

@@ -1,5 +1,6 @@
 logging:
   level: INFO
+  file: logs/rag.log
   max_bytes: 10485760
   backup_count: 5
   search_trace: true
