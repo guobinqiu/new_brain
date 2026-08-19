@@ -280,6 +280,37 @@ def start(self):
 
 `load_models()` 只负责模型、分词器和 OCR runtime；`init_connections()` 负责向量库连接、collection 检查和搜索 pipeline 运行绑定。backend 进程调用 `Application.start()` 按顺序执行两个阶段；索引消费器复用同一份 `Application`，不单独加载模型。
 
+### 2.8 API 分层：对内与对外
+
+服务入口按调用方拆成两套路径前缀：
+
+- 对内 `/api/*`：User JWT 登录态，管理台前端使用，契约可随前端发版自由演进。
+- 对外 `/api/open/*`：AK/SK 请求签名认证，供上游系统集成，契约保持稳定。
+
+每个 open 端点都是对应内部端点的薄别名：路由函数只替换认证依赖（`require_jwt` vs `require_aksk`），业务逻辑收敛在同一个实现函数里，两边行为一致。
+
+对外面收敛：只暴露索引、搜索、删除共 4 个业务端点；管理面（apps、monitor、traces、config、upload、presign、files 列表等）不对外。
+
+上游系统有自己的对象存储时，只需要调用 `POST /api/open/index/jobs`，自己生成 `presigned_url` 传入。管理台前端的本地上传链路是 upload → presign → index/jobs 三步；presign 让内部上传的文件也走统一的 `presigned_url` 契约。
+
+对内与对外端点对照：
+
+| 业务 | 对内（JWT，前端用） | 对外（AKSK，上游用） | 共用实现 |
+|---|---|---|---|
+| 同步索引 | `POST /api/index` | `POST /api/open/index` | `_index_object()` |
+| 异步索引 | `POST /api/index/jobs` | `POST /api/open/index/jobs` | `_create_index_job()` |
+| 搜索 | `POST /api/search` | `POST /api/open/search` | `_search()` |
+| 删文件 | `DELETE /api/files/{file_id}` | `DELETE /api/open/files/{file_id}` | `_delete_index_file()` |
+| 上传 | `POST /api/upload` | ——（内部专用） | |
+| 生成下载签名 | `POST /api/presign` | ——（内部专用） | |
+| 文件列表 | `GET /api/files` | ——（内部专用） | |
+| 向量数据 / 应用 / 监控 / 追踪等管理面 | `POST /api/chunks`、`/api/apps`、`/api/monitor`、`/api/traces` 等 | ——（不对外） | |
+
+两处不对称需要说明：
+
+- 删除语义：内部删文件在共用 `_delete_index_file()` 之外还会删除 MinIO/S3 中 `uploads/{app_id}/{file_id}/` 前缀下的原始对象；open 删除只清理当前 app 向量库里的 chunks（见 2.6）。
+- 异步索引请求模型：内部 `/api/index/jobs` 接收 `AdminIndexJobRequest`（继承 `ObjectIndexRequest`，`file_id` 必填，用于回传上传接口生成的文件 ID）；open 侧接收 `ObjectIndexRequest`，`file_id` 可选。两者共用 `_create_index_job()`。
+
 ---
 
 ## 3. 配置目录
