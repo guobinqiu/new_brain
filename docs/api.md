@@ -241,56 +241,11 @@ Content-Type: application/json
 
 ```json
 {
-  "job_id": "a3f47d1b05a944d4927e0c87531f9c2a"
+  "file_id": "550e8400e29b41d4a716446655440000"
 }
 ```
 
-异步索引只创建任务。下载、解析、OCR、embedding 和向量库写入由后台 worker 执行。
-
-### 查询异步索引任务
-
-```http
-POST /api/open/index/jobs/status
-Content-Type: application/json
-```
-
-请求：
-
-```json
-{
-  "job_ids": ["a3f47d1b05a944d4927e0c87531f9c2a"]
-}
-```
-
-响应：
-
-```json
-{
-  "jobs": [
-    {
-      "file_id": "550e8400e29b41d4a716446655440000",
-      "job_id": "a3f47d1b05a944d4927e0c87531f9c2a",
-      "status": "finished",
-      "filename": "example.pdf",
-      "s3_url": "s3://bucket/path/to/example.pdf",
-      "chunk_count": 12,
-      "error": null,
-      "created_at": "2026-08-17T09:00:00+08:00",
-      "enqueued_at": "2026-08-17T09:00:00+08:00",
-      "started_at": "2026-08-17T09:00:02+08:00",
-      "ended_at": "2026-08-17T09:00:18+08:00"
-    }
-  ]
-}
-```
-
-`queued` / `started` 表示任务已接受或正在处理。
-
-`finished` 表示索引已写入向量库，响应里包含 `file_id`。
-
-`failed` 表示索引失败，响应里包含 `error`。
-
-`not_found` 表示任务不存在或状态已过期。
+异步索引入队后立即返回。下载、解析、OCR、embedding 和向量库写入由 backend 进程内的索引消费器后台执行，没有任务状态查询接口；调用方可以用 `file_id` 通过搜索接口验证索引是否就绪。进程内待处理任务队列已满时返回 429。
 
 ## 搜索
 
@@ -400,7 +355,7 @@ GET /api/monitor
 |---|---|
 | `ready` | 应用是否完成初始化 |
 | `profile` | 运行 profile，包括配置名和 store 概要 |
-| `components` | 运行组件列表，包括 Store、Redis、Dense、Sparse、Rerank、OCR 的状态和绑定模型 |
+| `components` | 运行组件列表，包括 Store、Dense、Sparse、Rerank、OCR 的状态和绑定模型 |
 | `capabilities` | 服务能力，包括搜索模式、是否支持配置写入和重启 |
 | `index_contract` | 索引与存储诊断信息，包括 collection、dense 和 sparse 配置等 |
 
@@ -421,62 +376,6 @@ GET /api/logs/stream
 ```
 
 返回 `text/event-stream`。连接建立后先输出最近日志 ring buffer，再持续输出实时运行日志。
-
-### 索引任务列表
-
-```http
-GET /api/index/jobs?limit=200&app_id=<app_id>
-```
-
-管理台任务列表接口，User JWT 鉴权。`app_id` 传入时按该应用过滤；`limit` 默认 50，必须大于 0，上限 200。接口返回最近 `limit` 条任务快照，没有 cursor 分页，不用于全量历史查询。
-
-响应：
-
-```json
-{
-  "jobs": [
-    {
-      "app_id": "imsdom",
-      "file_id": "550e8400e29b41d4a716446655440000",
-      "job_id": "a3f47d1b05a944d4927e0c87531f9c2a",
-      "status": "finished",
-      "filename": "example.pdf",
-      "s3_url": "s3://bucket/path/to/example.pdf",
-      "chunk_count": 12,
-      "error": null,
-      "created_at": "2026-08-17T09:00:00+08:00",
-      "enqueued_at": "2026-08-17T09:00:00+08:00",
-      "started_at": "2026-08-17T09:00:02+08:00",
-      "ended_at": "2026-08-17T09:00:18+08:00"
-    }
-  ]
-}
-```
-
-任务列表用于管理台展示最近任务快照；任务详情和状态语义见"查询异步索引任务"。
-
-### 索引任务事件流
-
-```http
-GET /api/index/jobs/stream?app_id=<app_id>
-```
-
-管理台实时任务事件接口，User JWT 鉴权，`app_id` 必填。返回 `text/event-stream`。任务开始、成功或失败时，worker 通过 Redis Pub/Sub 发布事件，API 进程订阅并转发为 SSE 帧：
-
-```text
-data: {"app_id": "imsdom", "job_id": "a3f47d1b05a944d4927e0c87531f9c2a", "status": "started", "filename": "example.pdf"}
-```
-
-事件字段：
-
-| 字段 | 说明 |
-|---|---|
-| `app_id` | 应用 ID |
-| `job_id` | 任务 ID |
-| `status` | `started` / `finished` / `failed`；worker 重试的中间状态不发事件 |
-| `filename` | 展示文件名，可能为 `null` |
-
-事件发布失败（Redis 不可用）时索引流程不受影响，管理台通过索引任务列表接口轮询兜底。
 
 ### 上传文件列表
 

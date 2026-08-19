@@ -11,7 +11,6 @@
     "upload": "上传",
     "database": "数据库",
     "search": "搜索",
-    "index": "索引",
     "trace": "链路",
     "monitor": "监控",
     "logs": "日志",
@@ -60,42 +59,16 @@
     "uploading": "上传中",
     "files": "上传文件",
     "empty": "暂无上传文件",
-    "indexSubmitted": "已提交 {count} 个索引任务，可在索引页查看状态",
+    "indexSubmitted": "已提交 {count} 个索引任务，处理完成后即可搜索",
     "selectApp": "请先选择应用",
     "deletedFile": "{name} 已删除"
   },
   "monitor": {
     "title": "监控",
     "components": "组件",
-    "indexJobs": "索引",
-    "indexJobsLimitNote": "仅显示最近 {count} 条",
     "traces": "链路",
-    "noIndexJobs": "暂无索引任务",
-    "indexQueueUnavailable": "索引队列不可用，请启动 Redis",
     "noTraces": "暂无查询",
-    "noAppSelected": "请先在应用列表中选择一个应用",
-    "jobFilter": {
-      "all": "全部",
-      "processing": "处理中",
-      "finished": "成功",
-      "failed": "失败"
-    },
-    "jobStatus": {
-      "processing": "处理中",
-      "finished": "成功",
-      "failed": "失败",
-      "missing": "未找到"
-    },
-    "jobColumns": {
-      "status": "状态",
-      "jobId": "任务 ID",
-      "filename": "文件名",
-      "fileId": "文件 ID",
-      "chunks": "分块",
-      "error": "错误",
-      "created": "创建时间",
-      "ended": "结束时间"
-    }
+    "noAppSelected": "请先在应用列表中选择一个应用"
   },
   "status": {
     "ready": "就绪",

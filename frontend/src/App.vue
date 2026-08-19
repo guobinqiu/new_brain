@@ -58,7 +58,6 @@
               <el-menu-item :index="`/apps/${app.app_id}/database`">{{ t('nav.database') }}</el-menu-item>
               <el-menu-item :index="`/apps/${app.app_id}/upload`">{{ t('nav.upload') }}</el-menu-item>
               <el-menu-item :index="`/apps/${app.app_id}/search`">{{ t('nav.search') }}</el-menu-item>
-              <el-menu-item :index="`/apps/${app.app_id}/index`">{{ t('nav.index') }}</el-menu-item>
               <el-menu-item :index="`/apps/${app.app_id}/trace`">{{ t('nav.trace') }}</el-menu-item>
             </el-sub-menu>
             <el-menu-item index="/monitor">{{ t('nav.monitor') }}</el-menu-item>
@@ -113,7 +112,7 @@ const { apps } = storeToRefs(appsStore)
 const lang = computed(() => locale.value)
 const epLocale = computed(() => (locale.value === 'zh' ? zhCn : en))
 
-const SUB_PAGES = ['/database', '/upload', '/search', '/index', '/trace']
+const SUB_PAGES = ['/database', '/upload', '/search', '/trace']
 
 const routerViewKey = computed(() => (appId.value ? `${appId.value}${route.path}` : route.path))
 
@@ -277,7 +276,6 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helv
 .kv-list strong { color: var(--el-text-color-primary); font-weight: 500; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .trace-table-wrap { overflow-x: auto; }
-.job-table-wrap { max-height: 320px; overflow: auto; }
 .apps-table-wrap { max-height: 360px; overflow: auto; }
 .trace-query { color: var(--el-text-color-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .trace-note { font-weight: 500; color: var(--el-text-color-placeholder); }
@@ -287,13 +285,6 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helv
 html.dark .logs-box { background: #050b13; color: #d6e4f2; }
 
 .job-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.job-filters { display: flex; flex-wrap: wrap; gap: 4px; }
-.job-status { font-weight: 600; }
-.job-status.processing { color: var(--el-color-warning); }
-.job-status.finished { color: var(--el-color-success); }
-.job-status.failed { color: var(--el-color-danger); }
-.job-status.missing { color: var(--el-text-color-placeholder); }
-.job-error { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--el-color-danger); }
 .app-create { display: grid; grid-template-columns: minmax(0, 1fr) 120px; gap: 8px; margin-bottom: 12px; }
 .app-row-actions { display: flex; gap: 8px; }
 

@@ -116,16 +116,12 @@ class TestUploadAPI:
         assert resp.status_code == 200, resp.text
         assert resp.json() == {"file_id": "generatedfile001"}
 
-    def test_async_index_job_returns_job_id(self, app_api_client, monkeypatch):
-        """``POST /api/open/index/jobs`` creates an async index job and returns job_id."""
+    def test_async_index_job_returns_file_id(self, app_api_client, monkeypatch):
+        """``POST /api/open/index/jobs`` enqueues an async index job and returns file_id."""
         import main
 
-        class FakeJob:
-            id = "job001"
-
         monkeypatch.setattr(main, "create_file_id", lambda: "550e8400e29b41d4a716446655440000")
-        monkeypatch.setattr(main, "create_job_id", lambda: "job001")
-        monkeypatch.setattr(main, "enqueue_index_job", lambda **kwargs: FakeJob())
+        monkeypatch.setattr(main, "enqueue_index_job", lambda **kwargs: {"file_id": kwargs["file_id"]})
 
         resp = app_api_client.post(
             "/api/open/index/jobs",
@@ -137,18 +133,14 @@ class TestUploadAPI:
         )
 
         assert resp.status_code == 202, resp.text
-        assert resp.json() == {"job_id": "job001"}
+        assert resp.json() == {"file_id": "550e8400e29b41d4a716446655440000"}
 
     def test_async_index_job_accepts_caller_uuid_file_id(self, app_api_client, monkeypatch):
         import main
 
         enqueued = []
 
-        class FakeJob:
-            id = "job001"
-
-        monkeypatch.setattr(main, "create_job_id", lambda: "job001")
-        monkeypatch.setattr(main, "enqueue_index_job", lambda **kwargs: enqueued.append(kwargs) or FakeJob())
+        monkeypatch.setattr(main, "enqueue_index_job", lambda **kwargs: enqueued.append(kwargs) or {"file_id": kwargs["file_id"]})
 
         resp = app_api_client.post(
             "/api/open/index/jobs",
@@ -161,8 +153,9 @@ class TestUploadAPI:
         )
 
         assert resp.status_code == 202, resp.text
-        assert resp.json() == {"job_id": "job001"}
+        assert resp.json() == {"file_id": "550e8400e29b41d4a716446655440000"}
         assert enqueued[0]["file_id"] == "550e8400e29b41d4a716446655440000"
+        assert "job_id" not in enqueued[0]
 
     def test_index_presigned_url_accepts_caller_uuid_file_id(self, app_api_client, monkeypatch):
         """``POST /api/open/index`` accepts caller-provided UUID file_id."""

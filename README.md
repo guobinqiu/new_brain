@@ -2,30 +2,22 @@
 
 ## Native 启动
 
-Native 方式只把后端、前端和索引 worker 跑在宿主机上，默认仍使用 Docker 启动 Qdrant、MinIO 和 Redis。
+Native 方式只把后端和前端跑在宿主机上，默认仍使用 Docker 启动 Qdrant 和 MinIO。异步索引任务由 backend 进程内的索引消费器处理，不需要单独的 worker 进程。
 
-1. 启动 Qdrant、MinIO 和 Redis：
+1. 启动 Qdrant 和 MinIO：
 
 ```bash
-docker compose -f deploy/cpu/docker-compose.yml up -d qdrant minio redis
+docker compose -f deploy/cpu/docker-compose.yml up -d qdrant minio
 ```
 
 2. 启动后端：
 
 ```bash
 cd backend
-S3_ENDPOINT_URL=http://localhost:19000 REDIS_URL=redis://localhost:16379/0 CONFIG_FILE=local.yaml .venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8000
+S3_ENDPOINT_URL=http://localhost:19000 CONFIG_FILE=local.yaml .venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
-3. 处理异步索引任务：
-
-```bash
-just worker
-```
-
-Native worker 使用 Celery `solo` pool 常驻运行，前端上传文件后会自动消费异步索引任务。
-
-4. 启动前端：
+3. 启动前端：
 
 ```bash
 cd frontend
@@ -107,16 +99,15 @@ http://<服务器地址>:28000
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | `POST` | `/api/open/index` | 同步索引对象存储文件，完成后返回 `file_id` |
-| `POST` | `/api/open/index/jobs` | 创建异步索引任务，立即返回 `job_id` |
-| `POST` | `/api/open/index/jobs/status` | 批量查询异步索引任务状态 |
+| `POST` | `/api/open/index/jobs` | 创建异步索引任务，入队后立即返回 `file_id`，处理在 backend 进程内异步完成 |
 | `POST` | `/api/open/search` | 按 `query` 和可选 `file_ids` 搜索知识库 |
 | `DELETE` | `/api/open/files/{file_id}` | 删除当前应用向量库中的索引文件 |
 
-上游如果已经有自己的队列、限流和重试机制，可以调用同步索引；否则建议调用异步索引并轮询任务状态。索引接口接收 `presigned_url`、`s3_url`、可选 `filename` 和可选 `file_id`。上游传 `file_id` 时必须是 UUID；不传时由 RAG 生成。异步任务创建后只返回 `job_id`；任务完成后通过 `POST /api/open/index/jobs/status` 查看 `file_id`、状态和错误。搜索时不传 `file_ids` 表示全库搜索。
+上游如果已经有自己的队列、限流和重试机制，可以调用同步索引；否则建议调用异步索引。索引接口接收 `presigned_url`、`s3_url`、可选 `filename` 和可选 `file_id`。上游传 `file_id` 时必须是 UUID；不传时由 RAG 生成。异步索引入队后立即返回 `file_id`，下载、解析、OCR、embedding 和向量库写入由 backend 进程内的索引消费器后台完成；没有任务状态查询接口，调用方用 `file_id` 通过搜索接口验证索引就绪，backend 重启会丢失队列中未完成任务，需要重新提交。搜索时不传 `file_ids` 表示全库搜索。
 
 上游系统使用的 `app_id`、`access_key` 和 `secret_key` 由管理台创建。每个 `app_id` 对应独立 collection，业务接口根据 AK/SK 签名里的 `app_id` 自动选择当前应用的数据范围。索引前需要先在管理台为该 `app_id` 初始化数据库。
 
-异步索引任务由 Celery 和 Redis 处理。Docker 默认保留成功任务 7 天、失败任务 30 天，可通过 `INDEX_JOB_RESULT_TTL_SECONDS` 和 `INDEX_JOB_FAILURE_TTL_SECONDS` 覆盖。
+异步索引由 backend 进程内的 `InlineIndexConsumer` 处理：进程内 `queue.Queue`，并发固定为 1，超时和失败重试在后台静默进行。待处理任务上限由 `INDEX_MAX_PENDING_JOBS` 控制（默认 10），单任务超时由 `INDEX_JOB_TIMEOUT_SECONDS` 控制（默认 1800 秒），最大重试次数由 `INDEX_JOB_RETRY_MAX` 控制（默认 2）。任务不落盘，backend 重启后队列中未完成任务丢失；原始文件仍在对象存储，可以重新提交索引。
 
 业务接口每次请求都带 AK/SK 签名：
 
@@ -165,7 +156,7 @@ http://<服务器地址>:28000
 
 ### POST /api/open/index/jobs
 
-创建异步索引任务。接口只入队，真正的下载、解析、OCR、embedding 和向量库写入由后台 worker 执行。
+创建异步索引任务。接口只入队，真正的下载、解析、OCR、embedding 和向量库写入由 backend 进程内的索引消费器后台执行。
 
 请求字段：
 
@@ -191,53 +182,11 @@ http://<服务器地址>:28000
 
 ```json
 {
-  "job_id": "a3f47d1b05a944d4927e0c87531f9c2a"
+  "file_id": "550e8400e29b41d4a716446655440000"
 }
 ```
 
-### POST /api/open/index/jobs/status
-
-批量查询异步索引任务状态。
-
-请求字段：
-
-| 字段 | 类型 | 必填 | 说明 |
-|---|---|---|---|
-| `job_ids` | string[] | 是 | `/api/open/index/jobs` 返回的任务 ID 列表 |
-
-`queued` / `started`：任务已接受或正在处理。
-
-`finished`：索引已写入向量库，响应里包含 `file_id`。
-
-`failed`：索引失败，响应里包含 `error`。
-
-`not_found`：任务不存在或状态已过期。
-
-请求：
-
-```json
-{
-  "job_ids": ["a3f47d1b05a944d4927e0c87531f9c2a"]
-}
-```
-
-响应：
-
-```json
-{
-  "jobs": [
-    {
-      "job_id": "a3f47d1b05a944d4927e0c87531f9c2a",
-      "file_id": "550e8400e29b41d4a716446655440000",
-      "status": "finished",
-      "chunk_count": 12,
-      "error": null,
-      "created_at": "2026-08-17T09:00:00+08:00",
-      "ended_at": "2026-08-17T09:00:18+08:00"
-    }
-  ]
-}
-```
+入队成功即表示任务已被接受，接口立即返回 `file_id`。没有任务状态查询接口；调用方可以用 `file_id` 通过搜索接口验证索引是否就绪。backend 重启会丢失队列中未完成的任务，需要重新提交索引。
 
 ### POST /api/open/search
 

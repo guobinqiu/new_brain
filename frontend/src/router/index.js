@@ -5,7 +5,6 @@ import DatabaseView from '../views/DatabaseView.vue'
 import UploadView from '../views/UploadView.vue'
 import SearchView from '../views/SearchView.vue'
 import MonitorView from '../views/MonitorView.vue'
-import IndexJobsView from '../views/IndexJobsView.vue'
 import TracesView from '../views/TracesView.vue'
 import LogsView from '../views/LogsView.vue'
 import ConfigView from '../views/ConfigView.vue'
@@ -19,7 +18,6 @@ const router = createRouter({
     { path: '/upload', component: UploadView },
     { path: '/search', component: SearchView },
     { path: '/monitor', component: MonitorView },
-    { path: '/index', component: IndexJobsView },
     { path: '/trace', component: TracesView },
     { path: '/logs', component: LogsView },
     { path: '/config', component: ConfigView },

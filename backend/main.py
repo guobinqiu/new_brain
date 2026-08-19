@@ -2,7 +2,6 @@ import os
 import asyncio
 import logging
 import threading
-import time
 import json
 import uuid
 from io import BytesIO
@@ -22,8 +21,8 @@ from app_registry import AppRegistry
 from auth import Principal, authenticate_client_signature, authenticate_password, issue_token, principal_from_authorization
 from bootstrap import Application
 from indexing import create_file_id, enqueue_index_job, index_file, index_presigned_object
-from indexing.queue import IndexQueueRejected, IndexQueueUnavailable, get_index_job, list_index_jobs
-from indexing.repository import redis_url, _index_events_channel
+from indexing.consumer import InlineIndexConsumer
+from indexing.queue import IndexQueueRejected
 from indexing.service import SUPPORTED_FILE_EXTENSIONS, filename_from_s3_url, parse_s3_url, validate_supported_file_extension
 from log_buffer import logs_after, recent_logs
 from search import SearchPlan, _SearchExecutor
@@ -87,10 +86,6 @@ class AdminIndexJobRequest(ObjectIndexRequest):
     file_id: str = Field(..., min_length=1, max_length=64)
 
 
-class IndexJobsStatusRequest(BaseModel):
-    job_ids: list[str] = Field(..., min_length=1, max_length=200)
-
-
 class PresignRequest(BaseModel):
     s3_url: str = Field(..., min_length=1)
     expires_in: int = Field(3600, ge=60, le=86400)
@@ -132,11 +127,13 @@ STARTUP_RETRY_MAX_INTERVAL_SECONDS = 30
 SEARCH_TRACE_LIMIT = 200
 _search_traces = deque(maxlen=SEARCH_TRACE_LIMIT)
 _search_traces_lock = threading.Lock()
+_index_consumer: InlineIndexConsumer | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """启动进程后在后台初始化 RAG，避免数据库暂时不可用导致进程退出。"""
+    global _index_consumer
     configure_logging(application.config.logging)
     app.state.application = application
     stop_event = None
@@ -148,7 +145,15 @@ async def lifespan(app: FastAPI):
         logger.info("Preloading models ...", extra={"event": "startup_preload"})
         application.start()
         logger.info("Startup model preload done", extra={"event": "startup_ready"})
+    # Inline index consumer lives in-process; it idles on queue.get() until the
+    # API enqueues a job (which is guarded by _require_ready), so it is safe to
+    # start before the models finish loading.
+    _index_consumer = InlineIndexConsumer(application)
+    await _index_consumer.start()
     yield
+    if _index_consumer is not None:
+        await _index_consumer.stop()
+        _index_consumer = None
     if stop_event is not None:
         stop_event.set()
     application.stop()
@@ -174,10 +179,6 @@ def ready():
     if not application.ready:
         raise HTTPException(503, "search is not initialized")
     return {"status": "ready"}
-
-
-def create_job_id() -> str:
-    return uuid.uuid4().hex
 
 
 def require_jwt(authorization: str | None = Header(None)) -> Principal:
@@ -415,117 +416,26 @@ def _create_index_job(req: ObjectIndexRequest, principal: Principal):
     except ValueError as e:
         raise HTTPException(400, str(e))
     file_id = getattr(req, "file_id", None) or create_file_id()
-    job_id = create_job_id()
     effective_principal = _database_principal(principal, req.app_id)
     try:
         _require_app_database(effective_principal)
-        job = enqueue_index_job(
-            job_id=job_id,
+        enqueue_index_job(
             app_id=effective_principal.app_id,
             file_id=file_id,
             presigned_url=req.presigned_url,
             s3_url=req.s3_url,
             filename=filename,
         )
-        return {"job_id": job.id}
+        return {"file_id": file_id}
     except HTTPException:
         raise
     except IndexQueueRejected as e:
         raise HTTPException(429, str(e))
-    except IndexQueueUnavailable as e:
-        raise HTTPException(503, str(e))
     except ValueError as e:
         raise HTTPException(400, str(e))
     except Exception as e:
         logger.exception("Object index job failed", extra={"event": "object_index_job_failed", "document_filename": filename, "s3_url": req.s3_url})
         raise HTTPException(500, str(e))
-
-
-@app.get("/api/index/jobs")
-def index_jobs(limit: int = 50, app_id: str | None = None, principal: Principal = Depends(require_jwt)):
-    selected_app_id = _app_filter(principal, app_id)
-    try:
-        page = list_index_jobs(limit=limit, app_id=selected_app_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except IndexQueueUnavailable as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-    return {"jobs": [_index_job_record(job) for job in page["jobs"]]}
-
-
-@app.get("/api/index/jobs/stream")
-async def index_jobs_stream(request: Request, app_id: str, principal: Principal = Depends(require_jwt)):
-    selected_app_id = _app_filter(principal, app_id)
-    if not selected_app_id:
-        raise HTTPException(status_code=400, detail="app_id is required")
-
-    def _listen(pubsub, queue):
-        try:
-            while True:
-                msg = pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
-                if msg and msg.get("type") == "message":
-                    queue.put_nowait(msg["data"])
-                else:
-                    time.sleep(0.1)
-        except Exception:
-            pass  # pubsub.close() 后 get_message 可能抛 Bad file descriptor / I/O on closed file，静默退出
-
-    async def stream():
-        from redis import Redis
-        redis_conn = Redis.from_url(redis_url())
-        pubsub = redis_conn.pubsub()
-        pubsub.subscribe(_index_events_channel(selected_app_id))
-        queue = asyncio.Queue()
-        thread = threading.Thread(target=_listen, args=(pubsub, queue), daemon=True)
-        thread.start()
-        try:
-            while not await request.is_disconnected():
-                try:
-                    data = await asyncio.wait_for(queue.get(), timeout=1.0)
-                    if isinstance(data, bytes):
-                        data = data.decode("utf-8")
-                    yield f"data: {data}\n\n"
-                except asyncio.TimeoutError:
-                    continue
-        finally:
-            pubsub.close()
-            redis_conn.close()
-
-    return StreamingResponse(stream(), media_type="text/event-stream")
-
-
-@app.post("/api/open/index/jobs/status")
-def client_index_jobs_status(req: IndexJobsStatusRequest, principal: Principal = Depends(require_aksk)):
-    return _index_jobs_status(req, principal)
-
-
-@app.post("/api/index/jobs/status")
-def admin_index_jobs_status(req: IndexJobsStatusRequest, principal: Principal = Depends(require_jwt)):
-    return _index_jobs_status(req, principal)
-
-
-@app.get("/api/index/jobs/{job_id}")
-def index_job_status(job_id: str, principal: Principal = Depends(require_jwt)):
-    return _index_job_status(job_id, principal)
-
-
-def _index_jobs_status(req: IndexJobsStatusRequest, principal: Principal):
-    principal = _effective_principal(principal)
-    jobs = []
-    for job_id in req.job_ids:
-        jobs.append(_index_job_status(job_id, principal))
-    return {"jobs": jobs}
-
-
-def _index_job_status(job_id: str, principal: Principal):
-    principal = _effective_principal(principal)
-    try:
-        job = get_index_job(job_id)
-    except IndexQueueUnavailable as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-    if job is None or (principal.type == "app" and _job_app_id(job) != principal.app_id):
-        return {"job_id": job_id, "status": "not_found"}
-    return _index_job_record(job)
 
 
 @app.post("/api/presign")
@@ -660,11 +570,6 @@ def _components() -> list[dict[str, Any]]:
             "model": application.config.store.type,
         },
         {
-            "name": "Redis",
-            "status": "ready" if _redis_ready() else "error",
-            "model": redis_url(),
-        },
-        {
             "name": "Dense",
             "status": _component_status(application.dense, enabled=application.config.dense is not None, error=application.component_errors.get("dense")),
             "model": _component_model(application.config.dense),
@@ -705,16 +610,6 @@ def _component_model(component_config: Any) -> str | None:
 
 def _is_ready(component: Any) -> bool:
     return bool(getattr(component, "ready", False))
-
-
-def _redis_ready() -> bool:
-    try:
-        from redis import Redis
-
-        Redis.from_url(redis_url(), socket_connect_timeout=0.2, socket_timeout=0.2).ping()
-        return True
-    except Exception:
-        return False
 
 
 def _store_context(principal: Principal):
@@ -1050,43 +945,3 @@ def _iso_datetime(value) -> str | None:
     if value.tzinfo is None:
         value = value.replace(tzinfo=timezone.utc)
     return value.astimezone().isoformat(timespec="seconds")
-
-
-def _job_error(job) -> str | None:
-    exc_info = getattr(job, "exc_info", None)
-    if not exc_info:
-        return None
-    lines = [line.strip() for line in str(exc_info).splitlines() if line.strip()]
-    return lines[-1] if lines else str(exc_info)
-
-
-def _job_status(job) -> str:
-    status = job.get_status(refresh=True)
-    return getattr(status, "value", str(status))
-
-
-def _job_app_id(job) -> str | None:
-    result = job.result if isinstance(job.result, dict) else {}
-    meta = getattr(job, "meta", {}) or {}
-    return result.get("app_id") or meta.get("app_id")
-
-
-def _index_job_record(job, file_id: str | None = None) -> dict[str, Any]:
-    result = job.result if isinstance(job.result, dict) else {}
-    meta = getattr(job, "meta", {}) or {}
-    resolved_file_id = file_id or result.get("file_id") or meta.get("file_id")
-    status = _job_status(job)
-    return {
-        "app_id": _job_app_id(job),
-        "file_id": resolved_file_id,
-        "job_id": job.id,
-        "status": status,
-        "filename": meta.get("filename"),
-        "s3_url": meta.get("s3_url"),
-        "chunk_count": result.get("chunk_count"),
-        "error": _job_error(job) if status == "failed" else None,
-        "created_at": _iso_datetime(job.created_at),
-        "enqueued_at": _iso_datetime(job.enqueued_at),
-        "started_at": _iso_datetime(job.started_at),
-        "ended_at": _iso_datetime(job.ended_at),
-    }

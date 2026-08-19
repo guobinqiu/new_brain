@@ -35,10 +35,3 @@ export function escapeHtml(text) {
   el.textContent = text
   return el.innerHTML
 }
-
-export function jobStatusClass(status) {
-  if (status === 'finished') return 'finished'
-  if (status === 'failed') return 'failed'
-  if (status === 'not_found') return 'missing'
-  return 'processing'
-}

@@ -11,7 +11,6 @@
     "upload": "Upload",
     "database": "Database",
     "search": "Search",
-    "index": "Index",
     "trace": "Trace",
     "monitor": "Monitor",
     "logs": "Logs",
@@ -60,42 +59,16 @@
     "uploading": "Uploading",
     "files": "Uploaded files",
     "empty": "No uploaded files",
-    "indexSubmitted": "{count} indexing job(s) submitted. Check status on the Index page.",
+    "indexSubmitted": "{count} indexing task(s) submitted. They will be searchable once processed.",
     "selectApp": "Select an app first",
     "deletedFile": "{name} deleted"
   },
   "monitor": {
     "title": "Runtime",
     "components": "Components",
-    "indexJobs": "Index",
-    "indexJobsLimitNote": "Latest {count} only",
     "traces": "Trace",
-    "noIndexJobs": "No index jobs",
-    "indexQueueUnavailable": "Index queue unavailable. Start Redis.",
     "noTraces": "No searches yet",
-    "noAppSelected": "Select an app first",
-    "jobFilter": {
-      "all": "All",
-      "processing": "Processing",
-      "finished": "Success",
-      "failed": "Failed"
-    },
-    "jobStatus": {
-      "processing": "Processing",
-      "finished": "Success",
-      "failed": "Failed",
-      "missing": "Missing"
-    },
-    "jobColumns": {
-      "status": "Status",
-      "jobId": "Job ID",
-      "filename": "Filename",
-      "fileId": "File ID",
-      "chunks": "Chunks",
-      "error": "Error",
-      "created": "Created",
-      "ended": "Ended"
-    }
+    "noAppSelected": "Select an app first"
   },
   "status": {
     "ready": "Ready",
