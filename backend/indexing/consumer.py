@@ -59,6 +59,16 @@ class InlineIndexConsumer:
         # max_workers=1 串行化索引，超时后的孤儿线程不会与下一个任务的 GPU 工作重叠（设计 §4.3）。
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="index-worker")
 
+    def _upsert_record(self, result: dict) -> None:
+        self.application.database.upsert_file(
+            result["app_id"],
+            result["file_id"],
+            result["filename"],
+            result["s3_url"],
+            size=result["size"],
+            chunk_count=result["chunk_count"],
+        )
+
     async def start(self) -> None:
         _register_consumer(self)
         self.task = asyncio.create_task(self._loop())
@@ -93,7 +103,7 @@ class InlineIndexConsumer:
         # _index_object 自己也会进 app_context，这里是兜底。
         ctx = contextvars.copy_context()
         try:
-            await asyncio.wait_for(
+            result = await asyncio.wait_for(
                 loop.run_in_executor(
                     self.executor,
                     ctx.run,
@@ -101,6 +111,7 @@ class InlineIndexConsumer:
                 ),
                 timeout=self.timeout,
             )
+            self._upsert_record(result)
             return
         except ValueError as exc:
             # 不可重试（app 数据库未初始化、不支持的文件类型）：直接丢弃。
@@ -163,7 +174,7 @@ def _index_object(application, job) -> dict:
     if not application.store.app_collection_exists(app_id):
         raise ValueError("app database is not initialized")
     with application.store.app_context(app_id):
-        count = index_presigned_object(application, file_id, presigned_url, s3_url, filename)
+        count, file_size = index_presigned_object(application, file_id, presigned_url, s3_url, filename)
     logger.info(
         "Object indexed",
         extra={
@@ -175,4 +186,11 @@ def _index_object(application, job) -> dict:
             "chunk_count": count,
         },
     )
-    return {"app_id": app_id, "file_id": file_id, "chunk_count": count}
+    return {
+        "app_id": app_id,
+        "file_id": file_id,
+        "chunk_count": count,
+        "size": file_size,
+        "s3_url": s3_url,
+        "filename": filename,
+    }

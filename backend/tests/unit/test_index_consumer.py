@@ -55,9 +55,20 @@ class FakeStore:
         return len(chunks)
 
 
+class FakeDatabase:
+    """记录 upsert_file 调用的内存假数据库（架构 D 契约）。"""
+
+    def __init__(self) -> None:
+        self.upsert_calls: list[tuple] = []
+
+    def upsert_file(self, app_id, file_id, filename, s3_url, **kwargs) -> None:
+        self.upsert_calls.append((app_id, file_id, filename, s3_url, kwargs))
+
+
 class FakeApplication:
-    def __init__(self, store: FakeStore | None = None) -> None:
+    def __init__(self, store: FakeStore | None = None, database: FakeDatabase | None = None) -> None:
         self.store = store or FakeStore()
+        self.database = database or FakeDatabase()
 
 
 def _job(
@@ -89,6 +100,23 @@ def _clear_consumer_singleton():
 
 
 # --------------------------------------------------------------------------- #
+# 数据库记录 upsert（架构 D）
+# --------------------------------------------------------------------------- #
+
+def test_consumer_upserts_database_record_on_success():
+    import indexing.consumer as consumer_mod
+
+    calls = []
+    db = type("FakeDB", (), {
+        "upsert_file": lambda self, app_id, file_id, filename, s3_url, **kw: calls.append((app_id, file_id, filename, s3_url, kw)),
+    })()
+    app = type("FakeApp", (), {"database": db})()
+    consumer = consumer_mod.InlineIndexConsumer(app)
+    consumer._upsert_record({"app_id": "app1", "file_id": "f1", "chunk_count": 3, "size": 10, "s3_url": "s3://b/a.txt", "filename": "a.txt"})
+    assert calls == [("app1", "f1", "a.txt", "s3://b/a.txt", {"size": 10, "chunk_count": 3})]
+
+
+# --------------------------------------------------------------------------- #
 # _run_job：成功
 # --------------------------------------------------------------------------- #
 
@@ -97,7 +125,14 @@ def test_run_job_success_consumes_without_retry(monkeypatch):
 
     def fake_index_object(application, job):
         calls.append(job)
-        return {"app_id": job["app_id"], "file_id": job["file_id"], "chunk_count": 5}
+        return {
+            "app_id": job["app_id"],
+            "file_id": job["file_id"],
+            "chunk_count": 5,
+            "size": 10,
+            "s3_url": job["s3_url"],
+            "filename": job["filename"],
+        }
 
     monkeypatch.setattr(consumer_mod, "_index_object", fake_index_object)
 
@@ -290,7 +325,7 @@ def test_index_object_enters_app_context_for_app(monkeypatch):
     def fake_index_presigned(application, file_id, presigned_url, s3_url, filename):
         seen["collection"] = current_collection()
         seen["file_id"] = file_id
-        return 7
+        return 7, 1
 
     monkeypatch.setattr(consumer_mod, "index_presigned_object", fake_index_presigned)
     store = FakeStore(exists=True)
@@ -316,7 +351,7 @@ def test_app_context_isolation_between_apps(monkeypatch):
 
     def fake_index_presigned(application, file_id, presigned_url, s3_url, filename):
         seen.append((file_id, current_collection()))
-        return 1
+        return 1, 1
 
     monkeypatch.setattr(consumer_mod, "index_presigned_object", fake_index_presigned)
     store = FakeStore(exists=True)
@@ -374,7 +409,14 @@ def test_serial_processing_no_concurrent_index_calls(monkeypatch):
         end = time.monotonic()
         with lock:
             timeline.append((start, end))
-        return {"chunk_count": 0}
+        return {
+            "app_id": job["app_id"],
+            "file_id": job["file_id"],
+            "chunk_count": 0,
+            "size": 0,
+            "s3_url": job["s3_url"],
+            "filename": job["filename"],
+        }
 
     monkeypatch.setattr(consumer_mod, "_index_object", slow_index_object)
 
@@ -403,7 +445,14 @@ def test_loop_consumes_jobs_in_order(monkeypatch):
 
     def fake_index_object(application, job):
         processed.append(job["file_id"])
-        return {"chunk_count": 1}
+        return {
+            "app_id": job["app_id"],
+            "file_id": job["file_id"],
+            "chunk_count": 1,
+            "size": 1,
+            "s3_url": job["s3_url"],
+            "filename": job["filename"],
+        }
 
     monkeypatch.setattr(consumer_mod, "_index_object", fake_index_object)
 

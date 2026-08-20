@@ -114,10 +114,18 @@ def test_delete_app_api_removes_credentials(monkeypatch, tmp_path):
     AppRegistry(auth_config.registry_file).create_app("tenant_a")
     config = replace(main.application.config, auth=auth_config)
 
+    class Database:
+        def __init__(self):
+            self.purged = []
+
+        def purge_app(self, app_id):
+            self.purged.append(app_id)
+
     class Application:
         def __init__(self):
             self.config = config
             self.ready = False
+            self.database = Database()
 
         def start(self):
             pass
@@ -125,7 +133,8 @@ def test_delete_app_api_removes_credentials(monkeypatch, tmp_path):
         def stop(self):
             pass
 
-    monkeypatch.setattr(main, "application", Application())
+    application = Application()
+    monkeypatch.setattr(main, "application", application)
     monkeypatch.setattr(main, "STARTUP_IN_BACKGROUND", False)
     token = issue_token(auth_config, Principal(type="admin", app_id="admin"))
 
@@ -134,6 +143,7 @@ def test_delete_app_api_removes_credentials(monkeypatch, tmp_path):
 
     assert response.status_code == 200
     assert response.json() == {"deleted": True}
+    assert application.database.purged == ["tenant_a"]
 
 
 def test_app_database_status_and_empty_delete(monkeypatch, tmp_path):
@@ -161,11 +171,19 @@ def test_app_database_status_and_empty_delete(monkeypatch, tmp_path):
         def get_total_chunks(self, file_ids=None):
             return 0
 
+    class Database:
+        def __init__(self):
+            self.purged = []
+
+        def purge_app(self, app_id):
+            self.purged.append(app_id)
+
     class Application:
         def __init__(self):
             self.config = config
             self.ready = True
             self.store = Store()
+            self.database = Database()
 
         def start(self):
             pass
@@ -173,7 +191,8 @@ def test_app_database_status_and_empty_delete(monkeypatch, tmp_path):
         def stop(self):
             pass
 
-    monkeypatch.setattr(main, "application", Application())
+    application = Application()
+    monkeypatch.setattr(main, "application", application)
     monkeypatch.setattr(main, "STARTUP_IN_BACKGROUND", False)
     token = issue_token(auth_config, Principal(type="admin", app_id="admin"))
 
@@ -185,6 +204,7 @@ def test_app_database_status_and_empty_delete(monkeypatch, tmp_path):
     assert status.json() == {"app_id": "tenant_a", "exists": True, "chunk_count": 0, "empty": True}
     assert deleted.status_code == 200
     assert deleted.json() == {"app_id": "tenant_a", "deleted": True}
+    assert application.database.purged == ["tenant_a"]
 
 
 def test_app_database_delete_rejects_non_empty_database(monkeypatch, tmp_path):

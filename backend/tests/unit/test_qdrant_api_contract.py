@@ -49,13 +49,18 @@ def test_index_object_indexes_presigned_object_synchronously(monkeypatch):
             calls.append(("context", app_id))
             return Context()
 
+    class Database:
+        def upsert_file(self, app_id, file_id, filename, s3_url, **kwargs):
+            calls.append(("upsert", app_id, file_id, filename, s3_url, kwargs))
+
     monkeypatch.setattr(main, "_require_ready", lambda: None)
     monkeypatch.setattr(main, "create_file_id", lambda: "abc123")
     monkeypatch.setattr(main.application, "store", Store())
+    monkeypatch.setattr(main.application, "database", Database())
     monkeypatch.setattr(
         main,
         "index_presigned_object",
-        lambda application, file_id, presigned_url, s3_url, filename: calls.append(("index", file_id, s3_url, filename)) or 3,
+        lambda application, file_id, presigned_url, s3_url, filename: calls.append(("index", file_id, s3_url, filename)) or (3, 10),
     )
 
     result = main.index_object(
@@ -73,6 +78,7 @@ def test_index_object_indexes_presigned_object_synchronously(monkeypatch):
         ("context", "imsdom"),
         ("enter", "imsdom"),
         ("index", "abc123", "s3://rag-dev/docs/a.txt", "a.txt"),
+        ("upsert", "imsdom", "abc123", "a.txt", "s3://rag-dev/docs/a.txt", {"size": 10, "chunk_count": 3}),
         ("exit", "imsdom"),
     ]
 

@@ -237,6 +237,7 @@ def delete_app(app_id: str, _: Principal = Depends(require_jwt)):
         raise HTTPException(400, str(exc)) from exc
     if not deleted:
         raise HTTPException(404, "app not found")
+    application.database.purge_app(app_id)
     return {"deleted": True}
 
 
@@ -265,6 +266,7 @@ def delete_app_database(app_id: str, _: Principal = Depends(require_jwt)):
     if status["chunk_count"] > 0:
         raise HTTPException(409, "app database is not empty")
     deleted = application.store.drop_app_collection(app_id)
+    application.database.purge_app(app_id)
     return {"app_id": app_id, "deleted": deleted}
 
 
@@ -378,12 +380,20 @@ def _index_object(req: ObjectIndexRequest, principal: Principal):
         effective_principal = _database_principal(principal, req.app_id)
         _require_app_database(effective_principal)
         with _store_context(effective_principal):
-            count = index_presigned_object(
+            count, file_size = index_presigned_object(
                 application,
                 file_id=file_id,
                 presigned_url=req.presigned_url,
                 s3_url=req.s3_url,
                 filename=filename,
+            )
+            application.database.upsert_file(
+                effective_principal.app_id,
+                file_id,
+                filename,
+                req.s3_url,
+                size=file_size,
+                chunk_count=count,
             )
         logger.info("Object indexed", extra={"event": "object_indexed", "document_filename": filename, "file_id": file_id, "s3_url": req.s3_url, "chunk_count": count})
         return {"file_id": file_id}
@@ -712,7 +722,9 @@ def delete_file(file_id: str, app_id: str | None = None, principal: Principal = 
 def _delete_index_file(file_id: str, principal: Principal) -> dict[str, Any]:
     _require_ready()
     scoped_store = _scoped_store(principal)
-    return {"deleted_chunks": scoped_store.delete_file_chunks(file_id)}
+    deleted_chunks = scoped_store.delete_file_chunks(file_id)
+    application.database.soft_delete_file(principal.app_id, file_id)
+    return {"deleted_chunks": deleted_chunks}
 
 
 def _chunk_record(document: dict) -> dict[str, Any]:

@@ -12,7 +12,7 @@ def _index_ready_file(api_client, test_txt_path, monkeypatch, filename="test_ai.
 
     def index_object(application, file_id, presigned_url, s3_url, filename):
         main.index_file(main.application, file_id, Path(test_txt_path), filename, extra_metadata={"s3_url": s3_url})
-        return 1
+        return 1, Path(test_txt_path).stat().st_size
 
     monkeypatch.setattr(main, "index_presigned_object", index_object)
     resp = api_client.post(

@@ -29,13 +29,16 @@ def index_file(application, file_id: str, path: str | Path, filename: str, extra
     return count
 
 
-def index_presigned_object(application, file_id: str, presigned_url: str, s3_url: str, filename: str | None = None) -> int:
+def index_presigned_object(application, file_id: str, presigned_url: str, s3_url: str, filename: str | None = None) -> tuple[int, int]:
+    """返回 ``(chunk_count, file_size)``。"""
     resolved_filename = filename or filename_from_s3_url(s3_url)
     ext = Path(resolved_filename).suffix.lower()
     validate_supported_file_extension(ext)
     path = Path(download_presigned_file(presigned_url, ext))
     try:
-        return index_file(application, file_id, path, resolved_filename, extra_metadata={"s3_url": s3_url})
+        file_size = path.stat().st_size
+        count = index_file(application, file_id, path, resolved_filename, extra_metadata={"s3_url": s3_url})
+        return count, file_size
     finally:
         try:
             path.unlink()
