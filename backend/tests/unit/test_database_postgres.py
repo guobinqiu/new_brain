@@ -1,6 +1,6 @@
 import pytest
 
-from database.postgres import PostgresDatabase, FIRST_PAGE_SQL, NEXT_PAGE_SQL, PREV_PAGE_SQL
+from database.postgres import PostgresDatabase, FIRST_PAGE_SQL, NEXT_PAGE_SQL, COUNT_FILES_SQL
 
 
 pytestmark = pytest.mark.unit
@@ -18,13 +18,16 @@ class FakeCursor:
 
 
 class FakeConn:
-    def __init__(self, page_rows, probe_rows=None):
+    def __init__(self, page_rows, probe_rows=None, total=0):
         self._page_rows = page_rows
         self._probe_rows = probe_rows
+        self._total = total
         self.executed = []
 
     def execute(self, sql, params=None):
         self.executed.append((sql, params))
+        if sql == COUNT_FILES_SQL:
+            return FakeCursor([{"total": self._total}])
         if sql.startswith("SELECT 1"):
             return FakeCursor(self._probe_rows or [])
         return FakeCursor(self._page_rows)
@@ -37,13 +40,16 @@ class FakeConn:
 
 
 class FakePool:
-    def __init__(self, page_rows, probe_rows=None):
+    def __init__(self, page_rows, probe_rows=None, total=0):
         self._page_rows = page_rows
         self._probe_rows = probe_rows
+        self._total = total
         self.conn = None
+        self.connections = []
 
     def connection(self):
-        self.conn = FakeConn(self._page_rows, self._probe_rows)
+        self.conn = FakeConn(self._page_rows, self._probe_rows, self._total)
+        self.connections.append(self.conn)
         return self.conn
 
 
@@ -56,67 +62,43 @@ def _row(i, file_id):
         "s3_url": f"s3://b/{file_id}.txt",
         "size": 10,
         "chunk_count": 1,
+        "status": "success",
+        "error": None,
         "created_at": __import__("datetime").datetime(2026, 8, 20, tzinfo=__import__("datetime").timezone.utc),
+        "indexed_at": __import__("datetime").datetime(2026, 8, 20, tzinfo=__import__("datetime").timezone.utc),
     }
 
 
-def _db(rows, probe_rows=None):
+def _db(rows, probe_rows=None, total=0):
     db = PostgresDatabase(url="postgresql://x")
-    db._pool = FakePool(rows, probe_rows)
+    db._pool = FakePool(rows, probe_rows, total)
     db.ready = True
     return db
 
 
 def test_first_page_uses_first_page_sql():
-    db = _db([_row(4, "f4"), _row(3, "f3"), _row(2, "f2")])  # limit=2 → 多取1判断 has_more
+    db = _db([_row(4, "f4"), _row(3, "f3"), _row(2, "f2")], total=4)  # limit=2 → 多取1判断 has_more
     page = db.list_files("app1", limit=2)
     assert [r.id for r in page.files] == ["f4", "f3"]
     assert page.has_more is True
-    sql, params = db._pool.conn.executed[0]
+    assert page.total == 4
+    sql, params = db._pool.connections[0].executed[0]
     assert sql == FIRST_PAGE_SQL
     assert params == ("app1", 3)
+    count_sql, count_params = db._pool.connections[1].executed[0]
+    assert count_sql == COUNT_FILES_SQL
+    assert count_params == ("app1",)
 
 
 def test_next_page_uses_next_page_sql():
-    db = _db([_row(2, "f2"), _row(1, "f1")])
-    page = db.list_files("app1", limit=2, cursor="3", direction="next")
+    db = _db([_row(2, "f2"), _row(1, "f1")], total=4)
+    page = db.list_files("app1", limit=2, cursor="3")
     assert [r.id for r in page.files] == ["f2", "f1"]
     assert page.has_more is False
-    sql, params = db._pool.conn.executed[0]
+    assert page.total == 4
+    sql, params = db._pool.connections[0].executed[0]
     assert sql == NEXT_PAGE_SQL
     assert params == ("app1", 3, 3)
-
-
-def test_prev_page_reverses_rows():
-    # prev 查询 ASC 取回 limit+1 条 raw=[2,3,4]：raw[limit]=4 是探针（表示还有更新记录），
-    # 探针行不进本页；本页 = raw[:limit]=[2,3] 反转 → [f3,f2]；
-    # prev_cursor 指向本页第一条（最新一条）f3 → "3"，而非探针 id。
-    db = _db([_row(2, "f2"), _row(3, "f3"), _row(4, "f4")], probe_rows=[_row(1, "f1")])
-    page = db.list_files("app1", limit=2, cursor="1", direction="prev")
-    assert [r.id for r in page.files] == ["f3", "f2"]
-    assert page.prev_cursor == "3"
-    assert page.has_more is True  # 探测到 id < 2 的记录（更旧方向）
-    assert page.next_cursor == "2"
-    sql, params = db._pool.conn.executed[0]
-    assert sql == PREV_PAGE_SQL
-    assert params == ("app1", 1, 3)
-
-
-def test_prev_at_newest_boundary_has_no_prev_cursor():
-    db = _db([_row(3, "f3"), _row(4, "f4")], probe_rows=[])  # 已到最新边界，且无更旧记录
-    page = db.list_files("app1", limit=2, cursor="1", direction="prev")
-    assert [r.id for r in page.files] == ["f4", "f3"]
-    assert page.prev_cursor is None
-    assert page.has_more is False
-
-
-def test_prev_requires_cursor():
-    db = _db([])
-    try:
-        db.list_files("app1", direction="prev")
-        raise AssertionError("expected ValueError")
-    except ValueError:
-        pass
 
 
 def test_record_maps_file_id_and_iso_created_at():
@@ -125,3 +107,6 @@ def test_record_maps_file_id_and_iso_created_at():
     record = page.files[0]
     assert record.id == "f1"
     assert record.created_at == "2026-08-20T00:00:00+00:00"
+    assert record.indexed_at == "2026-08-20T00:00:00+00:00"
+    assert record.status == "success"
+    assert record.error is None

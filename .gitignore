@@ -16,6 +16,7 @@ models/
 chroma_data/
 milvus_data/
 minio_data/
+pg_data/
 postgres_data/
 qdrant_data/
 redis_data/

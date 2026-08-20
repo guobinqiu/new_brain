@@ -18,6 +18,8 @@ def test_upsert_and_soft_delete():
     assert db.soft_delete_file("app1", "f1") == 0  # 幂等
     page = db.list_files("app1")
     assert [r.id for r in page.files] == ["f3", "f2", "f0"]  # f1 已软删，新→旧
+    assert all(r.status == "success" for r in page.files)
+    assert page.total == 3
 
 
 def test_upsert_restores_soft_deleted():
@@ -26,7 +28,7 @@ def test_upsert_restores_soft_deleted():
     db.soft_delete_file("app1", "f0")
     db.upsert_file("app1", "f0", "a.txt", "s3://b/a.txt", size=99, chunk_count=5)
     page = db.list_files("app1")
-    assert any(r.id == "f0" and r.chunk_count == 5 for r in page.files)
+    assert any(r.id == "f0" and r.chunk_count == 5 and r.status == "success" for r in page.files)
 
 
 def test_list_first_page_and_next():
@@ -35,37 +37,14 @@ def test_list_first_page_and_next():
     page = db.list_files("app1", limit=2)
     assert [r.id for r in page.files] == ["f3", "f2"]
     assert page.next_cursor is not None
-    assert page.prev_cursor is None
     assert page.has_more is True
+    assert page.total == 4
 
-    page2 = db.list_files("app1", limit=2, cursor=page.next_cursor, direction="next")
+    page2 = db.list_files("app1", limit=2, cursor=page.next_cursor)
     assert [r.id for r in page2.files] == ["f1", "f0"]
     assert page2.has_more is False
     assert page2.next_cursor is None
-    assert page2.prev_cursor is not None
-
-
-def test_list_prev_page():
-    db = FakeDatabase()
-    _seed(db)
-    page = db.list_files("app1", limit=2)
-    page2 = db.list_files("app1", limit=2, cursor=page.next_cursor, direction="next")
-    back = db.list_files("app1", limit=2, cursor=page2.prev_cursor, direction="prev")
-    assert [r.id for r in back.files] == ["f3", "f2"]
-    assert back.prev_cursor is None  # 已到最新边界
-    assert back.has_more is True
-
-
-def test_list_prev_page_drops_probe_row():
-    # cursor=1、limit=2 → raw=[f1,f2,f3]（ASC，3 条 > limit），raw[2]=f3 是探针：
-    # 探针行不进本页；本页 = raw[:2] 反转 = [f2,f1]，prev_cursor 指向本页第一条 f2（id=3）
-    db = FakeDatabase()
-    _seed(db)
-    back = db.list_files("app1", limit=2, cursor="1", direction="prev")
-    assert [r.id for r in back.files] == ["f2", "f1"]
-    assert back.prev_cursor == "3"
-    assert back.has_more is True  # 更旧方向仍有 f0
-    assert back.next_cursor == "2"
+    assert page2.total == 4
 
 
 def test_purge_app():
@@ -75,7 +54,22 @@ def test_purge_app():
     assert db.list_files("app1").files == []
 
 
-def test_prev_requires_cursor():
+def test_mark_file_status_lifecycle():
     db = FakeDatabase()
-    with pytest.raises(ValueError):
-        db.list_files("app1", direction="prev")
+    db.create_file("app1", "f1", "a.txt", "s3://b/a.txt", size=10)
+    assert db.list_files("app1").files[0].status == "queued"
+
+    db.mark_file_indexing("app1", "f1")
+    assert db.list_files("app1").files[0].status == "indexing"
+
+    db.mark_file_failed("app1", "f1", "parse failed")
+    failed = db.list_files("app1").files[0]
+    assert failed.status == "failed"
+    assert failed.error == "parse failed"
+    assert failed.indexed_at is None
+
+    db.upsert_file("app1", "f1", "a.txt", "s3://b/a.txt", size=10, chunk_count=3)
+    success = db.list_files("app1").files[0]
+    assert success.status == "success"
+    assert success.error is None
+    assert success.indexed_at is not None

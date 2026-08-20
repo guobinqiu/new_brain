@@ -233,7 +233,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helv
 .upload-feedback { font-size: 13px; margin-top: 8px; padding: 6px 12px; border-radius: 8px; }
 .upload-feedback.error { color: var(--el-color-danger); background: rgba(245,106,0,.12); }
 
-.docs-head { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+.docs-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 14px; }
 .docs-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .docs-head h2 { font-size: 14px; font-weight: 600; color: var(--el-text-color-primary); }
 .docs-count { font-size: 12px; font-weight: 500; color: var(--el-text-color-secondary); background: var(--el-fill-color); padding: 0 8px; min-width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; border-radius: 10px; }
@@ -242,7 +242,6 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helv
 .database-delete-btn { margin-left: auto; }
 .docs-empty { font-size: 13px; color: var(--el-text-color-secondary); text-align: center; padding: 28px 0; }
 .chunk-filter { display: grid; grid-template-columns: 64px minmax(0, 1fr) 64px; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 12px; color: var(--el-text-color-secondary); }
-.docs-more { margin-top: 10px; }
 .copy-cell { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) 42px; align-items: center; gap: 6px; }
 .chunk-id { min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chunk-content { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--el-text-color-primary); }

@@ -93,6 +93,7 @@ def _chunk(chunk_id, filename, content):
 
 def test_chroma_store_adds_searches_and_deletes_file_chunks(tmp_path):
     from store import chroma
+    from collection_names import app_collection
 
     chroma.close_store()
     try:
@@ -102,32 +103,34 @@ def test_chroma_store_adds_searches_and_deletes_file_chunks(tmp_path):
             dense=dense,
             sparse=None,
             persist_dir=str(tmp_path),
-            chunks_collection="chroma_chunks_it",
         )
 
-        chroma.add_file_chunks(
-            [_chunk("alpha-1", "alpha.txt", "alpha knowledge")],
-            file_id="chromafilealpha",
-        )
+        chroma.ensure_app_collection("chromait")
+        with app_collection("chromait"):
+            chroma.add_file_chunks(
+                [_chunk("alpha-1", "alpha.txt", "alpha knowledge")],
+                file_id="chromafilealpha",
+            )
 
-        docs = chroma.get_search_documents(chroma.build_file_filter(["chromafilealpha"]))
-        assert docs[0]["metadata"]["filename"] == "alpha.txt"
+            docs = chroma.get_search_documents(chroma.build_file_filter(["chromafilealpha"]))
+            assert docs[0]["metadata"]["filename"] == "alpha.txt"
 
-        results = chroma.search_dense(
-            "alpha",
-            1,
-            chroma.build_file_filter(["chromafilealpha"]),
-        )
-        assert results[0]["content"] == "alpha knowledge"
+            results = chroma.search_dense(
+                "alpha",
+                1,
+                chroma.build_file_filter(["chromafilealpha"]),
+            )
+            assert results[0]["content"] == "alpha knowledge"
 
-        assert chroma.delete_file_chunks("chromafilealpha") == 1
-        assert chroma.get_search_documents(chroma.build_file_filter(["chromafilealpha"])) == []
+            assert chroma.delete_file_chunks("chromafilealpha") == 1
+            assert chroma.get_search_documents(chroma.build_file_filter(["chromafilealpha"])) == []
     finally:
         chroma.close_store()
 
 
 def test_chroma_local_store_rejects_store_sparse_with_clear_error(tmp_path):
     from store import chroma
+    from collection_names import app_collection
 
     chroma.close_store()
     try:
@@ -140,7 +143,7 @@ def test_chroma_local_store_rejects_store_sparse_with_clear_error(tmp_path):
                 dense=dense,
                 sparse=sparse,
                 persist_dir=str(tmp_path),
-                chunks_collection="chroma_sparse_chunks_it",
             )
+            chroma.ensure_app_collection("chromasparseit")
     finally:
         chroma.close_store()

@@ -103,7 +103,7 @@ http://<服务器地址>:28000
 | `POST` | `/api/open/search` | 按 `query` 和可选 `file_ids` 搜索知识库 |
 | `DELETE` | `/api/open/files/{file_id}` | 删除当前应用向量库中的索引文件 |
 
-上游如果已经有自己的队列、限流和重试机制，可以调用同步索引；否则建议调用异步索引。索引接口接收 `presigned_url`、`s3_url`、可选 `filename` 和可选 `file_id`。上游传 `file_id` 时必须是 UUID；不传时由 RAG 生成。异步索引入队后立即返回 `file_id`，下载、解析、OCR、embedding 和向量库写入由 backend 进程内的索引消费器后台完成；没有任务状态查询接口，调用方用 `file_id` 通过搜索接口验证索引就绪，backend 重启会丢失队列中未完成任务，需要重新提交。搜索时不传 `file_ids` 表示全库搜索。
+上游如果已经有自己的队列、限流和重试机制，可以调用同步索引；否则建议调用异步索引。索引接口接收 `presigned_url`、`s3_url`、可选 `filename` 和可选 `file_id`。上游传 `file_id` 时服务端原样保存，推荐使用 UUID；不传时由 RAG 生成 UUID。异步索引入队后立即返回 `file_id`，下载、解析、OCR、embedding 和向量库写入由 backend 进程内的索引消费器后台完成；没有任务状态查询接口，调用方用 `file_id` 通过搜索接口验证索引就绪，backend 重启会丢失队列中未完成任务，需要重新提交。搜索时不传 `file_ids` 表示全库搜索。
 
 上游系统使用的 `app_id`、`access_key` 和 `secret_key` 由管理台创建。每个 `app_id` 对应独立 collection，业务接口根据 AK/SK 签名里的 `app_id` 自动选择当前应用的数据范围。索引前需要先在管理台为该 `app_id` 初始化数据库。
 
@@ -133,7 +133,7 @@ http://<服务器地址>:28000
 | `presigned_url` | string | 是 | RAG 下载文件用的预签名 URL |
 | `s3_url` | string | 是 | 稳定对象存储地址，写入 chunk metadata 用于追溯 |
 | `filename` | string | 否 | 展示文件名；不传时从 `s3_url` 推导 |
-| `file_id` | string | 否 | 上游指定的文件 ID，必须是 UUID；不传时由 RAG 生成 |
+| `file_id` | string | 否 | 上游指定的文件 ID，推荐使用 UUID；不传时由 RAG 生成 UUID |
 
 请求：
 
@@ -150,7 +150,7 @@ http://<服务器地址>:28000
 
 ```json
 {
-  "file_id": "550e8400e29b41d4a716446655440000"
+  "file_id": "550e8400-e29b-41d4-a716-446655440000"
 }
 ```
 
@@ -165,7 +165,7 @@ http://<服务器地址>:28000
 | `presigned_url` | string | 是 | RAG 下载文件用的预签名 URL |
 | `s3_url` | string | 是 | 稳定对象存储地址，写入 chunk metadata 用于追溯 |
 | `filename` | string | 否 | 展示文件名；不传时从 `s3_url` 推导 |
-| `file_id` | string | 否 | 上游指定的文件 ID，必须是 UUID；不传时由 RAG 生成 |
+| `file_id` | string | 否 | 上游指定的文件 ID，推荐使用 UUID；不传时由 RAG 生成 UUID |
 
 请求：
 
@@ -182,7 +182,7 @@ http://<服务器地址>:28000
 
 ```json
 {
-  "file_id": "550e8400e29b41d4a716446655440000"
+  "file_id": "550e8400-e29b-41d4-a716-446655440000"
 }
 ```
 
@@ -213,7 +213,7 @@ http://<服务器地址>:28000
   "query": "要查询的问题",
   "mode": "hybrid",
   "top_k": 20,
-  "file_ids": ["550e8400e29b41d4a716446655440000"]
+  "file_ids": ["550e8400-e29b-41d4-a716-446655440000"]
 }
 ```
 
@@ -225,7 +225,7 @@ http://<服务器地址>:28000
     {
       "content": "命中的 chunk 文本",
       "score": 0.82,
-      "file_id": "550e8400e29b41d4a716446655440000",
+      "file_id": "550e8400-e29b-41d4-a716-446655440000",
       "filename": "example.pdf",
       "chunk_index": 3
     }

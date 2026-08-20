@@ -85,7 +85,7 @@
     "initialized": "{appId} database initialized",
     "delete": "Delete database",
     "deleted": "{appId} database deleted",
-    "deleteConfirm": "Delete empty database for {appId}?",
+    "deleteConfirm": "Delete database for {appId}?",
     "query": "Query",
     "fileIdsPlaceholder": "Separate file_id values with commas",
     "empty": "No vector data"

@@ -161,7 +161,7 @@ flowchart TB
   Chunks --> Vectors["dense vector / 可选 vector sparse"]
 ```
 
-系统按 app 使用独立 chunks collection 存储 chunk。不引入文件父表时，文件列表从当前 app collection 的 chunk metadata 聚合得到。`file_id` 写入 chunk metadata，并在支持的向量库里建立过滤索引。
+系统按 app 使用独立 chunks collection 存储 chunk。文件元数据由 PostgreSQL `app_files` 表保存，向量库只负责 chunk 检索。`file_id` 写入 chunk metadata，并在支持的向量库里建立过滤索引。
 
 ### 2.4 写入流程图
 
@@ -195,9 +195,9 @@ sequenceDiagram
   Client->>Entry: 用 file_id 搜索验证索引就绪
 ```
 
-写入入口可以同步执行索引，也可以创建异步任务。两种入口都接收 `presigned_url + s3_url`，并允许外部系统传入 UUID 格式的 `file_id`；不传时由 RAG 生成。管理台本地上传链路先通过上传接口生成 `file_id` 并写入对象存储路径，再调用 `/api/index/jobs`，因此管理台异步索引必须传入上传阶段返回的 `file_id`。文件名默认可从对象存储地址推导，也允许调用方指定展示名。同步索引成功返回代表已经写入向量库。异步索引入队后立即返回 `file_id`，backend 进程内的索引消费器后台完成下载、解析、切分、embedding 并写入向量库；没有任务状态查询接口，调用方用 `file_id` 通过搜索接口验证索引就绪。同步入口和异步消费器复用同一套索引执行逻辑。对象存储索引使用 `presigned_url` 做一次性下载，不把临时下载 URL 写入 chunk metadata；稳定的 `s3_url` 会写入 chunk metadata 用于追溯。文件和 chunk 的 `created_at` 在索引写入时生成并写入 chunk metadata。存储层统一保存 UTC 时间，对外返回前再转换成本机或容器时区。
+写入入口可以同步执行索引，也可以创建异步任务。两种入口都接收 `presigned_url + s3_url`，并允许外部系统传入 UUID 格式的 `file_id`；不传时由 RAG 生成。管理台本地上传链路先通过上传接口生成 `file_id` 并写入对象存储路径，再调用 `/api/index/jobs`，因此管理台异步索引必须传入上传阶段返回的 `file_id`。文件名默认可从对象存储地址推导，也允许调用方指定展示名。同步索引成功返回代表已经写入向量库。异步索引入队后立即返回 `file_id`，backend 进程内的索引消费器后台完成下载、解析、切分、embedding 并写入向量库；文件状态可通过管理台文件列表查看。同步入口和异步消费器复用同一套索引执行逻辑。对象存储索引使用 `presigned_url` 做一次性下载，不把临时下载 URL 写入 chunk metadata；稳定的 `s3_url` 会写入 chunk metadata 用于追溯。文件表的 `created_at` 在索引请求进入系统时生成，`indexed_at` 在索引成功时生成；chunk 的 `created_at` 在索引写入时生成并写入 chunk metadata。存储层统一保存 UTC 时间，对外返回前再转换成本机或容器时区。
 
-异步索引任务保存在 backend 进程内的 `queue.Queue`（标准库线程安全队列）里，容量 10（硬编码默认值，不走环境变量）。入队端点在请求线程里直接 `put_nowait`，消费器经 `run_in_executor` 在工作线程里取任务，两端跨线程安全。任务入队成功即被接受，由进程内消费器串行消费，实际索引并发固定为 1；队列已满时入队请求返回 429。RAG 不假设所有上游系统都有自己的队列、限流和重试能力；内部队列是 RAG 服务的资源保护边界，用来削峰并控制 OCR、embedding 和向量库写入并发。进程内队列不做持久化，backend 重启后未完成的任务会丢失；原始文件仍在对象存储，可以重新触发索引。每个 `app_id` 对应独立 collection，外部系统只要按 UUID 规约生成 `file_id`，就不会和其他 app 的同名文件发生跨系统冲突。
+异步索引任务保存在 backend 进程内的 `queue.Queue`（标准库线程安全队列）里，容量 10（硬编码默认值，不走环境变量）。入队端点在请求线程里直接 `put_nowait`，消费器在普通工作线程里阻塞读取任务，两端跨线程安全。任务入队成功即被接受，由进程内消费器串行消费，实际索引并发固定为 1；队列已满时入队请求返回 429。RAG 不假设所有上游系统都有自己的队列、限流和重试能力；内部队列是 RAG 服务的资源保护边界，用来削峰并控制 OCR、embedding 和向量库写入并发。进程内队列不做持久化，backend 重启后未完成的任务会丢失；原始文件仍在对象存储，可以重新触发索引。每个 `app_id` 对应独立 collection，外部系统只要按 UUID 规约生成 `file_id`，就不会和其他 app 的同名文件发生跨系统冲突。
 
 Docker 开发环境使用 MinIO 模拟 S3。MinIO 提供本地 bucket 和对象下载能力，服务入口可以在本地联调时根据 `s3_url` 生成后端可访问的短期下载地址。生产环境里，重签通常由业务系统或对象存储网关完成，RAG 仍只消费 `presigned_url + s3_url`。
 
@@ -237,7 +237,7 @@ flowchart TB
 
 模型切换属于配置管理能力，不属于运行监控能力。
 
-向量数据查看能力直接分页读取向量库 chunk 数据，展示 chunk 主键、`file_id`、`s3_url`、`filename`、`chunk_index` 和完整 chunk 文本。管理台文件列表由 database 组件（PostgreSQL `app_files` 表）提供分页元数据，展示 `file_id`、`filename`、`s3_url`、`size`、`chunk_count` 和入库时间。管理台按 `file_id` 删除文件时同时删除向量库 chunks、软删 `app_files` 记录并删除该 MinIO/S3 前缀下的对象；上游删除文件接口删除向量库 chunks 并软删 `app_files` 记录，不动 MinIO 对象。
+向量数据查看能力直接分页读取向量库 chunk 数据，展示 chunk 主键、`file_id`、`s3_url`、`filename`、`chunk_index` 和完整 chunk 文本。管理台文件列表由 database 组件（PostgreSQL `app_files` 表）提供分页元数据，展示 `file_id`、`filename`、`s3_url`、`size`、`chunk_count`、索引状态、失败原因、创建时间和索引成功时间。管理台按 `file_id` 删除文件时同时删除向量库 chunks、软删 `app_files` 记录并删除该 MinIO/S3 前缀下的对象；上游删除文件接口删除向量库 chunks 并软删 `app_files` 记录，不动 MinIO 对象。
 
 ### 2.7 进程内索引消费器
 
@@ -245,18 +245,17 @@ flowchart TB
 
 | 边界                              | 实现                                                                                                                                                           |
 | --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 入队                              | `indexing.queue.enqueue_index_job()` 向进程内 `queue.Queue`（`maxsize=10`，硬编码）`put_nowait`；同步入队端点直接 put，消费器经 `run_in_executor` 取，线程安全 |
-| 消费                              | `InlineIndexConsumer`，lifespan 启动 1 个 asyncio task，并发固定为 1                                                                                           |
-| 执行                              | 专用 `ThreadPoolExecutor(max_workers=1)` + `run_in_executor`，同步 embedding 不阻塞事件循环，任务串行执行                                                      |
-| 超时                              | `asyncio.wait_for(..., timeout=1800)`，超时 1800 秒（硬编码）；超时按可重试处理                                                                                |
-| 重试                              | job 字典内 `retry_count`，小于 2 时重新入队尾（最多重试 2 次，硬编码），超过后记日志放弃                                                                       |
-| 不可恢复错误                      | app 数据库未初始化、文件格式不支持等 `ValueError` 直接丢弃，不重试                                                                                             |
+| 入队                              | `indexing.queue.enqueue_index_job()` 向进程内 `queue.Queue`（`maxsize=10`，硬编码）`put_nowait`；入队前写 `app_files.status=queued`                            |
+| 消费                              | `InlineIndexConsumer`，lifespan 启动 1 个普通 daemon 线程，并发固定为 1                                                                                        |
+| 执行                              | 工作线程同步执行下载、OCR、embedding 和向量库写入，不再包 executor 假超时                                                                                     |
+| 重试                              | job 字典内 `retry_count`，小于 2 时重新入队尾（最多重试 2 次，硬编码），超过后写 `app_files.status=failed`                                                     |
+| 不可恢复错误                      | app 数据库未初始化、文件格式不支持等 `ValueError` 写 `app_files.status=failed`，不重试                                                                         |
 | 队列满                            | `put_nowait` 抛 `QueueFull`，入队接口返回 429                                                                                                                  |
-| 任务记录 / 列表 / 状态 / 事件推送 | 无 job_id、无任务记录、无状态接口、无 SSE；调用方用 `file_id` 通过搜索接口验证索引就绪                                                                         |
+| 任务记录 / 列表 / 状态 / 事件推送 | 无 job_id、无任务记录、无状态接口、无 SSE；文件级状态落在 `app_files.status/error/indexed_at`                                                                 |
 | 重启                              | 进程内队列随进程清空，接受丢任务；原始文件仍在对象存储，可重新触发索引                                                                                         |
-| 停止                              | lifespan 停止时置位 stop_event、等待循环退出、关闭 executor，并注销模块级单例；此后入队直接抛 `RuntimeError`                                                   |
+| 停止                              | lifespan 停止时置位 stop_event、等待循环退出，并注销模块级单例；此后入队直接抛 `RuntimeError`                                                                  |
 
-超时后 executor 线程无法被硬中断，孤儿线程会占住唯一 worker 直到当前下载、推理结束；后续任务在 executor 内排队等待，天然串行，不会并发命中同一份模型。`add_file_chunks` 按 `file_id` delete-then-upsert 幂等，重试会覆盖孤儿线程的写入。
+`InlineIndexConsumer` 不做应用层假超时；长任务由工作线程同步跑完。`add_file_chunks` 按 `file_id` delete-then-upsert 幂等，重试会覆盖前一次失败前可能写入的旧 chunks。
 
 #### 2.7.1 Application 两阶段启动
 
@@ -474,13 +473,14 @@ Store 和 Search 不负责偷偷启动 dense 或 sparse，只校验依赖组件�
 
 `database` 是与 `store`、`dense` 等平级的一等组件，由 DI 容器按配置装配、`Application` 统一管理生命周期。PG 只承载文件元数据，chunk 正文和向量仍存向量库。
 
-`database/base.py` 定义 `Database` Protocol 与数据模型（`FileRecord`/`FilePage`），并提供测试用的内存实现 `FakeDatabase`。生产实现是 `database/postgres.PostgresDatabase`（psycopg3 连接池），`start()` 幂等建 `app_files` 表：`app_id` 租户隔离，`(app_id, file_id)` 唯一约束，`deleted_at` 软删除标记。
+`database/base.py` 定义 `Database` Protocol 与数据模型（`FileRecord`/`FilePage`），并提供测试用的内存实现 `FakeDatabase`。生产实现是 `database/postgres.PostgresDatabase`（psycopg3 连接池），`start()` 幂等建 `app_files` 表：`app_id` 租户隔离，`(app_id, file_id)` 唯一约束，`status` 记录索引生命周期，`error` 记录失败原因，`indexed_at` 记录索引成功时间，`deleted_at` 记录软删除时间。
 
 关键语义：
 
 - 软删除：`soft_delete_file` 只置 `deleted_at` 不物理删除；列表查询带 `deleted_at IS NULL` 过滤。
+- 状态推进：索引请求进入系统时 `create_file` 写入 `queued`；consumer 开始处理时 `mark_file_indexing` 写入 `indexing`；索引成功时 `upsert_file` 写入 `success`、`chunk_count`、`size` 和 `indexed_at`；索引失败时 `mark_file_failed` 写入 `failed` 和 `error`。
 - upsert 复活：`upsert_file` 用 `ON CONFLICT (app_id, file_id) DO UPDATE`，重新索引同一 `file_id` 时自动清除 `deleted_at`，软删记录复活。
-- 双向 keyset 纯 id 游标：`list_files` 用表主键 `id`（BIGSERIAL，与 `created_at` 同序）做游标，列表按 `created_at DESC, id DESC` 展示；`direction=next` 用 `id < cursor`，`direction=prev` 用 `id > cursor` 反取再反转，多取 1 条判断 has_more，无 COUNT 无页码。
+- 单向 keyset 纯 id 游标：`list_files` 用表主键 `id`（BIGSERIAL，与 `created_at` 同序）做游标，列表按 `created_at DESC, id DESC` 展示；下一页用 `id < cursor`，多取 1 条判断 has_more，无 COUNT 无页码。
 - e2e 用 FakeDatabase：e2e 测试在 `conftest.py` 注入 `FakeDatabase`，不依赖真实 PG。
 
 ---

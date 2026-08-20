@@ -8,7 +8,7 @@ pytestmark = pytest.mark.e2e
 def _index_ready_file(api_client, test_txt_path, monkeypatch, filename="test_ai.txt"):
     import main
 
-    s3_url = f"s3://rag-dev/{filename}"
+    s3_url = f"s3://rag/{filename}"
 
     def index_object(application, file_id, presigned_url, s3_url, filename):
         main.index_file(main.application, file_id, Path(test_txt_path), filename, extra_metadata={"s3_url": s3_url})

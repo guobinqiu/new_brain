@@ -6,12 +6,9 @@ index-worker。``_index_object`` 从原 ``indexing/tasks.py`` 的 celery 封装�
 """
 from __future__ import annotations
 
-import asyncio
-import contextvars
-import functools
 import logging
 import queue as _queue
-from concurrent.futures import ThreadPoolExecutor
+import threading
 
 from indexing.service import index_presigned_object
 
@@ -21,9 +18,8 @@ logger = logging.getLogger("rag.index_consumer")
 # enqueue_index_job（queue.py）通过它拿到活队列。
 _consumer = None
 
-# 进程内队列不是真 broker，这三个值不进运维配置面，硬编码默认值。
+# 进程内队列不是真 broker，这两个值不进运维配置面，硬编码默认值。
 _DEFAULT_MAX_PENDING_JOBS = 10      # 等待队列容量：满了入队端点返回 429
-_DEFAULT_JOB_TIMEOUT_SECONDS = 1800 # 单任务 30 分钟超时，超时按可重试失败处理
 _DEFAULT_JOB_RETRY_MAX = 2          # 可重试失败最多重入队 2 次，仍失败则放弃
 
 
@@ -43,21 +39,18 @@ def _register_consumer(consumer) -> None:
 class InlineIndexConsumer:
     """单工作线程的进程内索引消费器。
 
-    ``queue``/``timeout``/``retry_max`` 是测试注入用的可选参数；不传时使用
-    模块级硬编码默认值（10 / 1800 / 2）。
+    ``queue``/``retry_max`` 是测试注入用的可选参数；不传时使用模块级硬编码
+    默认值（10 / 2）。
     """
 
-    def __init__(self, application, *, queue=None, timeout=None, retry_max=None):
+    def __init__(self, application, *, queue=None, retry_max=None):
         self.application = application
         self.queue = (
             queue if queue is not None else _queue.Queue(maxsize=_DEFAULT_MAX_PENDING_JOBS)
         )
-        self.stop_event = asyncio.Event()
-        self.task = None
-        self.timeout = timeout if timeout is not None else _DEFAULT_JOB_TIMEOUT_SECONDS
+        self.stop_event = threading.Event()
+        self.thread: threading.Thread | None = None
         self.retry_max = retry_max if retry_max is not None else _DEFAULT_JOB_RETRY_MAX
-        # max_workers=1 串行化索引，超时后的孤儿线程不会与下一个任务的 GPU 工作重叠（设计 §4.3）。
-        self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="index-worker")
 
     def _upsert_record(self, result: dict) -> None:
         self.application.database.upsert_file(
@@ -69,55 +62,40 @@ class InlineIndexConsumer:
             chunk_count=result["chunk_count"],
         )
 
-    async def start(self) -> None:
+    def start(self) -> None:
         _register_consumer(self)
-        self.task = asyncio.create_task(self._loop())
+        self.thread = threading.Thread(target=self._loop, name="index-consumer", daemon=True)
+        self.thread.start()
 
-    async def stop(self) -> None:
+    def stop(self) -> None:
         self.stop_event.set()
-        if self.task is not None:
-            await asyncio.gather(self.task, return_exceptions=True)
-        self.executor.shutdown(wait=False)
+        if self.thread is not None:
+            self.thread.join(timeout=1.0)
         # 与 start() 的注册对称：注销单例，让 shutdown 之后的 enqueue_index_job
         # 抛 RuntimeError，而不是把任务悄悄放进死队列。
         _register_consumer(None)
 
-    async def _loop(self) -> None:
-        loop = asyncio.get_running_loop()
+    def _loop(self) -> None:
         while not self.stop_event.is_set():
             try:
-                job = await loop.run_in_executor(
-                    None, lambda: self.queue.get(timeout=1.0)
-                )
+                job = self.queue.get(timeout=0.1)
             except _queue.Empty:
                 continue
-            await self._run_job(job)
+            self._run_job(job)
 
-    async def _run_job(self, job) -> None:
+    def _run_job(self, job) -> None:
         app_id = job["app_id"]
         file_id = job["file_id"]
         filename = job.get("filename")
         retry_count = job.get("retry_count", 0)
-        loop = asyncio.get_running_loop()
-        # copy_context() 给这次 executor 调用独立的 ContextVar 作用域；
-        # _index_object 自己也会进 app_context，这里是兜底。
-        ctx = contextvars.copy_context()
+        self.application.database.mark_file_indexing(app_id, file_id)
         try:
-            result = await asyncio.wait_for(
-                loop.run_in_executor(
-                    self.executor,
-                    ctx.run,
-                    functools.partial(_index_object, self.application, job),
-                ),
-                timeout=self.timeout,
-            )
-            # upsert 走 psycopg 阻塞 IO（池等待可达 30s），不能在事件循环线程同步执行。
-            await loop.run_in_executor(
-                self.executor, functools.partial(self._upsert_record, result)
-            )
+            result = _index_object(self.application, job)
+            self._upsert_record(result)
             return
         except ValueError as exc:
             # 不可重试（app 数据库未初始化、不支持的文件类型）：直接丢弃。
+            self.application.database.mark_file_failed(app_id, file_id, str(exc))
             logger.warning(
                 "Index failed (non-retryable)",
                 exc_info=True,
@@ -129,17 +107,16 @@ class InlineIndexConsumer:
                 },
             )
             return
-        except asyncio.TimeoutError:
-            reason = f"index timeout after {self.timeout}s"
         except Exception as exc:  # noqa: BLE001 - 可重试分支
             reason = f"index failed: {exc!r}"
 
-        # 可重试分支：超时或一般异常。
+        # 可重试分支：一般异常。
         if retry_count < self.retry_max:
             job["retry_count"] = retry_count + 1
             try:
                 self.queue.put_nowait(job)
             except _queue.Full:
+                self.application.database.mark_file_failed(app_id, file_id, "index queue full while retrying")
                 logger.error(
                     "Re-enqueue failed (queue full), dropping job",
                     extra={
@@ -149,6 +126,7 @@ class InlineIndexConsumer:
                     },
                 )
         else:
+            self.application.database.mark_file_failed(app_id, file_id, reason)
             logger.error(
                 "Index job exhausted retries, giving up",
                 extra={

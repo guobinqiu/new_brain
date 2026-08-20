@@ -34,13 +34,6 @@ from logging_config import configure_logging
 logger = logging.getLogger("rag.app")
 
 
-def normalize_file_id(file_id: str) -> str:
-    try:
-        return uuid.UUID(file_id).hex
-    except ValueError as exc:
-        raise ValueError("file_id must be a UUID") from exc
-
-
 class SearchRequest(BaseModel):
     query: str = Field(..., min_length=1)
     app_id: str | None = None
@@ -77,8 +70,6 @@ class ObjectIndexRequest(BaseModel):
     def validate_request(self):
         if not self.s3_url.startswith("s3://"):
             raise ValueError("s3_url must start with s3://")
-        if self.file_id is not None:
-            self.file_id = normalize_file_id(self.file_id)
         return self
 
 
@@ -148,10 +139,10 @@ async def lifespan(app: FastAPI):
     # 进程内索引消费器随本进程常驻；空转时阻塞在 queue.get() 上，入队端点有
     # _require_ready 守卫，因此模型加载完成前启动是安全的。
     _index_consumer = InlineIndexConsumer(application)
-    await _index_consumer.start()
+    _index_consumer.start()
     yield
     if _index_consumer is not None:
-        await _index_consumer.stop()
+        _index_consumer.stop()
         _index_consumer = None
     if stop_event is not None:
         stop_event.set()
@@ -263,8 +254,6 @@ def delete_app_database(app_id: str, _: Principal = Depends(require_jwt)):
     status = _app_database_status(app_id)
     if not status["exists"]:
         raise HTTPException(404, "app database not found")
-    if status["chunk_count"] > 0:
-        raise HTTPException(409, "app database is not empty")
     deleted = application.store.drop_app_collection(app_id)
     application.database.purge_app(app_id)
     return {"app_id": app_id, "deleted": deleted}
@@ -379,6 +368,8 @@ def _index_object(req: ObjectIndexRequest, principal: Principal):
     try:
         effective_principal = _database_principal(principal, req.app_id)
         _require_app_database(effective_principal)
+        application.database.create_file(effective_principal.app_id, file_id, filename, req.s3_url)
+        application.database.mark_file_indexing(effective_principal.app_id, file_id)
         with _store_context(effective_principal):
             count, file_size = index_presigned_object(
                 application,
@@ -400,8 +391,12 @@ def _index_object(req: ObjectIndexRequest, principal: Principal):
     except HTTPException:
         raise
     except ValueError as e:
+        if "effective_principal" in locals():
+            application.database.mark_file_failed(effective_principal.app_id, file_id, str(e))
         raise HTTPException(400, str(e))
     except Exception as e:
+        if "effective_principal" in locals():
+            application.database.mark_file_failed(effective_principal.app_id, file_id, str(e))
         logger.exception("Object index failed", extra={"event": "object_index_failed", "document_filename": filename, "s3_url": req.s3_url})
         raise HTTPException(500, str(e))
 
@@ -428,6 +423,7 @@ def _create_index_job(req: ObjectIndexRequest, principal: Principal):
     effective_principal = _database_principal(principal, req.app_id)
     try:
         _require_app_database(effective_principal)
+        application.database.create_file(effective_principal.app_id, file_id, filename, req.s3_url)
         enqueue_index_job(
             app_id=effective_principal.app_id,
             file_id=file_id,
@@ -439,10 +435,13 @@ def _create_index_job(req: ObjectIndexRequest, principal: Principal):
     except HTTPException:
         raise
     except IndexQueueRejected as e:
+        application.database.mark_file_failed(effective_principal.app_id, file_id, str(e))
         raise HTTPException(429, str(e))
     except ValueError as e:
+        application.database.mark_file_failed(effective_principal.app_id, file_id, str(e))
         raise HTTPException(400, str(e))
     except Exception as e:
+        application.database.mark_file_failed(effective_principal.app_id, file_id, str(e))
         logger.exception("Object index job failed", extra={"event": "object_index_job_failed", "document_filename": filename, "s3_url": req.s3_url})
         raise HTTPException(500, str(e))
 
@@ -663,22 +662,21 @@ def _start_application_until_ready(stop_event: threading.Event):
             retry_seconds = min(retry_seconds * 2, STARTUP_RETRY_MAX_INTERVAL_SECONDS)
 
 @app.get("/api/files")
-def files(limit: int = 50, cursor: str | None = None, direction: str = "next", app_id: str | None = None, principal: Principal = Depends(require_jwt)):
+def files(limit: int = 50, cursor: str | None = None, app_id: str | None = None, principal: Principal = Depends(require_jwt)):
     _require_ready()
     try:
         page = application.database.list_files(
             _database_principal(principal, app_id).app_id,
             limit=limit,
             cursor=cursor,
-            direction=direction,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {
         "files": [_file_record(record) for record in page.files],
-        "prev_cursor": page.prev_cursor,
         "next_cursor": page.next_cursor,
         "has_more": page.has_more,
+        "total": page.total,
     }
 
 
@@ -706,7 +704,19 @@ def client_delete_file(file_id: str, principal: Principal = Depends(require_aksk
 def delete_file(file_id: str, app_id: str | None = None, principal: Principal = Depends(require_jwt)):
     effective_principal = _database_principal(principal, app_id)
     result = _delete_index_file(file_id, effective_principal)
-    _delete_storage_file(effective_principal.app_id, file_id)
+    try:
+        _delete_storage_file(effective_principal.app_id, file_id)
+    except Exception as exc:
+        logger.warning(
+            "Storage file delete failed",
+            exc_info=True,
+            extra={
+                "event": "storage_file_delete_failed",
+                "app_id": effective_principal.app_id,
+                "file_id": file_id,
+                "error": str(exc),
+            },
+        )
     logger.info(
         "File deleted",
         extra={
@@ -849,7 +859,7 @@ def _minio_client() -> Minio:
 
 
 def _delete_storage_file(app_id: str, file_id: str) -> int:
-    bucket = os.getenv("S3_BUCKET", "rag-dev")
+    bucket = os.getenv("S3_BUCKET", "rag")
     client = _minio_client()
     if not client.bucket_exists(bucket):
         return 0
@@ -868,7 +878,10 @@ def _file_record(record) -> dict[str, Any]:
         "s3_url": record.s3_url,
         "size": record.size,
         "created_at": record.created_at,
+        "indexed_at": record.indexed_at,
         "chunk_count": record.chunk_count,
+        "status": record.status,
+        "error": record.error,
     }
 
 
@@ -882,7 +895,7 @@ def _storage_file_prefix(app_id: str, file_id: str) -> str:
 
 
 def _upload_file_to_storage(app_id: str, file_id: str, filename: str, content: bytes, content_type: str) -> str:
-    bucket = os.getenv("S3_BUCKET", "rag-dev")
+    bucket = os.getenv("S3_BUCKET", "rag")
     object_name = f"{_storage_file_prefix(app_id, file_id)}{Path(filename).name}"
     client = _minio_client()
     if not client.bucket_exists(bucket):

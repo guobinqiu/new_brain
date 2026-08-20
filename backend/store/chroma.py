@@ -67,26 +67,16 @@ class ChromaStore:
         return list_chunks(file_ids=file_ids, limit=limit, cursor=cursor)
 
     def ensure_app_collection(self, app_id: str) -> str:
-        collection_name = collection_name_for_app(app_id)
         _configure_store(self.persist_dir)
-        with app_collection(app_id):
-            _ensure_collection()
-        return collection_name
+        return ensure_app_collection(app_id)
 
     def app_collection_exists(self, app_id: str) -> bool:
         _configure_store(self.persist_dir)
-        collection_name = collection_name_for_app(app_id)
-        names = [getattr(collection, "name", collection) for collection in _get_chroma_client().list_collections()]
-        return collection_name in names
+        return app_collection_exists(app_id)
 
     def drop_app_collection(self, app_id: str) -> bool:
         _configure_store(self.persist_dir)
-        collection_name = collection_name_for_app(app_id)
-        if not self.app_collection_exists(app_id):
-            return False
-        _get_chroma_client().delete_collection(collection_name)
-        _stores.clear()
-        return True
+        return drop_app_collection(app_id)
 
     def app_context(self, app_id: str):
         return app_collection(app_id)
@@ -133,6 +123,28 @@ def drop_collections() -> None:
     except Exception:
         pass
     _stores.clear()
+
+
+def ensure_app_collection(app_id: str) -> str:
+    collection_name = collection_name_for_app(app_id)
+    with app_collection(app_id):
+        _ensure_collection()
+    return collection_name
+
+
+def app_collection_exists(app_id: str) -> bool:
+    collection_name = collection_name_for_app(app_id)
+    names = [getattr(collection, "name", collection) for collection in _get_chroma_client().list_collections()]
+    return collection_name in names
+
+
+def drop_app_collection(app_id: str) -> bool:
+    collection_name = collection_name_for_app(app_id)
+    if not app_collection_exists(app_id):
+        return False
+    _get_chroma_client().delete_collection(collection_name)
+    _stores.clear()
+    return True
 
 
 def init_store(

@@ -50,6 +50,15 @@ def test_index_object_indexes_presigned_object_synchronously(monkeypatch):
             return Context()
 
     class Database:
+        def create_file(self, app_id, file_id, filename, s3_url, **kwargs):
+            calls.append(("create", app_id, file_id, filename, s3_url, kwargs))
+
+        def mark_file_indexing(self, app_id, file_id):
+            calls.append(("indexing", app_id, file_id))
+
+        def mark_file_failed(self, app_id, file_id, error):
+            calls.append(("failed", app_id, file_id, error))
+
         def upsert_file(self, app_id, file_id, filename, s3_url, **kwargs):
             calls.append(("upsert", app_id, file_id, filename, s3_url, kwargs))
 
@@ -66,7 +75,7 @@ def test_index_object_indexes_presigned_object_synchronously(monkeypatch):
     result = main.index_object(
         main.ObjectIndexRequest(
             presigned_url="https://example.com/presigned",
-            s3_url="s3://rag-dev/docs/a.txt",
+            s3_url="s3://rag/docs/a.txt",
             filename="a.txt",
         ),
         Principal(type="app", app_id="imsdom"),
@@ -75,10 +84,12 @@ def test_index_object_indexes_presigned_object_synchronously(monkeypatch):
     assert result == {"file_id": "abc123"}
     assert calls == [
         ("exists", "imsdom"),
+        ("create", "imsdom", "abc123", "a.txt", "s3://rag/docs/a.txt", {}),
+        ("indexing", "imsdom", "abc123"),
         ("context", "imsdom"),
         ("enter", "imsdom"),
-        ("index", "abc123", "s3://rag-dev/docs/a.txt", "a.txt"),
-        ("upsert", "imsdom", "abc123", "a.txt", "s3://rag-dev/docs/a.txt", {"size": 10, "chunk_count": 3}),
+        ("index", "abc123", "s3://rag/docs/a.txt", "a.txt"),
+        ("upsert", "imsdom", "abc123", "a.txt", "s3://rag/docs/a.txt", {"size": 10, "chunk_count": 3}),
         ("exit", "imsdom"),
     ]
 
@@ -93,9 +104,17 @@ def test_create_index_job_enqueues_async_job(monkeypatch):
         def app_collection_exists(self, app_id):
             return True
 
+    class Database:
+        def create_file(self, app_id, file_id, filename, s3_url, **kwargs):
+            enqueued.append(("create", app_id, file_id, filename, s3_url, kwargs))
+
+        def mark_file_failed(self, app_id, file_id, error):
+            enqueued.append(("failed", app_id, file_id, error))
+
     monkeypatch.setattr(main, "_require_ready", lambda: None)
     monkeypatch.setattr(main, "create_file_id", lambda: "abc123")
     monkeypatch.setattr(main.application, "store", Store())
+    monkeypatch.setattr(main.application, "database", Database())
     monkeypatch.setattr(
         main,
         "enqueue_index_job",
@@ -105,20 +124,21 @@ def test_create_index_job_enqueues_async_job(monkeypatch):
     result = main.create_index_job(
         main.AdminIndexJobRequest(
             presigned_url="https://example.com/presigned",
-            s3_url="s3://rag-dev/docs/a.txt",
+            s3_url="s3://rag/docs/a.txt",
             filename="a.txt",
-            file_id="550e8400e29b41d4a716446655440000",
+            file_id="550e8400-e29b-41d4-a716-446655440000",
         ),
         Principal(type="app", app_id="imsdom"),
     )
 
-    assert result == {"file_id": "550e8400e29b41d4a716446655440000"}
+    assert result == {"file_id": "550e8400-e29b-41d4-a716-446655440000"}
     assert enqueued == [
+        ("create", "imsdom", "550e8400-e29b-41d4-a716-446655440000", "a.txt", "s3://rag/docs/a.txt", {}),
         {
             "app_id": "imsdom",
-            "file_id": "550e8400e29b41d4a716446655440000",
+            "file_id": "550e8400-e29b-41d4-a716-446655440000",
             "presigned_url": "https://example.com/presigned",
-            "s3_url": "s3://rag-dev/docs/a.txt",
+            "s3_url": "s3://rag/docs/a.txt",
             "filename": "a.txt",
         }
     ]
@@ -130,24 +150,38 @@ def test_create_index_job_returns_429_when_queue_rejects(monkeypatch):
     from auth import Principal
     from indexing.queue import IndexQueueRejected
 
+    calls = []
+
+    class Database:
+        def create_file(self, app_id, file_id, filename, s3_url, **kwargs):
+            calls.append(("create", app_id, file_id, filename, s3_url, kwargs))
+
+        def mark_file_failed(self, app_id, file_id, error):
+            calls.append(("failed", app_id, file_id, error))
+
     monkeypatch.setattr(main, "_require_ready", lambda: None)
     monkeypatch.setattr(main, "_require_app_database", lambda principal: None)
     monkeypatch.setattr(main, "create_file_id", lambda: "abc123")
+    monkeypatch.setattr(main.application, "database", Database())
     monkeypatch.setattr(main, "enqueue_index_job", lambda **kwargs: (_ for _ in ()).throw(IndexQueueRejected("queue full")))
 
     with pytest.raises(main.HTTPException) as exc:
         main.create_index_job(
             main.AdminIndexJobRequest(
                 presigned_url="https://example.com/presigned",
-                s3_url="s3://rag-dev/docs/a.txt",
+                s3_url="s3://rag/docs/a.txt",
                 filename="a.txt",
-                file_id="550e8400e29b41d4a716446655440000",
+                file_id="550e8400-e29b-41d4-a716-446655440000",
             ),
             Principal(type="app", app_id="imsdom"),
         )
 
     assert exc.value.status_code == 429
     assert exc.value.detail == "queue full"
+    assert calls == [
+        ("create", "imsdom", "550e8400-e29b-41d4-a716-446655440000", "a.txt", "s3://rag/docs/a.txt", {}),
+        ("failed", "imsdom", "550e8400-e29b-41d4-a716-446655440000", "queue full"),
+    ]
 
 
 def test_admin_index_job_requires_file_id():
@@ -157,7 +191,7 @@ def test_admin_index_job_requires_file_id():
     with pytest.raises(ValidationError):
         main.AdminIndexJobRequest(
             presigned_url="https://example.com/presigned",
-            s3_url="s3://rag-dev/docs/a.txt",
+            s3_url="s3://rag/docs/a.txt",
             filename="a.txt",
         )
 
@@ -179,12 +213,12 @@ def test_recent_search_traces_returns_recent_rows(monkeypatch):
     assert page == {"traces": [{"trace_id": "trace-1"}, {"trace_id": "trace-2"}]}
 
 
-def test_generated_file_id_is_uuid_hex_without_prefix_or_dash():
+def test_generated_file_id_is_standard_uuid():
     from indexing.service import create_file_id
 
     file_id = create_file_id()
 
-    assert re.fullmatch(r"[0-9a-f]{32}", file_id)
+    assert re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", file_id)
 
 
 def test_storage_presign_uses_minio_and_public_endpoint(monkeypatch):
@@ -192,18 +226,18 @@ def test_storage_presign_uses_minio_and_public_endpoint(monkeypatch):
 
     class FakeMinio:
         def presigned_get_object(self, bucket, object_name, expires):
-            assert bucket == "rag-dev"
+            assert bucket == "rag"
             assert object_name == "docs/a.pdf"
             assert expires == timedelta(seconds=120)
-            return "http://minio:9000/rag-dev/docs/a.pdf?token=abc"
+            return "http://minio:9000/rag/docs/a.pdf?token=abc"
 
     monkeypatch.setattr(main, "_minio_client", lambda: FakeMinio())
     monkeypatch.setenv("S3_ENDPOINT_URL", "http://minio:9000")
     monkeypatch.delenv("S3_PUBLIC_ENDPOINT_URL", raising=False)
 
-    result = main.presign_object(main.PresignRequest(s3_url="s3://rag-dev/docs/a.pdf", expires_in=120))
+    result = main.presign_object(main.PresignRequest(s3_url="s3://rag/docs/a.pdf", expires_in=120))
 
-    assert result == {"presigned_url": "http://minio:9000/rag-dev/docs/a.pdf?token=abc"}
+    assert result == {"presigned_url": "http://minio:9000/rag/docs/a.pdf?token=abc"}
 
 
 def test_presign_route_is_admin_api_endpoint():
@@ -243,15 +277,15 @@ def test_upload_file_to_storage_puts_object_in_bucket(monkeypatch):
 
     monkeypatch.setattr(main, "_minio_client", lambda: FakeMinio())
     monkeypatch.setattr(main, "create_file_id", lambda: "abc123")
-    monkeypatch.setenv("S3_BUCKET", "rag-dev")
+    monkeypatch.setenv("S3_BUCKET", "rag")
 
     result = main._upload_file_to_storage("imsdom", "abc123", "docs/a.txt", b"hello", "text/plain")
 
-    assert result == "s3://rag-dev/uploads/imsdom/abc123/a.txt"
+    assert result == "s3://rag/uploads/imsdom/abc123/a.txt"
     assert calls == [
-        ("bucket_exists", "rag-dev"),
-        ("make_bucket", "rag-dev"),
-        ("put_object", "rag-dev", "uploads/imsdom/abc123/a.txt", b"hello", 5, "text/plain"),
+        ("bucket_exists", "rag"),
+        ("make_bucket", "rag"),
+        ("put_object", "rag", "uploads/imsdom/abc123/a.txt", b"hello", 5, "text/plain"),
     ]
 
 

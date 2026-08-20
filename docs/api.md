@@ -175,7 +175,7 @@ GET /api/apps/{app_id}/database
 DELETE /api/apps/{app_id}/database
 ```
 
-只允许删除空数据库。数据库内已有 chunk 时返回 `app database is not empty`。
+删除当前应用数据库，同时清理该应用的文件记录。
 
 响应：
 
@@ -207,7 +207,7 @@ Content-Type: application/json
 | `presigned_url` | string | 是 | - | 本次索引用的一次性下载 URL，不保存到索引 |
 | `s3_url` | string | 是 | - | 稳定对象存储地址，例如 `s3://bucket/key`，写入 metadata 用于追溯 |
 | `filename` | string | 否 | 从 `s3_url` 推导 | 自定义展示文件名 |
-| `file_id` | string | 否 | RAG 生成 | 上游文件 ID；传入时必须是 UUID，后端统一保存为 32 位 hex |
+| `file_id` | string | 否 | RAG 生成 | 上游文件 ID；传入时原样保存，推荐使用 UUID |
 | `app_id` | string | User JWT 必填，AK/SK 调用不传 | - | 管理台选择的应用 ID |
 
 请求示例：
@@ -224,7 +224,7 @@ Content-Type: application/json
 
 ```json
 {
-  "file_id": "550e8400e29b41d4a716446655440000"
+  "file_id": "550e8400-e29b-41d4-a716-446655440000"
 }
 ```
 
@@ -258,7 +258,7 @@ Content-Type: application/json
 | `presigned_url` | string | 是 | - | 本次索引用的一次性下载 URL（上游用自己的凭据对自己的 MinIO/S3 生成），只在下载时使用，不保存到索引 |
 | `s3_url` | string | 是 | - | 稳定对象存储地址，例如 `s3://bucket/key`，写入 metadata 用于追溯；必须以 `s3://` 开头并包含 bucket 和 object key |
 | `filename` | string | 否 | 从 `s3_url` 推导 | 展示文件名，扩展名以此字段（缺省时取 object key）判断；对象 key 无扩展名时必须传带受支持扩展名的 `filename`，否则返回 400 |
-| `file_id` | string | 否 | 服务端生成 | 上游文件 ID；传入时必须是 UUID（32 位 hex 亦可），后端统一保存为 32 位 hex |
+| `file_id` | string | 否 | 服务端生成 | 上游文件 ID；传入时原样保存，推荐使用 UUID |
 | `app_id` | string | 否 | 签名里的 `X-App-Id` | AK/SK 主体已绑定单一应用，通常不传；传入时必须与签名应用一致，否则返回 403 |
 
 请求示例：
@@ -276,7 +276,7 @@ Content-Type: application/json
 
 ```json
 {
-  "file_id": "550e8400e29b41d4a716446655440000"
+  "file_id": "550e8400-e29b-41d4-a716-446655440000"
 }
 ```
 
@@ -314,7 +314,7 @@ Content-Type: application/json
 | `presigned_url` | string | 是 | - | 本次索引用的一次性下载 URL，管理台链路通常由 `/api/presign` 对 `/api/upload` 返回的 `s3_url` 生成 |
 | `s3_url` | string | 是 | - | 稳定对象存储地址，写入 metadata 用于追溯 |
 | `filename` | string | 否 | 从 `s3_url` 推导 | 自定义展示文件名 |
-| `file_id` | string | 是 | - | `/api/upload` 返回的文件 ID；必须是 UUID（32 位 hex 亦可），后端统一保存为 32 位 hex |
+| `file_id` | string | 是 | - | `/api/upload` 返回的文件 ID；RAG 生成的值为 UUID |
 | `app_id` | string | 是 | - | 管理台当前选择的应用 ID（User JWT 不绑定业务 app） |
 
 `file_id` 必填的原因：`/api/upload` 上传成功时已经把返回的 `file_id` 写进 MinIO 对象路径 `uploads/{app_id}/{file_id}/{filename}`，后续的索引、删除和文件列表都以这一前缀互相对齐。创建任务时如果不传 `file_id`，服务器会另外生成一个新的 `file_id`，向量库记录将与上传对象、文件列表断链：删除接口删不掉 MinIO 里的原文，文件列表也会出现一条无法对齐的幽灵记录。
@@ -323,7 +323,7 @@ Content-Type: application/json
 
 ```json
 {
-  "file_id": "550e8400e29b41d4a716446655440000"
+  "file_id": "550e8400-e29b-41d4-a716-446655440000"
 }
 ```
 
@@ -375,7 +375,7 @@ Content-Type: application/json
   "dense_weight": 0.5,
   "sparse_weight": 0.5,
   "rrf_k": 60,
-  "file_ids": ["550e8400e29b41d4a716446655440000"]
+  "file_ids": ["550e8400-e29b-41d4-a716-446655440000"]
 }
 ```
 
@@ -410,8 +410,8 @@ Content-Type: multipart/form-data
 
 ```json
 {
-  "file_id": "550e8400e29b41d4a716446655440000",
-  "s3_url": "s3://rag-dev/uploads/imsdom/550e8400e29b41d4a716446655440000/example.pdf",
+  "file_id": "550e8400-e29b-41d4-a716-446655440000",
+  "s3_url": "s3://rag/uploads/imsdom/550e8400-e29b-41d4-a716-446655440000/example.pdf",
   "filename": "example.pdf"
 }
 ```
@@ -432,7 +432,7 @@ Content-Type: application/json
 
 ```json
 {
-  "presigned_url": "http://minio:9000/rag-dev/uploads/example.pdf?..."
+  "presigned_url": "http://minio:9000/rag/uploads/example.pdf?..."
 }
 ```
 
@@ -475,16 +475,23 @@ GET /api/logs/stream
 ### 上传文件列表
 
 ```http
-GET /api/files?limit=50&cursor=...&direction=next&app_id=<app_id>
+GET /api/files?limit=50&cursor=...&app_id=<app_id>
 ```
 
-列出当前 app 已成功索引的文件。数据来自 PostgreSQL `app_files` 表（database 组件维护的文件元数据），软删除的文件不再出现。返回的 `id` 是 `file_id`，`s3_url` 指向 MinIO 对象，key 固定为 `uploads/{app_id}/{file_id}/{filename}`。
+列出当前 app 的索引文件。数据来自 PostgreSQL `app_files` 表（database 组件维护的文件元数据），软删除的文件不再出现。返回的 `id` 是 `file_id`，`s3_url` 指向 MinIO 对象，key 固定为 `uploads/{app_id}/{file_id}/{filename}`。
 
 分页参数：
 
-- `cursor`：数字主键 id（响应中的 `next_cursor` / `prev_cursor` 原样回传即可）。
-- `direction`：`next` 向更旧方向翻页（取 id 小于 cursor 的记录）；`prev` 向更新方向翻页（取 id 大于 cursor 的记录，必须提供 cursor）。列表按创建时间新→旧排序。
+- `cursor`：数字主键 id（响应中的 `next_cursor` 原样回传即可）。
 - `limit`：默认 50，上限 200。
+- `total`：当前 app 未软删文件总数，不是当前页条数。
+
+状态字段：
+
+- `queued`：已入队，等待索引。
+- `indexing`：正在索引。
+- `success`：索引成功。
+- `failed`：索引失败，错误原因见 `error`。
 
 响应：
 
@@ -492,17 +499,20 @@ GET /api/files?limit=50&cursor=...&direction=next&app_id=<app_id>
 {
   "files": [
     {
-      "id": "550e8400e29b41d4a716446655440000",
+      "id": "550e8400-e29b-41d4-a716-446655440000",
       "filename": "example.pdf",
-      "s3_url": "s3://rag-dev/uploads/imsdom/550e8400e29b41d4a716446655440000/example.pdf",
+      "s3_url": "s3://rag/uploads/imsdom/550e8400-e29b-41d4-a716-446655440000/example.pdf",
       "size": 1024,
       "chunk_count": 12,
-      "created_at": "2026-08-18T17:00:00+08:00"
+      "status": "success",
+      "error": null,
+      "created_at": "2026-08-18T17:00:00+08:00",
+      "indexed_at": "2026-08-18T17:00:30+08:00"
     }
   ],
-  "prev_cursor": null,
   "next_cursor": null,
-  "has_more": false
+  "has_more": false,
+  "total": 1
 }
 ```
 
@@ -519,7 +529,7 @@ POST /api/chunks
   "limit": 50,
   "cursor": null,
   "app_id": "imsdom",
-  "file_ids": ["550e8400e29b41d4a716446655440000"]
+  "file_ids": ["550e8400-e29b-41d4-a716-446655440000"]
 }
 ```
 

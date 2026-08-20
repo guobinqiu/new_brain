@@ -80,23 +80,16 @@ class QdrantStore:
         return list_chunks(file_ids=file_ids, limit=limit, cursor=cursor)
 
     def ensure_app_collection(self, app_id: str) -> str:
-        collection_name = collection_name_for_app(app_id)
         _configure_store(self.url, self.timeout)
-        run_with_startup_retry(lambda: ensure_collections(collection_name))
-        return collection_name
+        return ensure_app_collection(app_id)
 
     def app_collection_exists(self, app_id: str) -> bool:
         _configure_store(self.url, self.timeout)
-        return get_qdrant_client().collection_exists(collection_name_for_app(app_id))
+        return app_collection_exists(app_id)
 
     def drop_app_collection(self, app_id: str) -> bool:
         _configure_store(self.url, self.timeout)
-        collection_name = collection_name_for_app(app_id)
-        client = get_qdrant_client()
-        if not client.collection_exists(collection_name):
-            return False
-        client.delete_collection(collection_name)
-        return True
+        return drop_app_collection(app_id)
 
     def app_context(self, app_id: str):
         return app_collection(app_id)
@@ -144,6 +137,25 @@ def drop_collections() -> None:
     collection_name = _chunks_collection()
     if client.collection_exists(collection_name):
         client.delete_collection(collection_name)
+
+
+def ensure_app_collection(app_id: str) -> str:
+    collection_name = collection_name_for_app(app_id)
+    run_with_startup_retry(lambda: ensure_collections(collection_name))
+    return collection_name
+
+
+def app_collection_exists(app_id: str) -> bool:
+    return get_qdrant_client().collection_exists(collection_name_for_app(app_id))
+
+
+def drop_app_collection(app_id: str) -> bool:
+    collection_name = collection_name_for_app(app_id)
+    client = get_qdrant_client()
+    if not client.collection_exists(collection_name):
+        return False
+    client.delete_collection(collection_name)
+    return True
 
 
 def init_store(

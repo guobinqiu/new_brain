@@ -85,7 +85,7 @@
     "initialized": "{appId} 数据库已初始化",
     "delete": "删除数据库",
     "deleted": "{appId} 数据库已删除",
-    "deleteConfirm": "删除 {appId} 的空数据库？",
+    "deleteConfirm": "删除 {appId} 的数据库？",
     "query": "查询",
     "fileIdsPlaceholder": "英文逗号分隔多个 file_id",
     "empty": "暂无向量数据"

@@ -192,6 +192,7 @@ def uploaded_chunks(initialized_store, test_txt_path):
 def initialized_store(store_test_env):
     """Store module after explicit startup initialization."""
     import store
+    from collection_names import app_collection
     from dense.huggingface import HuggingFaceDense
     from search import set_default_store
 
@@ -199,7 +200,9 @@ def initialized_store(store_test_env):
     dense.start()
     store.init_store(dense=dense)
     set_default_store(store)
-    return store
+    store.ensure_app_collection(TEST_APP_ID)
+    with app_collection(TEST_APP_ID):
+        yield store
 
 
 class FakeReranker:

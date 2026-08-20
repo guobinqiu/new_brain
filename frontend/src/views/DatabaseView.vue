@@ -8,9 +8,8 @@
       <div class="docs-head">
         <div class="docs-title">
           <h2>{{ t('database.chunks') }}</h2>
-          <span class="docs-count">{{ chunks.length }}{{ chunksHasMore ? '+' : '' }}</span>
         </div>
-        <el-button type="danger" class="database-delete-btn" :disabled="!databaseStatus?.empty" @click="deleteDatabase">{{ t('database.delete') }}</el-button>
+        <el-button type="danger" class="database-delete-btn" @click="deleteDatabase">{{ t('database.delete') }}</el-button>
       </div>
       <div class="chunk-filter">
         <span>File IDs</span>
@@ -58,7 +57,6 @@
             </template>
           </el-table-column>
         </el-table>
-        <el-button v-if="chunksHasMore && !chunksLoading" class="docs-more" @click="fetchNextChunks">{{ t('common.loadMore') }}</el-button>
       </template>
     </div>
   </main>
@@ -114,7 +112,7 @@ async function initializeDatabase() {
 }
 
 async function deleteDatabase() {
-  if (!activeAppStore.appId || !activeAppStore.databaseStatus?.exists || !activeAppStore.databaseStatus?.empty) return
+  if (!activeAppStore.appId || !activeAppStore.databaseStatus?.exists) return
   try {
     await ElMessageBox.confirm(t('database.deleteConfirm', { appId: activeAppStore.appId }), t('database.delete'), { type: 'warning' })
   } catch {

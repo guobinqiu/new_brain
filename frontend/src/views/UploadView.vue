@@ -27,16 +27,21 @@
 
     <div class="files-card">
       <div class="docs-head">
-        <h2>{{ t('upload.files') }}</h2>
-        <span class="docs-count">{{ files.length }}</span>
+        <div class="docs-title">
+          <h2>{{ t('upload.files') }}</h2>
+          <span class="docs-count">{{ filesTotal }}</span>
+        </div>
+        <el-button size="small" :loading="filesLoading" @click="fetchFiles">{{ t('common.refresh') }}</el-button>
       </div>
       <div v-if="files.length === 0 && !filesLoading" class="docs-empty">{{ t('upload.empty') }}</div>
       <template v-else>
         <el-table
+          ref="filesTableRef"
           :data="files"
           style="width: 100%"
           max-height="360"
           v-loading="filesLoading"
+          @scroll="onFilesScroll"
         >
           <el-table-column label="file_id" min-width="240" show-overflow-tooltip>
             <template #default="{ row }">
@@ -52,6 +57,11 @@
           <el-table-column label="created_at" min-width="160">
             <template #default="{ row }">{{ shortTime(row.created_at) }}</template>
           </el-table-column>
+          <el-table-column prop="status" label="status" width="100" />
+          <el-table-column label="indexed_at" min-width="160">
+            <template #default="{ row }">{{ shortTime(row.indexed_at) }}</template>
+          </el-table-column>
+          <el-table-column prop="error" label="error" min-width="180" show-overflow-tooltip />
           <el-table-column prop="size" label="size" width="100" />
           <el-table-column :label="t('common.actions')" width="100">
             <template #default="{ row }">
@@ -59,17 +69,13 @@
             </template>
           </el-table-column>
         </el-table>
-        <div class="docs-pager" style="text-align: right">
-          <el-button :disabled="!filesPrevCursor || filesLoading" @click="fetchFiles('prev')">&lt;</el-button>
-          <el-button :disabled="!filesNextCursor || filesLoading" @click="fetchFiles('next')">&gt;</el-button>
-        </div>
       </template>
     </div>
   </main>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import axios from '../utils/api'
@@ -85,11 +91,12 @@ const { appId } = storeToRefs(activeAppStore)
 const selectedFiles = ref([])
 const uploading = ref(false)
 const files = ref([])
-const filesPrevCursor = ref(null)
+const filesTotal = ref(0)
 const filesNextCursor = ref(null)
 const filesLoading = ref(false)
 const deletingFileId = ref(null)
 const uploadRef = ref(null)
+const filesTableRef = ref(null)
 
 // el-upload on-change：(uploadFile, uploadFiles)，uploadFiles 为 UploadFile 数组，raw 为原始 File
 function onFileChange(file, fileList) {
@@ -149,24 +156,34 @@ async function uploadFiles(files) {
   return submitted > 0
 }
 
-async function fetchFiles(direction) {
+async function fetchFiles({ append = false } = {}) {
   if (filesLoading.value) return
   filesLoading.value = true
   try {
     const params = { limit: 10 }
     if (activeAppStore.appId) params.app_id = activeAppStore.appId
-    if (direction === 'next' && filesNextCursor.value) params.cursor = filesNextCursor.value
-    if (direction === 'prev' && filesPrevCursor.value) {
-      params.cursor = filesPrevCursor.value
-      params.direction = 'prev'
-    }
+    if (append && filesNextCursor.value) params.cursor = filesNextCursor.value
     const res = await axios.get(`${API}/files`, { params })
-    files.value = res.data.files || []
-    filesPrevCursor.value = res.data.prev_cursor || null
+    const rows = res.data.files || []
+    files.value = append ? files.value.concat(rows) : rows
+    filesTotal.value = res.data.total || 0
     filesNextCursor.value = res.data.next_cursor || null
   }
   catch (err) { console.error(err) }
   finally { filesLoading.value = false }
+}
+
+async function fetchNextFiles() {
+  await fetchFiles({ append: true })
+}
+
+function onFilesScroll(event) {
+  const wrap = filesTableRef.value?.scrollBarRef?.wrapRef
+  if (!wrap) return
+  const scrollTop = event?.scrollTop ?? wrap.scrollTop
+  if (scrollTop + wrap.clientHeight >= wrap.scrollHeight - 24 && filesNextCursor.value) {
+    fetchNextFiles()
+  }
 }
 
 async function deleteFile(file) {
@@ -186,4 +203,11 @@ async function deleteFile(file) {
 }
 
 onMounted(fetchFiles)
+
+watch(appId, () => {
+  files.value = []
+  filesTotal.value = 0
+  filesNextCursor.value = null
+  fetchFiles()
+})
 </script>

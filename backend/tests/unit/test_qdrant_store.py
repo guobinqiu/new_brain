@@ -30,15 +30,15 @@ def test_add_file_chunks_writes_file_metadata(monkeypatch):
     ]
 
     with app_collection("imsdom"):
-        assert store.add_file_chunks(chunks, file_id="550e8400e29b41d4a716446655440000") == 1
+        assert store.add_file_chunks(chunks, file_id="550e8400-e29b-41d4-a716-446655440000") == 1
     assert calls[0] == ("ready",)
-    assert calls[1] == ("delete", "550e8400e29b41d4a716446655440000")
+    assert calls[1] == ("delete", "550e8400-e29b-41d4-a716-446655440000")
 
     _, collection_name, points = calls[3]
     assert collection_name == "imsdom_chunks"
     assert points[0].id == store._point_id("chunk-1")
     assert points[0].payload["content"] == "华为给我们一万六千张卡"
-    assert points[0].payload["metadata"]["file_id"] == "550e8400e29b41d4a716446655440000"
+    assert points[0].payload["metadata"]["file_id"] == "550e8400-e29b-41d4-a716-446655440000"
     assert points[0].payload["metadata"]["chunk_index"] == 0
     assert points[0].payload["metadata"]["filename"] == "liang.pdf"
 

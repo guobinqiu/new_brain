@@ -207,7 +207,7 @@ def test_app_database_status_and_empty_delete(monkeypatch, tmp_path):
     assert application.database.purged == ["tenant_a"]
 
 
-def test_app_database_delete_rejects_non_empty_database(monkeypatch, tmp_path):
+def test_app_database_delete_allows_non_empty_database(monkeypatch, tmp_path):
     from auth import Principal, issue_token
     from schema import AuthConfig, AdminAuthConfig
     import main
@@ -225,11 +225,19 @@ def test_app_database_delete_rejects_non_empty_database(monkeypatch, tmp_path):
         def drop_app_collection(self, app_id):
             return True
 
+    class Database:
+        def __init__(self):
+            self.purged = []
+
+        def purge_app(self, app_id):
+            self.purged.append(app_id)
+
     class Application:
         def __init__(self):
             self.config = config
             self.ready = True
             self.store = Store()
+            self.database = Database()
 
         def start(self):
             pass
@@ -237,7 +245,8 @@ def test_app_database_delete_rejects_non_empty_database(monkeypatch, tmp_path):
         def stop(self):
             pass
 
-    monkeypatch.setattr(main, "application", Application())
+    application = Application()
+    monkeypatch.setattr(main, "application", application)
     monkeypatch.setattr(main, "STARTUP_IN_BACKGROUND", False)
     monkeypatch.setattr(main, "_scoped_store", lambda principal: type("ScopedStore", (), {"get_total_chunks": lambda self, file_ids=None: 2})())
     token = issue_token(auth_config, Principal(type="admin", app_id="admin"))
@@ -245,5 +254,6 @@ def test_app_database_delete_rejects_non_empty_database(monkeypatch, tmp_path):
     with TestClient(main.app) as client:
         response = client.delete("/api/apps/tenant_a/database", headers={"Authorization": f"Bearer {token}"})
 
-    assert response.status_code == 409
-    assert response.json()["detail"] == "app database is not empty"
+    assert response.status_code == 200
+    assert response.json() == {"app_id": "tenant_a", "deleted": True}
+    assert application.database.purged == ["tenant_a"]

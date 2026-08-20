@@ -14,7 +14,7 @@ SUPPORTED_FILE_EXTENSIONS = (".pdf", ".txt", ".md", ".markdown", ".docx", ".png"
 
 
 def create_file_id() -> str:
-    return uuid.uuid4().hex
+    return str(uuid.uuid4())
 
 
 def index_file(application, file_id: str, path: str | Path, filename: str, extra_metadata: dict | None = None) -> int:

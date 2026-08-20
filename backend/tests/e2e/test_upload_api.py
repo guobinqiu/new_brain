@@ -12,7 +12,7 @@ class TestUploadAPI:
 
         uploaded = []
         monkeypatch.setattr(main, "create_file_id", lambda: "abc123")
-        monkeypatch.setattr(main, "_upload_file_to_storage", lambda app_id, file_id, filename, content, content_type: uploaded.append((app_id, file_id, filename, content, content_type)) or f"s3://rag-dev/uploads/{app_api_client.app_id}/abc123/test_ai.txt", raising=False)
+        monkeypatch.setattr(main, "_upload_file_to_storage", lambda app_id, file_id, filename, content, content_type: uploaded.append((app_id, file_id, filename, content, content_type)) or f"s3://rag/uploads/{app_api_client.app_id}/abc123/test_ai.txt", raising=False)
 
         with open(test_txt_path, "rb") as f:
             resp = api_client.post(
@@ -20,7 +20,7 @@ class TestUploadAPI:
             )
         assert resp.status_code == 200, resp.text
         data = resp.json()
-        assert data == {"file_id": "abc123", "s3_url": f"s3://rag-dev/uploads/{app_api_client.app_id}/abc123/test_ai.txt", "filename": "test_ai.txt"}
+        assert data == {"file_id": "abc123", "s3_url": f"s3://rag/uploads/{app_api_client.app_id}/abc123/test_ai.txt", "filename": "test_ai.txt"}
         assert uploaded
         assert uploaded[0][0] == app_api_client.app_id
         assert uploaded[0][1] == "abc123"
@@ -42,7 +42,7 @@ class TestUploadAPI:
         import main
 
         monkeypatch.setattr(main, "create_file_id", lambda: "img123")
-        monkeypatch.setattr(main, "_upload_file_to_storage", lambda app_id, file_id, filename, content, content_type: f"s3://rag-dev/uploads/{app_api_client.app_id}/img123/test_ocr.png", raising=False)
+        monkeypatch.setattr(main, "_upload_file_to_storage", lambda app_id, file_id, filename, content, content_type: f"s3://rag/uploads/{app_api_client.app_id}/img123/test_ocr.png", raising=False)
 
         with open(test_img_path, "rb") as f:
             resp = api_client.post(
@@ -50,7 +50,7 @@ class TestUploadAPI:
             )
         assert resp.status_code == 200, resp.text
         data = resp.json()
-        assert data == {"file_id": "img123", "s3_url": f"s3://rag-dev/uploads/{app_api_client.app_id}/img123/test_ocr.png", "filename": "test_ocr.png"}
+        assert data == {"file_id": "img123", "s3_url": f"s3://rag/uploads/{app_api_client.app_id}/img123/test_ocr.png", "filename": "test_ocr.png"}
 
     def test_upload_no_filename(self, app_api_client, api_client, tmp_path):
         """Uploading a file with no filename returns a client error."""
@@ -75,7 +75,7 @@ class TestUploadAPI:
         monkeypatch.setattr(main, "create_file_id", lambda: "generatedfile001")
         monkeypatch.setattr(main, "index_presigned_object", index_object)
 
-        s3_url = "s3://rag-dev/test_ai.txt"
+        s3_url = "s3://rag/test_ai.txt"
         resp = app_api_client.post(
             "/api/open/index",
             json={
@@ -108,7 +108,7 @@ class TestUploadAPI:
             "/api/open/index",
             json={
                 "presigned_url": "https://example.com/presigned",
-                "s3_url": "s3://rag-dev/generated.txt",
+                "s3_url": "s3://rag/generated.txt",
                 "filename": "test_ai.txt",
             },
         )
@@ -120,20 +120,20 @@ class TestUploadAPI:
         """``POST /api/open/index/jobs`` enqueues an async index job and returns file_id."""
         import main
 
-        monkeypatch.setattr(main, "create_file_id", lambda: "550e8400e29b41d4a716446655440000")
+        monkeypatch.setattr(main, "create_file_id", lambda: "550e8400-e29b-41d4-a716-446655440000")
         monkeypatch.setattr(main, "enqueue_index_job", lambda **kwargs: {"file_id": kwargs["file_id"]})
 
         resp = app_api_client.post(
             "/api/open/index/jobs",
             json={
                 "presigned_url": "https://example.com/presigned",
-                "s3_url": "s3://rag-dev/generated.txt",
+                "s3_url": "s3://rag/generated.txt",
                 "filename": "test_ai.txt",
             },
         )
 
         assert resp.status_code == 202, resp.text
-        assert resp.json() == {"file_id": "550e8400e29b41d4a716446655440000"}
+        assert resp.json() == {"file_id": "550e8400-e29b-41d4-a716-446655440000"}
 
     def test_async_index_job_accepts_caller_uuid_file_id(self, app_api_client, monkeypatch):
         import main
@@ -147,14 +147,14 @@ class TestUploadAPI:
             json={
                 "file_id": "550e8400-e29b-41d4-a716-446655440000",
                 "presigned_url": "https://example.com/presigned",
-                "s3_url": "s3://rag-dev/generated.txt",
+                "s3_url": "s3://rag/generated.txt",
                 "filename": "test_ai.txt",
             },
         )
 
         assert resp.status_code == 202, resp.text
-        assert resp.json() == {"file_id": "550e8400e29b41d4a716446655440000"}
-        assert enqueued[0]["file_id"] == "550e8400e29b41d4a716446655440000"
+        assert resp.json() == {"file_id": "550e8400-e29b-41d4-a716-446655440000"}
+        assert enqueued[0]["file_id"] == "550e8400-e29b-41d4-a716-446655440000"
         assert "job_id" not in enqueued[0]
 
     def test_index_presigned_url_accepts_caller_uuid_file_id(self, app_api_client, monkeypatch):
@@ -168,26 +168,49 @@ class TestUploadAPI:
             json={
                 "file_id": "550e8400-e29b-41d4-a716-446655440000",
                 "presigned_url": "https://example.com/presigned",
-                "s3_url": "s3://rag-dev/business.txt",
+                "s3_url": "s3://rag/business.txt",
+                "filename": "test_ai.txt",
+            },
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json() == {"file_id": "550e8400-e29b-41d4-a716-446655440000"}
+
+    def test_index_presigned_url_accepts_custom_file_id(self, app_api_client, monkeypatch):
+        import main
+
+        monkeypatch.setattr(main, "index_presigned_object", lambda application, file_id, presigned_url, s3_url, filename: (1, 1))
+
+        resp = app_api_client.post(
+            "/api/open/index",
+            json={
+                "file_id": "business-file-001",
+                "presigned_url": "https://example.com/presigned",
+                "s3_url": "s3://rag/business.txt",
+                "filename": "test_ai.txt",
+            },
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json() == {"file_id": "business-file-001"}
+
+    def test_index_presigned_url_accepts_uuid_hex_file_id(self, app_api_client, monkeypatch):
+        import main
+
+        monkeypatch.setattr(main, "index_presigned_object", lambda application, file_id, presigned_url, s3_url, filename: (1, 1))
+
+        resp = app_api_client.post(
+            "/api/open/index",
+            json={
+                "file_id": "550e8400e29b41d4a716446655440000",
+                "presigned_url": "https://example.com/presigned",
+                "s3_url": "s3://rag/business.txt",
                 "filename": "test_ai.txt",
             },
         )
 
         assert resp.status_code == 200, resp.text
         assert resp.json() == {"file_id": "550e8400e29b41d4a716446655440000"}
-
-    def test_index_presigned_url_rejects_non_uuid_file_id(self, app_api_client):
-        resp = app_api_client.post(
-            "/api/open/index",
-            json={
-                "file_id": "business-file-001",
-                "presigned_url": "https://example.com/presigned",
-                "s3_url": "s3://rag-dev/business.txt",
-                "filename": "test_ai.txt",
-            },
-        )
-
-        assert resp.status_code == 422
 
     def test_index_presigned_url_can_infer_filename_from_s3_url(self, app_api_client, test_txt_path, monkeypatch):
         """``POST /api/open/index`` uses the object name when filename is omitted."""
@@ -203,7 +226,7 @@ class TestUploadAPI:
             "/api/open/index",
             json={
                 "presigned_url": "https://example.com/presigned",
-                "s3_url": "s3://rag-dev/uploads/test_ai.txt",
+                "s3_url": "s3://rag/uploads/test_ai.txt",
             },
         )
 
