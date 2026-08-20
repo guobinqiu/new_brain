@@ -29,10 +29,11 @@ def test_application_starts_public_components_in_order():
         search=FakeComponent("search"),
         rerank=FakeComponent("rerank"),
         ocr=FakeComponent("ocr"),
+        database=FakeComponent("database"),
     )
     application.start()
 
-    assert calls == ["dense", "sparse", "rerank", "ocr", "store", "search"]
+    assert calls == ["dense", "sparse", "rerank", "ocr", "store", "search", "database"]
     assert application.ready is True
 
 
@@ -60,12 +61,13 @@ def test_application_splits_model_loading_from_runtime_connections():
         search=FakeComponent("search"),
         rerank=FakeComponent("rerank"),
         ocr=FakeComponent("ocr"),
+        database=FakeComponent("database"),
     )
 
     application.load_models()
     application.init_connections()
 
-    assert calls == ["dense", "sparse", "rerank", "ocr", "store", "search"]
+    assert calls == ["dense", "sparse", "rerank", "ocr", "store", "search", "database"]
     assert application.ready is True
 
 
@@ -254,6 +256,7 @@ def test_application_clears_component_error_after_successful_start():
         store=FakeComponent(),
         search=FakeComponent(),
         ocr=FakeComponent(),
+        database=FakeComponent(),
     )
     application.component_errors["dense"] = "old error"
     application.start()
@@ -285,9 +288,10 @@ def test_application_stops_public_components(monkeypatch):
         search=FakeComponent("search"),
         rerank=FakeComponent("rerank"),
         ocr=FakeComponent("ocr"),
+        database=FakeComponent("database"),
     )
     application.ready = True
     application.stop()
 
-    assert calls == ["ocr", "rerank", "search", "store", "sparse", "dense"]
+    assert calls == ["ocr", "rerank", "search", "store", "database", "sparse", "dense"]
     assert application.ready is False

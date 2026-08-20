@@ -72,6 +72,7 @@ class TestMonitorAPI:
         assert components["Rerank"]["status"] in {"disabled", "ready"}
         assert components["OCR"]["status"] == "ready"
         assert components["OCR"]["model"] == "rapidocr"
+        assert "database" in components
         assert all(component["status"] in {"ready", "loading", "disabled", "error"} for component in components.values())
         assert monitor["capabilities"]["search_modes"] == ["dense", "sparse", "hybrid"]
         assert monitor["capabilities"]["config_write"] is False

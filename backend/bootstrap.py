@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from container import create_container
+from database.base import Database
 from dense.base import Dense
 from loader import load_app_config
 from schema import AppConfig
@@ -22,6 +23,7 @@ class Application:
         search: Search | None = None,
         rerank: Rerank | None = None,
         ocr: OCR | None = None,
+        database: Database | None = None,
     ):
         self.config = config or load_app_config()
         self.config_name = self.config.name
@@ -32,6 +34,7 @@ class Application:
         self.search = search or self.container.search(store=self.store, sparse=self.sparse)
         self.rerank = rerank or (self.container.rerank() if self.config.rerank is not None else None)
         self.ocr = ocr or self.container.ocr()
+        self.database = database or self.container.database()
         self.search_trace = None
         self.component_errors: dict[str, str] = {}
         self.models_loaded = False
@@ -52,6 +55,7 @@ class Application:
     def init_connections(self):
         self._start_component("store", self.store)
         self._start_component("search", self.search)
+        self._start_component("database", self.database)
         self.ready = True
 
     def _start_component(self, name: str, component):
@@ -68,6 +72,7 @@ class Application:
             self.rerank.stop()
         self.search.stop()
         self.store.stop()
+        self.database.stop()
         self.sparse.stop()
         self.dense.stop()
         self.models_loaded = False

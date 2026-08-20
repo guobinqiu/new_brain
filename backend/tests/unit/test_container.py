@@ -168,3 +168,19 @@ def test_container_injects_store_into_search_pipeline(tmp_path):
     search = container.search(store=store)
 
     assert search.store is store
+
+
+def test_container_maps_database_config_to_postgres(tmp_path):
+    from container import build_database, create_container
+    from database.postgres import PostgresDatabase
+    from loader import load_config_file
+
+    config = load_config_file(_config_file(tmp_path))
+    container = create_container(config)
+
+    database = container.database()
+
+    assert isinstance(database, PostgresDatabase)
+    assert database.url == config.database.url
+    assert database.pool_size == config.database.pool_size
+    assert isinstance(build_database(config), PostgresDatabase)

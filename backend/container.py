@@ -4,6 +4,8 @@ from importlib import import_module
 
 from dependency_injector import containers, errors, providers
 
+from database.base import Database
+from database.postgres import PostgresDatabase
 from dense.base import Dense
 from dense.huggingface import HuggingFaceDense
 from ocr.base import OCR
@@ -69,6 +71,9 @@ class ApplicationContainer(containers.DeclarativeContainer):
     chroma_persist_dir = providers.Callable(lambda app_config: app_config.store.persist_dir, config)
     milvus_uri = providers.Callable(lambda app_config: app_config.store.uri, config)
     store_timeout = providers.Callable(lambda app_config: app_config.store.timeout, config)
+    database_type = providers.Callable(lambda app_config: _component_key(app_config.database.type), config)
+    database_url = providers.Callable(lambda app_config: app_config.database.url, config)
+    database_pool_size = providers.Callable(lambda app_config: app_config.database.pool_size, config)
     tokenizer = providers.Selector(
         sparse_tokenizer,
         jieba=providers.Factory(JiebaTokenizer),
@@ -138,6 +143,11 @@ class ApplicationContainer(containers.DeclarativeContainer):
     )
 
     search = providers.Singleton(SearchPipeline, store=store, sparse=sparse)
+
+    database = providers.Selector(
+        database_type,
+        postgres=providers.Singleton(PostgresDatabase, url=database_url, pool_size=database_pool_size),
+    )
 
 
 def create_container(config: AppConfig) -> ApplicationContainer:
@@ -215,3 +225,10 @@ def build_ocr(config: AppConfig) -> OCR:
     if config.ocr.import_path:
         return _load_class(config.ocr.import_path)(model_dir=config.ocr.model_path)
     return _resolve(create_container(config).ocr, "ocr", config.ocr.name)
+
+
+def build_database(config: AppConfig) -> Database:
+    if config.database.import_path:
+        cls = _load_class(config.database.import_path)
+        return cls(url=config.database.url, pool_size=config.database.pool_size)
+    return _resolve(create_container(config).database, "database", config.database.type)

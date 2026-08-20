@@ -588,6 +588,10 @@ def _components() -> list[dict[str, Any]]:
             "status": _component_status(application.ocr, enabled=application.config.ocr is not None, error=application.component_errors.get("ocr")),
             "model": _component_model(application.config.ocr),
         },
+        {
+            "name": "database",
+            "status": _component_status(application.database, enabled=True, error=application.component_errors.get("database")),
+        },
     ]
 
 
