@@ -198,6 +198,8 @@ POST /api/open/index
 Content-Type: application/json
 ```
 
+认证使用 AK/SK 请求签名（请求头与签名算法见开头「鉴权」一节），认证失败返回 401。
+
 请求字段：
 
 | 字段 | 类型 | 必填 | 默认值 | 说明 |
@@ -228,6 +230,18 @@ Content-Type: application/json
 
 同步索引成功返回表示文件已经完成下载、解析、OCR、embedding 并写入向量库。
 
+错误码：
+
+| 状态码 | 场景 |
+|---|---|
+| 400 | 不支持的文件类型（以 `filename` 或 object key 的扩展名判断）；未传 `filename` 且 `s3_url` 不含 object key，无法推导文件名 |
+| 401 | AK/SK 签名认证失败：缺签名头、access key 无效、时间戳偏差超过 300 秒、签名不匹配 |
+| 403 | 请求体 `app_id` 与签名 `X-App-Id` 不一致（`app_id is not allowed`） |
+| 409 | 目标 app 数据库未初始化（`app database is not initialized`） |
+| 422 | 请求体校验失败：缺 `presigned_url`/`s3_url`、`s3_url` 不以 `s3://` 开头、`file_id` 不是 UUID 或长度不在 1..64、包含未定义字段 |
+| 500 | 下载或索引处理失败（如 `presigned_url` 失效、文件解析异常） |
+| 503 | 应用未完成初始化（`search is not initialized`） |
+
 ### 创建异步索引任务
 
 ```http
@@ -235,7 +249,75 @@ POST /api/open/index/jobs
 Content-Type: application/json
 ```
 
-请求字段与 `POST /api/open/index` 相同。管理台使用 User JWT 调用 `POST /api/index/jobs` 创建任务时必须传 `file_id`，也就是 `/api/upload` 返回的文件 ID。
+认证使用 AK/SK 请求签名（请求头与签名算法见开头「鉴权」一节）。签名验证通过后主体类型为 `app`，绑定 `X-App-Id` 对应的应用；缺签名头、access key 无效、时间戳偏差超过 300 秒或签名不匹配返回 401。
+
+请求字段：
+
+| 字段 | 类型 | 必填 | 默认值 | 说明 |
+|---|---|---|---|---|
+| `presigned_url` | string | 是 | - | 本次索引用的一次性下载 URL（上游用自己的凭据对自己的 MinIO/S3 生成），只在下载时使用，不保存到索引 |
+| `s3_url` | string | 是 | - | 稳定对象存储地址，例如 `s3://bucket/key`，写入 metadata 用于追溯；必须以 `s3://` 开头并包含 bucket 和 object key |
+| `filename` | string | 否 | 从 `s3_url` 推导 | 展示文件名，扩展名以此字段（缺省时取 object key）判断；对象 key 无扩展名时必须传带受支持扩展名的 `filename`，否则返回 400 |
+| `file_id` | string | 否 | 服务端生成 | 上游文件 ID；传入时必须是 UUID（32 位 hex 亦可），后端统一保存为 32 位 hex |
+| `app_id` | string | 否 | 签名里的 `X-App-Id` | AK/SK 主体已绑定单一应用，通常不传；传入时必须与签名应用一致，否则返回 403 |
+
+请求示例：
+
+```json
+{
+  "file_id": "550e8400-e29b-41d4-a716-446655440000",
+  "presigned_url": "https://upstream.example.com/presigned?X-Amz-Signature=...",
+  "s3_url": "s3://bucket/path/to/example.pdf",
+  "app_id": "tenant_a"
+}
+```
+
+响应 202：
+
+```json
+{
+  "file_id": "550e8400e29b41d4a716446655440000"
+}
+```
+
+错误码：
+
+| 状态码 | 场景 |
+|---|---|
+| 400 | 不支持的文件类型（以 `filename` 或 object key 的扩展名判断）；未传 `filename` 且 `s3_url` 不含 object key，无法推导文件名 |
+| 401 | AK/SK 签名认证失败：缺签名头、access key 无效、时间戳偏差超过 300 秒、签名不匹配 |
+| 403 | 请求体 `app_id` 与签名 `X-App-Id` 不一致（`app_id is not allowed`） |
+| 409 | 目标 app 数据库未初始化（`app database is not initialized`） |
+| 422 | 请求体校验失败：缺 `presigned_url`/`s3_url`、`s3_url` 不以 `s3://` 开头、`file_id` 不是 UUID 或长度不在 1..64、包含未定义字段 |
+| 429 | 进程内待处理任务队列已满 |
+| 503 | 应用未完成初始化（`search is not initialized`） |
+
+异步索引入队成功返回 202 和 `file_id`。下载、解析、OCR、embedding 和向量库写入由 backend 进程内的索引消费器后台执行，没有任务状态查询接口；调用方可以用 `file_id` 通过搜索接口验证索引是否就绪。`presigned_url` 的有效性在后台消费时才校验，入队成功不代表下载成功。进程内待处理任务队列已满时返回 429。任务不落盘，backend 重启会丢失队列中未完成的任务，需要重新提交索引。
+
+管理台内部版本 `POST /api/index/jobs` 见下文：认证改用 User JWT，`file_id` 和 `app_id` 必填。
+
+### 创建异步索引任务（管理台内部）
+
+```http
+POST /api/index/jobs
+Content-Type: application/json
+```
+
+`POST /api/open/index/jobs` 的管理台内部版本，两侧共用 `_create_index_job()` 实现，业务行为完全相同：异步入队、成功返回 202 和 `{file_id}`、队列满返回 429。差异只在认证方式和请求模型。
+
+认证使用 User JWT（`Authorization: Bearer <access_token>`，登录接口签发），不走 AK/SK 签名。
+
+请求字段与 `POST /api/open/index` 相同，但 `file_id` 必填：
+
+| 字段 | 类型 | 必填 | 默认值 | 说明 |
+|---|---|---|---|---|
+| `presigned_url` | string | 是 | - | 本次索引用的一次性下载 URL，管理台链路通常由 `/api/presign` 对 `/api/upload` 返回的 `s3_url` 生成 |
+| `s3_url` | string | 是 | - | 稳定对象存储地址，写入 metadata 用于追溯 |
+| `filename` | string | 否 | 从 `s3_url` 推导 | 自定义展示文件名 |
+| `file_id` | string | 是 | - | `/api/upload` 返回的文件 ID；必须是 UUID（32 位 hex 亦可），后端统一保存为 32 位 hex |
+| `app_id` | string | 是 | - | 管理台当前选择的应用 ID（User JWT 不绑定业务 app） |
+
+`file_id` 必填的原因：`/api/upload` 上传成功时已经把返回的 `file_id` 写进 MinIO 对象路径 `uploads/{app_id}/{file_id}/{filename}`，后续的索引、删除和文件列表都以这一前缀互相对齐。创建任务时如果不传 `file_id`，服务器会另外生成一个新的 `file_id`，向量库记录将与上传对象、文件列表断链：删除接口删不掉 MinIO 里的原文，文件列表也会出现一条无法对齐的幽灵记录。
 
 响应：
 
@@ -245,7 +327,20 @@ Content-Type: application/json
 }
 ```
 
-异步索引入队成功返回 202 和 `file_id`。下载、解析、OCR、embedding 和向量库写入由 backend 进程内的索引消费器后台执行，没有任务状态查询接口；调用方可以用 `file_id` 通过搜索接口验证索引是否就绪。进程内待处理任务队列已满时返回 429。任务不落盘，backend 重启会丢失队列中未完成的任务，需要重新提交索引。
+错误码：
+
+| 状态码 | 场景 |
+|---|---|
+| 401 | User JWT 缺失或无效 |
+| 400 | 不支持的文件类型；User JWT 未传 `app_id`（`app_id is required`） |
+| 409 | 目标 app 数据库未初始化（`app database is not initialized`） |
+| 422 | 请求体校验失败：缺 `file_id` 或其他必填字段、`file_id` 不是 UUID、`s3_url` 不以 `s3://` 开头等 |
+| 429 | 进程内待处理任务队列已满 |
+| 503 | 应用未完成初始化（`search is not initialized`） |
+
+任务同样不落盘，backend 重启会丢失队列中未完成的任务，需要重新提交索引。
+
+open 侧（外部上游）的 `file_id` 保持可选：外部文件不经过 `/api/upload`，没有对象路径对齐需求，缺省时由服务端生成新的 `file_id`。
 
 ## 搜索
 
