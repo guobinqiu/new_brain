@@ -475,10 +475,16 @@ GET /api/logs/stream
 ### 上传文件列表
 
 ```http
-GET /api/files?limit=50&cursor=...&app_id=<app_id>
+GET /api/files?limit=50&cursor=...&direction=next&app_id=<app_id>
 ```
 
-从 MinIO/S3 按当前 app 前缀分页列出原始上传文件。返回的 `id` 是 `file_id`，MinIO key 固定为 `uploads/{app_id}/{file_id}/{filename}`。
+列出当前 app 已成功索引的文件。数据来自 PostgreSQL `app_files` 表（database 组件维护的文件元数据），软删除的文件不再出现。返回的 `id` 是 `file_id`，`s3_url` 指向 MinIO 对象，key 固定为 `uploads/{app_id}/{file_id}/{filename}`。
+
+分页参数：
+
+- `cursor`：数字主键 id（响应中的 `next_cursor` / `prev_cursor` 原样回传即可）。
+- `direction`：`next` 向更旧方向翻页（取 id 小于 cursor 的记录）；`prev` 向更新方向翻页（取 id 大于 cursor 的记录，必须提供 cursor）。列表按创建时间新→旧排序。
+- `limit`：默认 50，上限 200。
 
 响应：
 
@@ -490,9 +496,11 @@ GET /api/files?limit=50&cursor=...&app_id=<app_id>
       "filename": "example.pdf",
       "s3_url": "s3://rag-dev/uploads/imsdom/550e8400e29b41d4a716446655440000/example.pdf",
       "size": 1024,
+      "chunk_count": 12,
       "created_at": "2026-08-18T17:00:00+08:00"
     }
   ],
+  "prev_cursor": null,
   "next_cursor": null,
   "has_more": false
 }

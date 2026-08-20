@@ -93,7 +93,7 @@ class FakeDatabase:
             raw = [r for r in rows if int(r["id"]) > cursor_id]
             raw.sort(key=lambda r: (r["created_at"], int(r["id"])))  # 旧→新
             raw = raw[: limit + 1]
-            page_rows = list(reversed(raw))
+            page_rows = list(reversed(raw[:limit]))  # 本页 = 掐掉探针行（raw[limit]）后反转
             prev_cursor = str(page_rows[0]["id"]) if len(raw) > limit else None
             last_id = int(page_rows[-1]["id"]) if page_rows else None
             has_more = last_id is not None and any(int(r["id"]) < last_id for r in rows)

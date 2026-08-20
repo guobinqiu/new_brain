@@ -1,4 +1,9 @@
+import pytest
+
 from database.postgres import PostgresDatabase, FIRST_PAGE_SQL, NEXT_PAGE_SQL, PREV_PAGE_SQL
+
+
+pytestmark = pytest.mark.unit
 
 
 class FakeCursor:
@@ -83,12 +88,15 @@ def test_next_page_uses_next_page_sql():
 
 
 def test_prev_page_reverses_rows():
-    # prev 查询 ASC 取回 [2,3,4]，反转后本页 [4,3]；取到 limit+1 条 → 还有更新的
+    # prev 查询 ASC 取回 limit+1 条 raw=[2,3,4]：raw[limit]=4 是探针（表示还有更新记录），
+    # 探针行不进本页；本页 = raw[:limit]=[2,3] 反转 → [f3,f2]；
+    # prev_cursor 指向本页第一条（最新一条）f3 → "3"，而非探针 id。
     db = _db([_row(2, "f2"), _row(3, "f3"), _row(4, "f4")], probe_rows=[_row(1, "f1")])
     page = db.list_files("app1", limit=2, cursor="1", direction="prev")
-    assert [r.id for r in page.files] == ["f4", "f3"]
-    assert page.prev_cursor is not None
-    assert page.has_more is True  # 探测到 id < 3 的记录（更旧方向）
+    assert [r.id for r in page.files] == ["f3", "f2"]
+    assert page.prev_cursor == "3"
+    assert page.has_more is True  # 探测到 id < 2 的记录（更旧方向）
+    assert page.next_cursor == "2"
     sql, params = db._pool.conn.executed[0]
     assert sql == PREV_PAGE_SQL
     assert params == ("app1", 1, 3)

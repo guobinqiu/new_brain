@@ -237,7 +237,7 @@ flowchart TB
 
 模型切换属于配置管理能力，不属于运行监控能力。
 
-向量数据查看能力直接分页读取向量库 chunk 数据，展示 chunk 主键、`file_id`、`s3_url`、`filename`、`chunk_index` 和完整 chunk 文本。管理台文件列表从 MinIO/S3 按 `uploads/{app_id}/` 前缀分页读取原始上传文件，文件 ID 来自对象路径 `uploads/{app_id}/{file_id}/{filename}`。管理台按 `file_id` 删除文件时同时删除向量库 chunks 和该 MinIO/S3 前缀下的对象；上游删除文件接口只删除向量库 chunks。
+向量数据查看能力直接分页读取向量库 chunk 数据，展示 chunk 主键、`file_id`、`s3_url`、`filename`、`chunk_index` 和完整 chunk 文本。管理台文件列表由 database 组件（PostgreSQL `app_files` 表）提供分页元数据，展示 `file_id`、`filename`、`s3_url`、`size`、`chunk_count` 和入库时间。管理台按 `file_id` 删除文件时同时删除向量库 chunks、软删 `app_files` 记录并删除该 MinIO/S3 前缀下的对象；上游删除文件接口删除向量库 chunks 并软删 `app_files` 记录，不动 MinIO 对象。
 
 ### 2.7 进程内索引消费器
 

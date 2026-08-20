@@ -121,13 +121,14 @@ class PostgresDatabase:
             if cursor_id is None:
                 raise ValueError("cursor is required for prev direction")
             with self._pool.connection() as conn:
+                # raw = 紧邻 cursor 之上的 limit+1 条（旧→新）；raw[limit] 是探针（表示还有更新记录）。
                 raw = conn.execute(PREV_PAGE_SQL, (app_id, cursor_id, limit + 1)).fetchall()
-                rows = list(reversed(raw))
-                prev_cursor = str(rows[0]["id"]) if len(raw) > limit else None
+                page_rows = list(reversed(raw[:limit]))  # 本页 = 掐掉探针后反转（新→旧）
+                prev_cursor = str(page_rows[0]["id"]) if len(raw) > limit else None
                 has_more = False
                 next_cursor = None
-                if rows:
-                    last_id = rows[-1]["id"]
+                if page_rows:
+                    last_id = page_rows[-1]["id"]
                     probe = conn.execute(
                         "SELECT 1 FROM app_files WHERE app_id = %s AND deleted_at IS NULL AND id < %s LIMIT 1",
                         (app_id, last_id),
@@ -145,7 +146,6 @@ class PostgresDatabase:
             page_rows = rows[:limit]
             prev_cursor = str(page_rows[0]["id"]) if cursor_id is not None and page_rows else None
             next_cursor = str(page_rows[-1]["id"]) if has_more else None
-        page_rows = rows[:limit]
         return FilePage(
             files=[_record(row) for row in page_rows],
             prev_cursor=prev_cursor,

@@ -111,7 +111,10 @@ class InlineIndexConsumer:
                 ),
                 timeout=self.timeout,
             )
-            self._upsert_record(result)
+            # upsert 走 psycopg 阻塞 IO（池等待可达 30s），不能在事件循环线程同步执行。
+            await loop.run_in_executor(
+                self.executor, functools.partial(self._upsert_record, result)
+            )
             return
         except ValueError as exc:
             # 不可重试（app 数据库未初始化、不支持的文件类型）：直接丢弃。

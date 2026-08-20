@@ -109,7 +109,8 @@ def anonymous_api_client(store_test_env):
     """FastAPI TestClient without Authorization header."""
     import main
 
-    main.application = main.Application()
+    from database.base import FakeDatabase
+    main.application = main.Application(database=FakeDatabase())
     orig_startup_in_background = main.STARTUP_IN_BACKGROUND
     main.STARTUP_IN_BACKGROUND = False
 

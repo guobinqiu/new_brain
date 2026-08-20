@@ -3,6 +3,9 @@ import pytest
 from database.base import FakeDatabase
 
 
+pytestmark = pytest.mark.unit
+
+
 def _seed(db):
     for i, fname in enumerate(["a.txt", "b.txt", "c.txt", "d.txt"]):
         db.upsert_file("app1", f"f{i}", fname, f"s3://b/{fname}", size=10 + i, chunk_count=1)
@@ -51,6 +54,18 @@ def test_list_prev_page():
     assert [r.id for r in back.files] == ["f3", "f2"]
     assert back.prev_cursor is None  # 已到最新边界
     assert back.has_more is True
+
+
+def test_list_prev_page_drops_probe_row():
+    # cursor=1、limit=2 → raw=[f1,f2,f3]（ASC，3 条 > limit），raw[2]=f3 是探针：
+    # 探针行不进本页；本页 = raw[:2] 反转 = [f2,f1]，prev_cursor 指向本页第一条 f2（id=3）
+    db = FakeDatabase()
+    _seed(db)
+    back = db.list_files("app1", limit=2, cursor="1", direction="prev")
+    assert [r.id for r in back.files] == ["f2", "f1"]
+    assert back.prev_cursor == "3"
+    assert back.has_more is True  # 更旧方向仍有 f0
+    assert back.next_cursor == "2"
 
 
 def test_purge_app():
