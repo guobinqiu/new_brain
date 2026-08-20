@@ -249,46 +249,6 @@ def test_upload_file_to_storage_puts_object_in_bucket(monkeypatch):
     ]
 
 
-def test_list_storage_files_uses_minio_object_pagination(monkeypatch):
-    import main
-    from datetime import datetime, timezone
-
-    calls = []
-
-    class Item:
-        def __init__(self, object_name, size):
-            self.object_name = object_name
-            self.size = size
-            self.last_modified = datetime(2026, 8, 18, 10, 0, tzinfo=timezone.utc)
-
-    class FakeMinio:
-        def bucket_exists(self, bucket):
-            calls.append(("bucket_exists", bucket))
-            return True
-
-        def list_objects(self, bucket, prefix, recursive, start_after):
-            calls.append(("list_objects", bucket, prefix, recursive, start_after))
-            return iter([
-                Item("uploads/imsdom/a/a.txt", 10),
-                Item("uploads/imsdom/b/b.txt", 20),
-                Item("uploads/imsdom/c/c.txt", 30),
-            ])
-
-    monkeypatch.setattr(main, "_minio_client", lambda: FakeMinio())
-    monkeypatch.setenv("S3_BUCKET", "rag-dev")
-
-    page = main._list_storage_files("imsdom", limit=2, cursor="uploads/imsdom/0.txt")
-
-    assert [item["id"] for item in page["files"]] == ["a", "b"]
-    assert page["files"][0]["s3_url"] == "s3://rag-dev/uploads/imsdom/a/a.txt"
-    assert page["next_cursor"] == "uploads/imsdom/b/b.txt"
-    assert page["has_more"] is True
-    assert calls == [
-        ("bucket_exists", "rag-dev"),
-        ("list_objects", "rag-dev", "uploads/imsdom/", True, "uploads/imsdom/0.txt"),
-    ]
-
-
 def test_client_delete_file_removes_index_only(monkeypatch):
     import main
     from auth import Principal

@@ -32,50 +32,43 @@ class TestFilesAPI:
         second_body = second_page.json()
         assert len(second_body["chunks"]) == 1
 
-    def test_list_files_api_uses_cursor_pagination(self, app_api_client, api_client, test_txt_path, monkeypatch):
-        """``GET /api/files`` returns MinIO-backed file pages."""
+    def test_list_files_api_uses_cursor_pagination(self, app_api_client, api_client, monkeypatch):
+        """``GET /api/files`` returns PG-backed file pages via keyset cursors."""
         import main
 
-        pages = {
-            None: {
-                "files": [{"id": "file-a", "filename": "first.txt", "s3_url": f"s3://rag-dev/uploads/{app_api_client.app_id}/file-a/first.txt", "size": 1, "created_at": None}],
-                "next_cursor": "cursor-a",
-                "has_more": True,
-            },
-            "cursor-a": {
-                "files": [{"id": "file-b", "filename": "second.txt", "s3_url": f"s3://rag-dev/uploads/{app_api_client.app_id}/file-b/second.txt", "size": 1, "created_at": None}],
-                "next_cursor": None,
-                "has_more": False,
-            },
-        }
-        monkeypatch.setattr(main, "_list_storage_files", lambda app_id, limit=50, cursor=None: pages[cursor])
+        db = main.application.database
+        for i, name in enumerate(["first.txt", "second.txt"]):
+            db.upsert_file(app_api_client.app_id, f"file-{name}", name, f"s3://rag-dev/uploads/{app_api_client.app_id}/f/{name}", size=i + 1)
 
         first_page = api_client.get("/api/files", params={"app_id": app_api_client.app_id, "limit": 1})
 
         assert first_page.status_code == 200
         first_body = first_page.json()
         assert len(first_body["files"]) == 1
+        assert first_body["prev_cursor"] is None
         assert first_body["next_cursor"]
         assert first_body["has_more"] is True
 
-        second_page = api_client.get("/api/files", params={"app_id": app_api_client.app_id, "limit": 1, "cursor": first_body["next_cursor"]})
+        second_page = api_client.get("/api/files", params={"app_id": app_api_client.app_id, "limit": 1, "cursor": first_body["next_cursor"], "direction": "next"})
 
         assert second_page.status_code == 200
         second_body = second_page.json()
         assert len(second_body["files"]) == 1
-        assert {first_body["files"][0]["id"], second_body["files"][0]["id"]} == {"file-a", "file-b"}
+        assert {first_body["files"][0]["id"], second_body["files"][0]["id"]} == {"file-first.txt", "file-second.txt"}
         assert second_body["has_more"] is False
         assert second_body["next_cursor"] is None
 
-    def test_list_files_api(self, app_api_client, api_client, test_txt_path, monkeypatch):
-        """``GET /api/files`` lists uploaded MinIO files."""
+        back = api_client.get("/api/files", params={"app_id": app_api_client.app_id, "limit": 1, "cursor": second_body["prev_cursor"], "direction": "prev"})
+
+        assert back.status_code == 200
+        assert back.json()["files"][0]["id"] == first_body["files"][0]["id"]
+        assert back.json()["prev_cursor"] is None
+
+    def test_list_files_api(self, app_api_client, api_client, monkeypatch):
+        """``GET /api/files`` lists indexed files from PG."""
         import main
 
-        monkeypatch.setattr(main, "_list_storage_files", lambda app_id, limit=50, cursor=None: {
-            "files": [{"id": "file-a", "filename": "test_ai.txt", "s3_url": f"s3://rag-dev/uploads/{app_api_client.app_id}/file-a/test_ai.txt", "size": 1, "created_at": None}],
-            "next_cursor": None,
-            "has_more": False,
-        })
+        main.application.database.upsert_file(app_api_client.app_id, "file-a", "test_ai.txt", f"s3://rag-dev/uploads/{app_api_client.app_id}/file-a/test_ai.txt", size=7)
 
         resp = api_client.get("/api/files", params={"app_id": app_api_client.app_id})
 

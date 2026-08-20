@@ -653,13 +653,23 @@ def _start_application_until_ready(stop_event: threading.Event):
             retry_seconds = min(retry_seconds * 2, STARTUP_RETRY_MAX_INTERVAL_SECONDS)
 
 @app.get("/api/files")
-def files(limit: int = 50, cursor: str | None = None, app_id: str | None = None, principal: Principal = Depends(require_jwt)):
+def files(limit: int = 50, cursor: str | None = None, direction: str = "next", app_id: str | None = None, principal: Principal = Depends(require_jwt)):
     _require_ready()
     try:
-        page = _list_storage_files(_database_principal(principal, app_id).app_id, limit=limit, cursor=cursor)
+        page = application.database.list_files(
+            _database_principal(principal, app_id).app_id,
+            limit=limit,
+            cursor=cursor,
+            direction=direction,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return page
+    return {
+        "files": [_file_record(record) for record in page.files],
+        "prev_cursor": page.prev_cursor,
+        "next_cursor": page.next_cursor,
+        "has_more": page.has_more,
+    }
 
 
 @app.post("/api/chunks")
@@ -826,34 +836,6 @@ def _minio_client() -> Minio:
     )
 
 
-def _list_storage_files(app_id: str, limit: int = 50, cursor: str | None = None) -> dict[str, Any]:
-    if limit <= 0:
-        raise ValueError("limit must be greater than 0")
-    limit = min(limit, 200)
-    bucket = os.getenv("S3_BUCKET", "rag-dev")
-    prefix = _storage_prefix(app_id)
-    client = _minio_client()
-    if not client.bucket_exists(bucket):
-        return {"files": [], "next_cursor": None, "has_more": False}
-    objects = client.list_objects(bucket, prefix=prefix, recursive=True, start_after=cursor)
-    rows = []
-    for item in objects:
-        object_name = item.object_name
-        if object_name.endswith("/"):
-            continue
-        rows.append({
-            "cursor": object_name,
-            "record": _storage_file_record(bucket, object_name, item),
-        })
-        if len(rows) > limit:
-            break
-    return {
-        "files": [row["record"] for row in rows[:limit]],
-        "next_cursor": rows[limit - 1]["cursor"] if len(rows) > limit else None,
-        "has_more": len(rows) > limit,
-    }
-
-
 def _delete_storage_file(app_id: str, file_id: str) -> int:
     bucket = os.getenv("S3_BUCKET", "rag-dev")
     client = _minio_client()
@@ -867,14 +849,14 @@ def _delete_storage_file(app_id: str, file_id: str) -> int:
     return deleted_count
 
 
-def _storage_file_record(bucket: str, object_name: str, item) -> dict[str, Any]:
-    file_id = _file_id_from_object_name(object_name)
+def _file_record(record) -> dict[str, Any]:
     return {
-        "id": file_id,
-        "filename": Path(object_name).name,
-        "s3_url": f"s3://{bucket}/{object_name}",
-        "size": getattr(item, "size", None),
-        "created_at": _iso_datetime(getattr(item, "last_modified", None)),
+        "id": record.id,
+        "filename": record.filename,
+        "s3_url": record.s3_url,
+        "size": record.size,
+        "created_at": record.created_at,
+        "chunk_count": record.chunk_count,
     }
 
 
@@ -885,11 +867,6 @@ def _storage_prefix(app_id: str) -> str:
 
 def _storage_file_prefix(app_id: str, file_id: str) -> str:
     return f"{_storage_prefix(app_id)}{file_id}/"
-
-
-def _file_id_from_object_name(object_name: str) -> str:
-    parts = object_name.split("/")
-    return parts[2] if len(parts) >= 4 and parts[0] == "uploads" else object_name
 
 
 def _upload_file_to_storage(app_id: str, file_id: str, filename: str, content: bytes, content_type: str) -> str:
