@@ -470,6 +470,19 @@ ocr = container.ocr()
 
 Store 和 Search 不负责偷偷启动 dense 或 sparse，只校验依赖组件已经 ready。这样初始化和查询严格分离：模型只在启动阶段加载，查询阶段不会懒加载模型。启动某个组件失败时，`Application` 会记录对应的 `component_errors`，监控状态把组件标成 `error`。
 
+### 6.1 database 组件
+
+`database` 是与 `store`、`dense` 等平级的一等组件，由 DI 容器按配置装配、`Application` 统一管理生命周期。PG 只承载文件元数据，chunk 正文和向量仍存向量库。
+
+`database/base.py` 定义 `Database` Protocol 与数据模型（`FileRecord`/`FilePage`），并提供测试用的内存实现 `FakeDatabase`。生产实现是 `database/postgres.PostgresDatabase`（psycopg3 连接池），`start()` 幂等建 `app_files` 表：`app_id` 租户隔离，`(app_id, file_id)` 唯一约束，`deleted_at` 软删除标记。
+
+关键语义：
+
+- 软删除：`soft_delete_file` 只置 `deleted_at` 不物理删除；列表查询带 `deleted_at IS NULL` 过滤。
+- upsert 复活：`upsert_file` 用 `ON CONFLICT (app_id, file_id) DO UPDATE`，重新索引同一 `file_id` 时自动清除 `deleted_at`，软删记录复活。
+- 双向 keyset 纯 id 游标：`list_files` 用表主键 `id`（BIGSERIAL，与 `created_at` 同序）做游标，列表按 `created_at DESC, id DESC` 展示；`direction=next` 用 `id < cursor`，`direction=prev` 用 `id > cursor` 反取再反转，多取 1 条判断 has_more，无 COUNT 无页码。
+- e2e 用 FakeDatabase：e2e 测试在 `conftest.py` 注入 `FakeDatabase`，不依赖真实 PG。
+
 ---
 
 ## 7. Store 能力
