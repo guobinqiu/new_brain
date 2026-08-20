@@ -28,17 +28,15 @@
     <div class="files-card">
       <div class="docs-head">
         <h2>{{ t('upload.files') }}</h2>
-        <span class="docs-count">{{ files.length }}{{ filesHasMore ? '+' : '' }}</span>
+        <span class="docs-count">{{ files.length }}</span>
       </div>
       <div v-if="files.length === 0 && !filesLoading" class="docs-empty">{{ t('upload.empty') }}</div>
       <template v-else>
         <el-table
-          ref="filesTableRef"
           :data="files"
           style="width: 100%"
           max-height="360"
           v-loading="filesLoading"
-          @scroll="onFilesScroll"
         >
           <el-table-column label="file_id" min-width="240" show-overflow-tooltip>
             <template #default="{ row }">
@@ -61,7 +59,10 @@
             </template>
           </el-table-column>
         </el-table>
-        <el-button v-if="filesHasMore && !filesLoading" class="docs-more" @click="fetchNextFiles">{{ t('common.loadMore') }}</el-button>
+        <div class="docs-pager">
+          <el-button :disabled="!filesPrevCursor || filesLoading" @click="fetchFiles('prev')">{{ t('common.prevPage') }}</el-button>
+          <el-button :disabled="!filesNextCursor || filesLoading" @click="fetchFiles('next')">{{ t('common.nextPage') }}</el-button>
+        </div>
       </template>
     </div>
   </main>
@@ -84,12 +85,11 @@ const { appId } = storeToRefs(activeAppStore)
 const selectedFiles = ref([])
 const uploading = ref(false)
 const files = ref([])
-const filesCursor = ref(null)
-const filesHasMore = ref(false)
+const filesPrevCursor = ref(null)
+const filesNextCursor = ref(null)
 const filesLoading = ref(false)
 const deletingFileId = ref(null)
 const uploadRef = ref(null)
-const filesTableRef = ref(null)
 
 // el-upload on-change：(uploadFile, uploadFiles)，uploadFiles 为 UploadFile 数组，raw 为原始 File
 function onFileChange(file, fileList) {
@@ -149,24 +149,21 @@ async function uploadFiles(files) {
   return submitted > 0
 }
 
-async function fetchFiles() {
-  files.value = []
-  filesCursor.value = null
-  filesHasMore.value = false
-  await fetchNextFiles()
-}
-
-async function fetchNextFiles() {
+async function fetchFiles(direction) {
   if (filesLoading.value) return
   filesLoading.value = true
   try {
     const params = { limit: 50 }
-    if (filesCursor.value) params.cursor = filesCursor.value
     if (activeAppStore.appId) params.app_id = activeAppStore.appId
+    if (direction === 'next' && filesNextCursor.value) params.cursor = filesNextCursor.value
+    if (direction === 'prev' && filesPrevCursor.value) {
+      params.cursor = filesPrevCursor.value
+      params.direction = 'prev'
+    }
     const res = await axios.get(`${API}/files`, { params })
-    files.value = files.value.concat(res.data.files || [])
-    filesCursor.value = res.data.next_cursor || null
-    filesHasMore.value = Boolean(res.data.has_more)
+    files.value = res.data.files || []
+    filesPrevCursor.value = res.data.prev_cursor || null
+    filesNextCursor.value = res.data.next_cursor || null
   }
   catch (err) { console.error(err) }
   finally { filesLoading.value = false }
@@ -185,16 +182,6 @@ async function deleteFile(file) {
     showToast('error', `${file.filename}: ${err.response?.data?.detail || err.message}`)
   } finally {
     deletingFileId.value = null
-  }
-}
-
-function onFilesScroll(event) {
-  // 同 DatabaseView：el-table scroll 事件 payload 为 { scrollTop, scrollLeft }
-  const wrap = filesTableRef.value?.scrollBarRef?.wrapRef
-  if (!wrap) return
-  const scrollTop = event?.scrollTop ?? wrap.scrollTop
-  if (scrollTop + wrap.clientHeight >= wrap.scrollHeight - 24 && filesHasMore.value) {
-    fetchNextFiles()
   }
 }
 
