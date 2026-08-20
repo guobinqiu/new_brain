@@ -399,9 +399,10 @@ class FakeDatabase:
             raw.sort(key=lambda r: (r["created_at"], int(r["id"])))  # 旧→新
             raw = raw[: limit + 1]
             page_rows = list(reversed(raw))
-            has_more = len(raw) > limit
             prev_cursor = str(page_rows[0]["id"]) if len(raw) > limit else None
-            next_cursor = str(page_rows[-1]["id"]) if has_more else None
+            last_id = int(page_rows[-1]["id"]) if page_rows else None
+            has_more = last_id is not None and any(int(r["id"]) < last_id for r in rows)
+            next_cursor = str(last_id) if has_more else None
         else:
             if cursor_id is not None:
                 rows = [r for r in rows if int(r["id"]) < cursor_id]
@@ -474,24 +475,37 @@ class FakeCursor:
     def fetchall(self):
         return self._rows
 
+    def fetchone(self):
+        return self._rows[0] if self._rows else None
+
 
 class FakeConn:
-    def __init__(self, rows):
-        self._rows = rows
+    def __init__(self, page_rows, probe_rows=None):
+        self._page_rows = page_rows
+        self._probe_rows = probe_rows
         self.executed = []
 
     def execute(self, sql, params=None):
         self.executed.append((sql, params))
-        return FakeCursor(self._rows)
+        if sql.startswith("SELECT 1"):
+            return FakeCursor(self._probe_rows or [])
+        return FakeCursor(self._page_rows)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
 
 
 class FakePool:
-    def __init__(self, rows):
-        self._rows = rows
+    def __init__(self, page_rows, probe_rows=None):
+        self._page_rows = page_rows
+        self._probe_rows = probe_rows
         self.conn = None
 
     def connection(self):
-        self.conn = FakeConn(self._rows)
+        self.conn = FakeConn(self._page_rows, self._probe_rows)
         return self.conn
 
 
@@ -508,9 +522,9 @@ def _row(i, file_id):
     }
 
 
-def _db(rows):
+def _db(rows, probe_rows=None):
     db = PostgresDatabase(url="postgresql://x")
-    db._pool = FakePool(rows)
+    db._pool = FakePool(rows, probe_rows)
     db.ready = True
     return db
 
@@ -537,18 +551,18 @@ def test_next_page_uses_next_page_sql():
 
 def test_prev_page_reverses_rows():
     # prev 查询 ASC 取回 [2,3,4]，反转后本页 [4,3]；取到 limit+1 条 → 还有更新的
-    db = _db([_row(2, "f2"), _row(3, "f3"), _row(4, "f4")])
+    db = _db([_row(2, "f2"), _row(3, "f3"), _row(4, "f4")], probe_rows=[_row(1, "f1")])
     page = db.list_files("app1", limit=2, cursor="1", direction="prev")
     assert [r.id for r in page.files] == ["f4", "f3"]
     assert page.prev_cursor is not None
-    assert page.has_more is True
+    assert page.has_more is True  # 探测到 id < 3 的记录（更旧方向）
     sql, params = db._pool.conn.executed[0]
     assert sql == PREV_PAGE_SQL
     assert params == ("app1", 1, 3)
 
 
 def test_prev_at_newest_boundary_has_no_prev_cursor():
-    db = _db([_row(3, "f3"), _row(4, "f4")])  # 恰好 2 条 → 已到最新边界
+    db = _db([_row(3, "f3"), _row(4, "f4")], probe_rows=[])  # 已到最新边界，且无更旧记录
     page = db.list_files("app1", limit=2, cursor="1", direction="prev")
     assert [r.id for r in page.files] == ["f4", "f3"]
     assert page.prev_cursor is None
@@ -705,9 +719,18 @@ class PostgresDatabase:
             with self._pool.connection() as conn:
                 raw = conn.execute(PREV_PAGE_SQL, (app_id, cursor_id, limit + 1)).fetchall()
             rows = list(reversed(raw))
-            has_more = len(raw) > limit
             prev_cursor = str(rows[0]["id"]) if len(raw) > limit else None
-            next_cursor = str(rows[-1]["id"]) if has_more else None
+            has_more = False
+            next_cursor = None
+            if rows:
+                last_id = rows[-1]["id"]
+                with self._pool.connection() as conn:
+                    probe = conn.execute(
+                        "SELECT 1 FROM app_files WHERE app_id = %s AND deleted_at IS NULL AND id < %s LIMIT 1",
+                        (app_id, last_id),
+                    ).fetchone()
+                has_more = probe is not None
+                next_cursor = str(last_id) if has_more else None
         else:
             if cursor_id is None:
                 with self._pool.connection() as conn:
@@ -769,7 +792,16 @@ git commit -m "feat: PostgresDatabase 连接池与 app_files 建表/增删查"
 - Consumes: `PostgresDatabase`（Task 3）、`DatabaseConfig`（Task 1）
 - Produces: `container.build_database(config) -> Database`；`Application.database` 属性；`/api/monitor` components 含 `{"name": "database", ...}`。
 
-- [ ] **Step 1: 写失败测试**（monitor 契约）
+- [ ] **Step 1: 写失败测试**（conftest 注入 FakeDatabase + monitor 契约）
+
+先修改 `backend/tests/conftest.py` 的 `api_client` fixture 中 `main.application = main.Application()` 为：
+
+```python
+    from database.base import FakeDatabase
+    main.application = main.Application(database=FakeDatabase())
+```
+
+（`anonymous_api_client` 保持不动。）
 
 `backend/tests/e2e/test_config_api.py` 中 `test_monitor_returns_runtime_data_and_index_contract` 的 `components` 断言处追加：
 
@@ -780,7 +812,7 @@ git commit -m "feat: PostgresDatabase 连接池与 app_files 建表/增删查"
 先运行确认失败：
 
 Run: `cd backend && .venv/bin/python -m pytest tests/e2e/test_config_api.py::TestConfigAPI::test_monitor_returns_runtime_data_and_index_contract -v`
-Expected: FAIL（`KeyError: 'database'`）
+Expected: FAIL（`TypeError: Application.__init__() got an unexpected keyword argument 'database'`）
 
 - [ ] **Step 2: 实现 container.py**
 
@@ -887,14 +919,9 @@ git commit -m "feat: database 组件接入 DI 容器、Application 生命周期�
 - Consumes: `Application.database.list_files`（Task 4）
 - Produces: `GET /api/files?limit&cursor&direction` 响应 `{"files": [{id, filename, s3_url, size, created_at, chunk_count}], "prev_cursor", "next_cursor", "has_more"}`。
 
-- [ ] **Step 1: 写失败测试**（重写 e2e，改用 FakeDatabase 注入数据）
+- [ ] **Step 1: 写失败测试**（重写 e2e 列表测试，数据经 `main.application.database`（FakeDatabase）注入）
 
-`backend/tests/conftest.py` 的 `api_client` fixture 中 `main.application = main.Application()` 改为：
-
-```python
-    from database.base import FakeDatabase
-    main.application = main.Application(database=FakeDatabase())
-```
+> 注：conftest 的 FakeDatabase 注入已在 Task 4 Step 1 完成，此处不再重复。
 
 `backend/tests/e2e/test_files_api.py` 替换两个列表测试：
 
@@ -1023,20 +1050,16 @@ git commit -m "feat: /api/files 改读 PG 双向 keyset 分页，e2e 注入 Fake
 `backend/tests/unit/test_index_consumer.py` 加：
 
 ```python
-def test_consumer_upserts_database_record_on_success(monkeypatch):
+def test_consumer_upserts_database_record_on_success():
     import indexing.consumer as consumer_mod
 
     calls = []
     db = type("FakeDB", (), {
         "upsert_file": lambda self, app_id, file_id, filename, s3_url, **kw: calls.append((app_id, file_id, filename, s3_url, kw)),
     })()
-
-    async def fake_run_job(self, job):
-        return {"app_id": "app1", "file_id": "f1", "chunk_count": 3, "size": 10, "s3_url": "s3://b/a.txt", "filename": "a.txt"}
-
-    monkeypatch.setattr(consumer_mod.InlineIndexConsumer, "_run_job", fake_run_job)
-    consumer = consumer_mod.InlineIndexConsumer(type("App", (), {"database": db})())
-    result = consumer_mod.InlineIndexConsumer._upsert_record(consumer, {"app_id": "app1", "file_id": "f1", "chunk_count": 3, "size": 10, "s3_url": "s3://b/a.txt", "filename": "a.txt"})
+    app = type("FakeApp", (), {"database": db})()
+    consumer = consumer_mod.InlineIndexConsumer(app)
+    consumer._upsert_record({"app_id": "app1", "file_id": "f1", "chunk_count": 3, "size": 10, "s3_url": "s3://b/a.txt", "filename": "a.txt"})
     assert calls == [("app1", "f1", "a.txt", "s3://b/a.txt", {"size": 10, "chunk_count": 3})]
 ```
 
@@ -1084,15 +1107,12 @@ def index_presigned_object(application, file_id: str, presigned_url: str, s3_url
         )
         self._upsert_record(result)
         return
-```
 
-`InlineIndexConsumer` 加静态方法：
+`InlineIndexConsumer` 的 `_upsert_record` 实现为**实例方法**：
 
 ```python
-    @staticmethod
-    def _upsert_record(result: dict) -> None:
-        db = result["__application"].database
-        db.upsert_file(
+    def _upsert_record(self, result: dict) -> None:
+        self.application.database.upsert_file(
             result["app_id"],
             result["file_id"],
             result["filename"],
@@ -1100,6 +1120,9 @@ def index_presigned_object(application, file_id: str, presigned_url: str, s3_url
             size=result["size"],
             chunk_count=result["chunk_count"],
         )
+```
+
+（原 staticmethod + `__application` 的写法已废弃。）
 ```
 
 `_index_object` 改为返回 size 与来源字段：
@@ -1115,7 +1138,6 @@ def index_presigned_object(application, file_id: str, presigned_url: str, s3_url
         "size": file_size,
         "s3_url": s3_url,
         "filename": filename,
-        "__application": application,
     }
 ```
 
