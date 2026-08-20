@@ -172,6 +172,16 @@ def test_docker_cpu_profile_keeps_lightweight_models_with_app_bm25_sparse():
     assert config["search"]["default_mode"] == "hybrid"
 
 
+def test_profiles_define_database_component():
+    for path in CONFIG_DIR.glob("*.yaml"):
+        config = _read_config(path.name)
+
+        assert config["database"]["type"] == "postgres"
+        assert "url" in config["database"]
+        assert "import_path" in config["database"]
+        assert "." in config["database"]["import_path"]
+
+
 def _is_component_group(section: dict) -> bool:
     if not isinstance(section, dict):
         return False

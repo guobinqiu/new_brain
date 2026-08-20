@@ -1,3 +1,8 @@
+database:
+  type: postgres
+  url: postgresql://rag:rag@postgres:5432/rag
+  pool_size: 5
+  import_path: database.postgres.PostgresDatabase
 logging:
   level: INFO
   max_bytes: 10485760

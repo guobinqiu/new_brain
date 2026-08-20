@@ -33,6 +33,8 @@ dependencies = [
     "opencv-python-headless>=4.10.0.84,<5.0.0",
     "dependency-injector>=4.48.0",
     "minio>=7.2.0",
+    "psycopg[binary]>=3.2.0",
+    "psycopg-pool>=3.2.0",
 ]
 
 [project.optional-dependencies]

@@ -37,6 +37,9 @@ def test_load_app_config_can_use_explicit_yaml(monkeypatch, tmp_path):
     path = tmp_path / "custom.yaml"
     path.write_text(
         """
+database:
+  type: postgres
+  url: postgresql://rag:rag@localhost:5432/rag
 dense: test_dense
 sparse:
   type: bm25
@@ -90,6 +93,9 @@ def test_load_app_config_supports_single_vector_sparse(monkeypatch, tmp_path):
     path = tmp_path / "single_vector_sparse.yaml"
     path.write_text(
         """
+database:
+  type: postgres
+  url: postgresql://rag:rag@localhost:5432/rag
 dense: bge_m3
 sparse:
   type: bge_m3
@@ -118,6 +124,9 @@ def test_load_app_config_rejects_nested_sparse_backends(monkeypatch, tmp_path):
     path = tmp_path / "nested_sparse.yaml"
     path.write_text(
         """
+database:
+  type: postgres
+  url: postgresql://rag:rag@localhost:5432/rag
 dense: bge_m3
 sparse:
   app:
@@ -146,6 +155,9 @@ def test_load_app_config_selects_named_components(monkeypatch, tmp_path):
     path = tmp_path / "key_config.yaml"
     path.write_text(
         """
+database:
+  type: postgres
+  url: postgresql://rag:rag@localhost:5432/rag
 dense:
   name: bge_m3
   model_name: bge-m3
@@ -191,6 +203,9 @@ def test_load_app_config_allows_profile_without_rerank(monkeypatch, tmp_path):
     path = tmp_path / "no_rerank.yaml"
     path.write_text(
         """
+database:
+  type: postgres
+  url: postgresql://rag:rag@localhost:5432/rag
 dense:
   name: bge_base
   model_name: bge-base-zh-v1.5
@@ -256,6 +271,9 @@ def test_load_app_config_rejects_chroma_bge_m3_sparse(tmp_path):
     path = tmp_path / "chroma_bge_m3_sparse.yaml"
     path.write_text(
         """
+database:
+  type: postgres
+  url: postgresql://rag:rag@localhost:5432/rag
 dense:
   name: bge_base
   model_name: bge-base-zh-v1.5
@@ -327,6 +345,9 @@ def test_load_app_config_supports_paddle_ocr(monkeypatch, tmp_path):
     path = tmp_path / "paddle_ocr.yaml"
     path.write_text(
         """
+database:
+  type: postgres
+  url: postgresql://rag:rag@localhost:5432/rag
 dense:
   name: bge_base
   model_name: bge-base-zh-v1.5
@@ -361,6 +382,9 @@ def test_load_app_config_supports_tesseract_ocr(monkeypatch, tmp_path):
     path = tmp_path / "tesseract_ocr.yaml"
     path.write_text(
         """
+database:
+  type: postgres
+  url: postgresql://rag:rag@localhost:5432/rag
 dense:
   name: bge_base
   model_name: bge-base-zh-v1.5
@@ -395,6 +419,9 @@ def test_load_app_config_rejects_unsupported_store(tmp_path):
     path = tmp_path / "bad.yaml"
     path.write_text(
         """
+database:
+  type: postgres
+  url: postgresql://rag:rag@localhost:5432/rag
 dense: test_dense
 sparse:
   type: bm25

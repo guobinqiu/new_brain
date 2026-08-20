@@ -35,6 +35,14 @@ class StoreConfig:
 
 
 @dataclass(frozen=True)
+class DatabaseConfig:
+    type: str
+    url: str
+    pool_size: int = 5
+    import_path: str | None = None
+
+
+@dataclass(frozen=True)
 class SearchConfig:
     default_mode: str = "hybrid"
     top_k: int = 20
@@ -86,6 +94,7 @@ class AppConfig:
     dense: DenseConfig
     sparse: SparseConfig
     store: StoreConfig
+    database: DatabaseConfig
     search: SearchConfig
     rerank: RerankConfig | None
     ocr: OCRConfig
@@ -99,6 +108,7 @@ def parse_app_config(raw: dict[str, Any]) -> AppConfig:
     dense = raw.get("dense") or {}
     sparse = raw.get("sparse") or {}
     store = raw.get("store") or {}
+    database = raw.get("database") or {}
     search = raw.get("search") or {}
     logging = raw.get("logging") or {}
     auth = raw.get("auth") or {}
@@ -118,6 +128,11 @@ def parse_app_config(raw: dict[str, Any]) -> AppConfig:
         _validate_supported("rerank", rerank_name, {"test_rerank", "bge_base", "bge_large", "bge_m3", "bge_reranker_base", "bge_reranker_large", "bge_reranker_v2_m3", "rerank/cross_encoder"})
     _validate_supported("ocr", ocr_name, {"test_ocr", "rapid", "paddle", "rapidocr", "paddleocr", "tesseract", "ocr/rapid", "ocr/paddle", "ocr/tesseract"})
     _validate_supported("store.type", store_type, {"qdrant", "chroma", "milvus", "milvus_lite", "store/qdrant", "store/chroma", "store/milvus"})
+    database_name = database.get("type") or database.get("name")
+    if database_name is None:
+        raise ValueError("database.type is required")
+    _validate_supported("database.type", database_name, {"postgres", "database/postgres"})
+    _required(database, "url", "database")
     _validate_supported("search.default_mode", search.get("default_mode", "hybrid"), {"dense", "sparse", "hybrid"})
     if store_type in ("qdrant", "store/qdrant"):
         _required(store, "url", "store")
@@ -158,6 +173,12 @@ def parse_app_config(raw: dict[str, Any]) -> AppConfig:
             uri=store.get("uri"),
             timeout=int(store.get("timeout", 30)),
             import_path=store.get("import_path"),
+        ),
+        database=DatabaseConfig(
+            type=database_name,
+            url=_required(database, "url", "database"),
+            pool_size=int(database.get("pool_size", 5)),
+            import_path=database.get("import_path"),
         ),
         search=SearchConfig(
             default_mode=search.get("default_mode", "hybrid"),

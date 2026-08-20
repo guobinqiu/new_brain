@@ -112,6 +112,9 @@ def test_application_selects_bge_m3_store_sparse(tmp_path):
     path = tmp_path / "qdrant_m3_sparse.yaml"
     path.write_text(
         """
+database:
+  type: postgres
+  url: postgresql://rag:rag@localhost:5432/rag
 dense:
   name: bge_m3
   model_name: bge-m3
@@ -162,12 +165,13 @@ def test_application_reads_config_name_from_explicit_yaml(monkeypatch):
 
 def test_build_dense_rejects_unsupported_dense_type():
     import container
-    from schema import AdminAuthConfig, AppConfig, AuthConfig, DenseConfig, OCRConfig, RerankConfig, SearchConfig, SparseConfig, StoreConfig
+    from schema import AdminAuthConfig, AppConfig, AuthConfig, DatabaseConfig, DenseConfig, OCRConfig, RerankConfig, SearchConfig, SparseConfig, StoreConfig
 
     config = AppConfig(
         dense=DenseConfig(name="unknown", model_path="/models/dense"),
         sparse=SparseConfig(name="bm25", tokenizer="jieba"),
         store=StoreConfig(type="qdrant", url="http://localhost:6333"),
+        database=DatabaseConfig(type="postgres", url="postgresql://rag:rag@localhost:5432/rag"),
         search=SearchConfig(),
         rerank=RerankConfig(name="bge_reranker_base", model_path="/models/rerank"),
         ocr=OCRConfig(name="rapidocr", model_path="/models/ocr"),

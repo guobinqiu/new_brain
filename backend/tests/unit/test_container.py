@@ -19,6 +19,9 @@ def _config_file(tmp_path, store_key: str = "qdrant", sparse_key: str = "bm25", 
     path = tmp_path / "profile.yaml"
     path.write_text(
         f"""
+database:
+  type: postgres
+  url: postgresql://rag:rag@localhost:5432/rag
 dense:
   name: bge_base
   model_name: bge-base-zh-v1.5
