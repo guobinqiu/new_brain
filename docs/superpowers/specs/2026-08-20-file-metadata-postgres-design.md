@@ -132,6 +132,9 @@ GET /api/files?limit=50[&cursor={id}&direction=next|prev]
 }
 ```
 
+> **字段区分**：`files[].id` 是业务 `file_id`（UUID，兼容现状前端删除操作）；分页游标 `cursor`/`prev_cursor`/`next_cursor` 是表主键 `id`（BIGSERIAL 自增数字）。二者不同。
+
+
 ### app 级销毁
 
 `DELETE /api/apps/{app_id}` 与 drop database 端点调 `database.purge_app(app_id)` 物理清该 app 的 PG 记录。
