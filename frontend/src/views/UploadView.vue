@@ -59,7 +59,7 @@
             </template>
           </el-table-column>
         </el-table>
-        <div class="docs-pager">
+        <div class="docs-pager" style="text-align: right">
           <el-button :disabled="!filesPrevCursor || filesLoading" @click="fetchFiles('prev')">&lt;</el-button>
           <el-button :disabled="!filesNextCursor || filesLoading" @click="fetchFiles('next')">&gt;</el-button>
         </div>
