@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Protocol
 from contextlib import AbstractContextManager
 
-from files.base import FilePage
 from sparse.base import Sparse
 
 
@@ -31,13 +30,7 @@ class Store(Protocol):
     def get_total_chunks(self, file_ids: list[str] | None = None) -> int:
         ...
 
-    def list_files(self, limit: int = 50, cursor: str | None = None) -> FilePage:
-        ...
-
     def list_chunks(self, file_ids: list[str] | None = None, limit: int = 50, cursor: str | None = None) -> dict:
-        ...
-
-    def count_files(self) -> int:
         ...
 
     def ensure_app_collection(self, app_id: str) -> str:

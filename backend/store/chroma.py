@@ -11,7 +11,6 @@ from collection_names import app_collection, collection_name_for_app, current_co
 from dense.base import Dense
 from dense.huggingface import HuggingFaceDense
 from sparse.base import Sparse
-from store.files import count_files_from_documents, list_files_from_documents
 
 
 SearchMode = Literal["dense", "sparse", "hybrid"]
@@ -64,14 +63,8 @@ class ChromaStore:
     def get_total_chunks(self, file_ids: list[str] | None = None) -> int:
         return get_total_chunks(file_ids)
 
-    def list_files(self, limit: int = 50, cursor: str | None = None):
-        return list_files_from_documents(get_search_documents(None), limit=limit, cursor=cursor)
-
     def list_chunks(self, file_ids: list[str] | None = None, limit: int = 50, cursor: str | None = None) -> dict:
         return list_chunks(file_ids=file_ids, limit=limit, cursor=cursor)
-
-    def count_files(self) -> int:
-        return count_files_from_documents(get_search_documents(None))
 
     def ensure_app_collection(self, app_id: str) -> str:
         collection_name = collection_name_for_app(app_id)
