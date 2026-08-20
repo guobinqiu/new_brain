@@ -119,6 +119,15 @@ def test_deploy_build_supports_optional_cn_mirror():
         assert "UV_DEFAULT_INDEX_CN: ${UV_DEFAULT_INDEX_CN:-https://pypi.tuna.tsinghua.edu.cn/simple}" in compose
 
 
+def test_deploy_runs_postgres_service():
+    for compose_file in ("deploy/cpu/docker-compose.yml", "deploy/gpu/docker-compose.yml"):
+        compose = (ROOT / compose_file).read_text(encoding="utf-8")
+
+        assert "postgres:16-alpine" in compose
+        assert "pg_isready" in compose
+        assert "../../pg_data:/var/lib/postgresql/data" in compose
+
+
 def test_deploy_services_use_bounded_json_file_logs():
     for compose_file in ("deploy/cpu/docker-compose.yml", "deploy/gpu/docker-compose.yml"):
         compose = (ROOT / compose_file).read_text(encoding="utf-8")

@@ -5,6 +5,25 @@ x-json-logging: &json-logging
     max-file: "5"
 
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: rag-postgres
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      POSTGRES_USER: rag
+      POSTGRES_PASSWORD: rag
+      POSTGRES_DB: rag
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rag -d rag"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    ports:
+      - "15432:5432"
+    volumes:
+      - ../../pg_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
   qdrant:
     image: qdrant/qdrant:v1.18.3
     container_name: rag-qdrant
@@ -70,6 +89,9 @@ services:
               count: all
               capabilities: [gpu]
     logging: *json-logging
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
 
   frontend:

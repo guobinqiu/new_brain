@@ -354,6 +354,8 @@ milvus_data/
   standalone/
   lite/
     lite.db
+
+pg_data/           # PostgreSQL 文件元数据（app_files 表）
 ```
 
 Qdrant 和 Milvus Standalone 是服务型数据库，backend 通过网络访问。Chroma local 和 Milvus Lite 是嵌入式文件库，本地后端和 Docker 后端使用同一份数据目录；不要同时启动两个后端访问同一份嵌入式库文件。
