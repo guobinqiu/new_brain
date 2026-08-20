@@ -25,18 +25,18 @@
 
 ## 2. 核心概念
 
-| 概念 | 含义 |
-|---|---|
-| `file_id` | 文件主键，外部系统保存后用于限定搜索范围 |
-| file | 上传或对象存储索引的文件父对象，文件级信息从 chunk metadata 聚合得到 |
-| chunk | 文件切片后的检索对象，存储在向量库 collection |
-| `top_k` | 最多返回条数 |
-| `fetch_k` | rerank 候选池大小，只在 `rerank=true` 时使用 |
-| dense | 语义向量检索 |
-| sparse | 关键词、词权重或稀疏向量检索 |
-| hybrid | dense 和 sparse 的融合检索 |
-| User JWT | 管理用户登录后得到的 JWT，用于管理功能 |
-| `app_id` | 外部系统身份标识，用于鉴权、审计和 collection 隔离 |
+| 概念      | 含义                                                                 |
+| --------- | -------------------------------------------------------------------- |
+| `file_id` | 文件主键，外部系统保存后用于限定搜索范围                             |
+| file      | 上传或对象存储索引的文件父对象，文件级信息从 chunk metadata 聚合得到 |
+| chunk     | 文件切片后的检索对象，存储在向量库 collection                        |
+| `top_k`   | 最多返回条数                                                         |
+| `fetch_k` | rerank 候选池大小，只在 `rerank=true` 时使用                         |
+| dense     | 语义向量检索                                                         |
+| sparse    | 关键词、词权重或稀疏向量检索                                         |
+| hybrid    | dense 和 sparse 的融合检索                                           |
+| User JWT  | 管理用户登录后得到的 JWT，用于管理功能                               |
+| `app_id`  | 外部系统身份标识，用于鉴权、审计和 collection 隔离                   |
 
 查询范围示例：
 
@@ -141,11 +141,11 @@ LangChain 在系统里负责文档解析复用、文本切分、HuggingFace embe
 
 向量库读写和检索由 Store 层直接使用各向量库原生 SDK：
 
-| 向量库 | Store 实现 | 原生依赖 | 职责 |
-|---|---|---|---|
-| Qdrant | `store.qdrant.QdrantStore` | `qdrant-client` | collection 创建、payload index、dense/vector sparse 写入与查询 |
-| Chroma local | `store.chroma.ChromaStore` | `chromadb` | 本地 collection、metadata filter、dense 写入与查询 |
-| Milvus / Milvus Lite | `store.milvus.MilvusStore` | `pymilvus` / `milvus-lite` | schema、dense/sparse index、scalar index、写入与查询 |
+| 向量库               | Store 实现                 | 原生依赖                   | 职责                                                           |
+| -------------------- | -------------------------- | -------------------------- | -------------------------------------------------------------- |
+| Qdrant               | `store.qdrant.QdrantStore` | `qdrant-client`            | collection 创建、payload index、dense/vector sparse 写入与查询 |
+| Chroma local         | `store.chroma.ChromaStore` | `chromadb`                 | 本地 collection、metadata filter、dense 写入与查询             |
+| Milvus / Milvus Lite | `store.milvus.MilvusStore` | `pymilvus` / `milvus-lite` | schema、dense/sparse index、scalar index、写入与查询           |
 
 这个边界保证搜索流程只依赖 `Store` 接口，不受第三方封装层的底层能力暴露范围影响。新增向量库时，只需要实现 `Store` 接口；如果该向量库支持 vector sparse，再补对应的 `sparse/*` 适配类。
 
@@ -243,18 +243,18 @@ flowchart TB
 
 异步索引由 backend 进程内的 `InlineIndexConsumer`（`indexing/consumer.py`）消费，没有独立 index-worker 进程，也没有 Celery/Redis。FastAPI lifespan 启动消费器；索引与查询共享同一份 `Application`，模型只在 backend 进程内加载一份。
 
-| 边界 | 实现 |
-|---|---|
-| 入队 | `indexing.queue.enqueue_index_job()` 向进程内 `queue.Queue`（`maxsize=10`，硬编码）`put_nowait`；同步入队端点直接 put，消费器经 `run_in_executor` 取，线程安全 |
-| 消费 | `InlineIndexConsumer`，lifespan 启动 1 个 asyncio task，并发固定为 1 |
-| 执行 | 专用 `ThreadPoolExecutor(max_workers=1)` + `run_in_executor`，同步 embedding 不阻塞事件循环，任务串行执行 |
-| 超时 | `asyncio.wait_for(..., timeout=1800)`，超时 1800 秒（硬编码）；超时按可重试处理 |
-| 重试 | job 字典内 `retry_count`，小于 2 时重新入队尾（最多重试 2 次，硬编码），超过后记日志放弃 |
-| 不可恢复错误 | app 数据库未初始化、文件格式不支持等 `ValueError` 直接丢弃，不重试 |
-| 队列满 | `put_nowait` 抛 `QueueFull`，入队接口返回 429 |
-| 任务记录 / 列表 / 状态 / 事件推送 | 无 job_id、无任务记录、无状态接口、无 SSE；调用方用 `file_id` 通过搜索接口验证索引就绪 |
-| 重启 | 进程内队列随进程清空，接受丢任务；原始文件仍在对象存储，可重新触发索引 |
-| 停止 | lifespan 停止时置位 stop_event、等待循环退出、关闭 executor，并注销模块级单例；此后入队直接抛 `RuntimeError` |
+| 边界                              | 实现                                                                                                                                                           |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 入队                              | `indexing.queue.enqueue_index_job()` 向进程内 `queue.Queue`（`maxsize=10`，硬编码）`put_nowait`；同步入队端点直接 put，消费器经 `run_in_executor` 取，线程安全 |
+| 消费                              | `InlineIndexConsumer`，lifespan 启动 1 个 asyncio task，并发固定为 1                                                                                           |
+| 执行                              | 专用 `ThreadPoolExecutor(max_workers=1)` + `run_in_executor`，同步 embedding 不阻塞事件循环，任务串行执行                                                      |
+| 超时                              | `asyncio.wait_for(..., timeout=1800)`，超时 1800 秒（硬编码）；超时按可重试处理                                                                                |
+| 重试                              | job 字典内 `retry_count`，小于 2 时重新入队尾（最多重试 2 次，硬编码），超过后记日志放弃                                                                       |
+| 不可恢复错误                      | app 数据库未初始化、文件格式不支持等 `ValueError` 直接丢弃，不重试                                                                                             |
+| 队列满                            | `put_nowait` 抛 `QueueFull`，入队接口返回 429                                                                                                                  |
+| 任务记录 / 列表 / 状态 / 事件推送 | 无 job_id、无任务记录、无状态接口、无 SSE；调用方用 `file_id` 通过搜索接口验证索引就绪                                                                         |
+| 重启                              | 进程内队列随进程清空，接受丢任务；原始文件仍在对象存储，可重新触发索引                                                                                         |
+| 停止                              | lifespan 停止时置位 stop_event、等待循环退出、关闭 executor，并注销模块级单例；此后入队直接抛 `RuntimeError`                                                   |
 
 超时后 executor 线程无法被硬中断，孤儿线程会占住唯一 worker 直到当前下载、推理结束；后续任务在 executor 内排队等待，天然串行，不会并发命中同一份模型。`add_file_chunks` 按 `file_id` delete-then-upsert 幂等，重试会覆盖孤儿线程的写入。
 
@@ -295,16 +295,16 @@ def start(self):
 
 对内与对外端点对照：
 
-| 业务 | 对内（JWT，前端用） | 对外（AKSK，上游用） | 共用实现 |
-|---|---|---|---|
-| 同步索引 | `POST /api/index` | `POST /api/open/index` | `_index_object()` |
-| 异步索引 | `POST /api/index/jobs` | `POST /api/open/index/jobs` | `_create_index_job()` |
-| 搜索 | `POST /api/search` | `POST /api/open/search` | `_search()` |
-| 删文件 | `DELETE /api/files/{file_id}` | `DELETE /api/open/files/{file_id}` | `_delete_index_file()` |
-| 上传 | `POST /api/upload` | ——（内部专用） | |
-| 生成下载签名 | `POST /api/presign` | ——（内部专用） | |
-| 文件列表 | `GET /api/files` | ——（内部专用） | |
-| 向量数据 / 应用 / 监控 / 追踪等管理面 | `POST /api/chunks`、`/api/apps`、`/api/monitor`、`/api/traces` 等 | ——（不对外） | |
+| 业务                                  | 对内（JWT，前端用）                                               | 对外（AKSK，上游用）               | 共用实现               |
+| ------------------------------------- | ----------------------------------------------------------------- | ---------------------------------- | ---------------------- |
+| 同步索引                              | `POST /api/index`                                                 | `POST /api/open/index`             | `_index_object()`      |
+| 异步索引                              | `POST /api/index/jobs`                                            | `POST /api/open/index/jobs`        | `_create_index_job()`  |
+| 搜索                                  | `POST /api/search`                                                | `POST /api/open/search`            | `_search()`            |
+| 删文件                                | `DELETE /api/files/{file_id}`                                     | `DELETE /api/open/files/{file_id}` | `_delete_index_file()` |
+| 上传                                  | `POST /api/upload`                                                | ——（内部专用）                     |                        |
+| 生成下载签名                          | `POST /api/presign`                                               | ——（内部专用）                     |                        |
+| 文件列表                              | `GET /api/files`                                                  | ——（内部专用）                     |                        |
+| 向量数据 / 应用 / 监控 / 追踪等管理面 | `POST /api/chunks`、`/api/apps`、`/api/monitor`、`/api/traces` 等 | ——（不对外）                       |                        |
 
 两处不对称需要说明：
 
@@ -406,24 +406,24 @@ backend/
 
 模块职责：
 
-| 模块 | 职责 |
-|---|---|
-| `main.py` | FastAPI 应用、鉴权、写入、搜索、删除、列表和配置入口 |
-| `bootstrap.py` | 创建 Application，管理组件启动和关闭 |
-| `container.py` | DI 容器，按配置组装组件并注入依赖 |
-| `config.py` | 应用配置入口，暴露搜索参数、模型路径、向量库配置 |
-| `device.py` | 检测当前可用计算设备；有 GPU 时优先使用 GPU，否则使用 CPU |
-| `download_models.py` | 下载或准备本地模型目录 |
-| `loader.py` | 读取运行环境指定的 yaml profile |
-| `schema.py` | 校验配置结构和默认值 |
-| `document_parser.py` | 文件解析、OCR 调用、文本清理、chunk 生成 |
-| `dense/` | 生成 dense 向量 |
-| `sparse/` | 执行应用内 sparse 检索，或生成 sparse vector |
-| `store/` | 连接向量库，负责写入、删除、列表、dense 查询、可选 sparse 查询 |
-| `search/` | SearchPipeline 和 SearchRunner，负责检索流程、并发查询、去重、融合和 rerank 调用 |
-| `rerank/` | 对候选结果做二次排序 |
-| `ocr/` | 图片或 PDF 内图片的 OCR |
-| `tokenizer/` | 分词能力接口和 jieba 实现 |
+| 模块                 | 职责                                                                             |
+| -------------------- | -------------------------------------------------------------------------------- |
+| `main.py`            | FastAPI 应用、鉴权、写入、搜索、删除、列表和配置入口                             |
+| `bootstrap.py`       | 创建 Application，管理组件启动和关闭                                             |
+| `container.py`       | DI 容器，按配置组装组件并注入依赖                                                |
+| `config.py`          | 应用配置入口，暴露搜索参数、模型路径、向量库配置                                 |
+| `device.py`          | 检测当前可用计算设备；有 GPU 时优先使用 GPU，否则使用 CPU                        |
+| `download_models.py` | 下载或准备本地模型目录                                                           |
+| `loader.py`          | 读取运行环境指定的 yaml profile                                                  |
+| `schema.py`          | 校验配置结构和默认值                                                             |
+| `document_parser.py` | 文件解析、OCR 调用、文本清理、chunk 生成                                         |
+| `dense/`             | 生成 dense 向量                                                                  |
+| `sparse/`            | 执行应用内 sparse 检索，或生成 sparse vector                                     |
+| `store/`             | 连接向量库，负责写入、删除、列表、dense 查询、可选 sparse 查询                   |
+| `search/`            | SearchPipeline 和 SearchRunner，负责检索流程、并发查询、去重、融合和 rerank 调用 |
+| `rerank/`            | 对候选结果做二次排序                                                             |
+| `ocr/`               | 图片或 PDF 内图片的 OCR                                                          |
+| `tokenizer/`         | 分词能力接口和 jieba 实现                                                        |
 
 命名规则：
 
@@ -616,8 +616,8 @@ vector sparse
 
 系统对每个 app 使用一个知识集合：
 
-| 集合 | 用途 |
-|---|---|
+| 集合              | 用途                          |
+| ----------------- | ----------------------------- |
 | `{app_id}_chunks` | 存储当前 app 的所有文件 chunk |
 
 collection 名由后端根据 `app_id` 生成。文件范围通过 `file_id` metadata filter 表达；不同 app 的数据落在不同 collection。不同模型组合如果索引结构不兼容，必须使用不同 profile 或重建对应 app collection，避免新旧向量混在一个索引里。
@@ -628,11 +628,11 @@ collection 名由后端根据 `app_id` 生成。文件范围通过 `file_id` met
 
 每条 chunk 在向量库里分成三类数据：
 
-| 类型 | 存什么 | 例子 |
-|---|---|---|
-| 正文内容 | 被检索、展示的 chunk 文本 | `content` / `documents` / `text` |
-| metadata | 描述这段正文的附加信息 | `file_id`、`filename`、`chunk_index`、`s3_url` |
-| vector | 正文内容生成出来的向量 | dense vector、可选 sparse vector |
+| 类型     | 存什么                    | 例子                                           |
+| -------- | ------------------------- | ---------------------------------------------- |
+| 正文内容 | 被检索、展示的 chunk 文本 | `content` / `documents` / `text`               |
+| metadata | 描述这段正文的附加信息    | `file_id`、`filename`、`chunk_index`、`s3_url` |
+| vector   | 正文内容生成出来的向量    | dense vector、可选 sparse vector               |
 
 chunk metadata：
 
@@ -647,93 +647,32 @@ chunk metadata：
 
 字段约定：
 
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `file_id` | keyword/string | 必填，搜索过滤用，要建索引 |
-| `filename` | keyword/string | 必填，搜索结果展示用 |
-| `chunk_index` | integer | 必填，文件内 chunk 序号，不建索引 |
-| `s3_url` | string | 对象存储来源地址，用于追溯，不建索引 |
+| 字段          | 类型           | 说明                                 |
+| ------------- | -------------- | ------------------------------------ |
+| `file_id`     | keyword/string | 必填，搜索过滤用，要建索引           |
+| `filename`    | keyword/string | 必填，搜索结果展示用                 |
+| `chunk_index` | integer        | 必填，文件内 chunk 序号，不建索引    |
+| `s3_url`      | string         | 对象存储来源地址，用于追溯，不建索引 |
 
 放进 metadata 不等于自动有高效过滤索引。只给 `file_id` 建过滤索引：
 
-| 向量库 | `file_id` 过滤索引策略 |
-|---|---|
-| Qdrant | 创建 payload index：`metadata.file_id` |
-| Milvus | 创建 scalar index：`file_id` 字段 |
+| 向量库       | `file_id` 过滤索引策略                                                       |
+| ------------ | ---------------------------------------------------------------------------- |
+| Qdrant       | 创建 payload index：`metadata.file_id`                                       |
+| Milvus       | 创建 scalar index：`file_id` 字段                                            |
 | Chroma local | metadata 写入后由 Chroma 本地 SQLite metadata 表维护索引；代码不额外声明索引 |
 
 `filename`、`chunk_index` 会随每条 chunk 一起保存，搜索结果可以返回这些字段；它们不作为搜索过滤条件，不建索引。
 
 chunk 文本会随分块一起写入向量库。不同向量库的原生字段不同，但 Store 对搜索流程统一返回 `content`：
 
-| 向量库 | 原生保存位置 | Store 返回字段 |
-|---|---|---|
-| Qdrant | payload 的 `content` | `content` |
-| Chroma local | Chroma collection 的 `documents` | `content` |
-| Milvus / Milvus Lite | scalar 字段 `text` | `content` |
+| 向量库               | 原生保存位置                     | Store 返回字段 |
+| -------------------- | -------------------------------- | -------------- |
+| Qdrant               | payload 的 `content`             | `content`      |
+| Chroma local         | Chroma collection 的 `documents` | `content`      |
+| Milvus / Milvus Lite | scalar 字段 `text`               | `content`      |
 
 向量库里保存的是解析后的 chunk 文本，不保存完整原始文件内容。上传接口把原文件写入对象存储；对象存储索引接口不保存 `presigned_url`。
-
----
-
-## 11. 内容存储边界
-
-系统默认使用 `vector` 内容存储形态：chunk 正文随向量一起写入向量库。Qdrant 使用 payload `content`，Chroma 使用 `documents`，Milvus 使用 scalar 字段 `text`。这种形态适合轻量部署，少一个事实数据库，文件列表和删除能力都从 chunk metadata 聚合得到。
-
-系统保留 `postgres` 内容存储形态作为可选架构：Postgres 做文件和 chunk 的事实表，向量库只做检索索引。该形态适合需要文件状态、精确统计、审计、复杂管理查询或大规模数据治理的部署。
-
-两种内容存储形态的数据职责：
-
-| 数据 | `vector` 形态 | `postgres` 形态 |
-|---|---|---|
-| chunk 正文 | 向量库 | Postgres |
-| dense vector | 向量库 | 向量库 |
-| vector sparse | 向量库 | 向量库 |
-| `file_id` 过滤字段 | 向量库 metadata/scalar | 向量库 metadata/scalar + Postgres |
-| `chunk_id` | 向量库主键 | Postgres 主键 + 向量库引用 |
-| 文件列表 | 从向量库 metadata 聚合 | 从 Postgres 查询 |
-| 文件状态 | 不保存 | Postgres |
-
-`postgres` 形态的最小事实表：
-
-```sql
-create table files (
-  id text primary key,
-  filename text not null,
-  s3_url text,
-  status text not null
-);
-
-create table chunks (
-  id text primary key,
-  file_id text not null references files(id),
-  chunk_index integer not null,
-  content text not null
-);
-```
-
-`postgres` 形态下，写入流程由 ContentStore 和 VectorStore 共同完成：
-
-```text
-1. 写入入口接收 presigned_url + s3_url
-2. RAG 生成 file_id
-3. DocumentParser 解析、OCR、切 chunk
-4. ContentStore 写入 files 和 chunks
-5. VectorStore 写入 chunk_id、file_id、chunk_index 和 vector
-6. 写入入口返回 file_id 或异步任务状态
-```
-
-查询流程：
-
-```text
-1. VectorStore 按 query + file_id filter 搜索
-2. VectorStore 返回 chunk_id、file_id、chunk_index、score
-3. ContentStore 按 chunk_id 批量读取 content 和文件信息
-4. SearchPipeline 合并 score、content、metadata
-5. rerank 和 format_response 使用合并后的结果
-```
-
-`vector` 和 `postgres` 两种形态不能直接切配置复用同一份旧数据。切换内容存储形态时，必须迁移 chunk 正文和索引引用，或重新索引原始文件，保证 `chunk_id`、`file_id` 和正文来源一致。
 
 ---
 
@@ -743,10 +682,10 @@ create table chunks (
 
 切片参数由配置决定：
 
-| 参数 | 含义 |
-|---|---|
+| 参数       | 含义                  |
+| ---------- | --------------------- |
 | chunk size | 单个 chunk 的目标长度 |
-| overlap | 相邻 chunk 的重叠长度 |
+| overlap    | 相邻 chunk 的重叠长度 |
 
 切片按中文文档常见边界拆分，优先使用段落、换行、中文句号、感叹号、问号、分号、逗号和空格。
 
@@ -774,17 +713,17 @@ SearchPlan(
 
 字段说明：
 
-| 字段 | 说明 |
-|---|---|
-| `query` | 查询文本 |
-| `mode` | `dense` / `sparse` / `hybrid` |
-| `top_k` | 最多返回条数 |
-| `rerank` | 是否使用 rerank |
-| `fetch_k` | rerank 候选池大小 |
-| `dense_weight` | 本次 hybrid 查询的 dense 权重 |
-| `sparse_weight` | 本次 hybrid 查询的 sparse 权重 |
-| `rrf_k` | 本次 hybrid 查询的 RRF 参数 |
-| `file_ids` | 查询文件范围；不传时搜索当前 app collection |
+| 字段            | 说明                                        |
+| --------------- | ------------------------------------------- |
+| `query`         | 查询文本                                    |
+| `mode`          | `dense` / `sparse` / `hybrid`               |
+| `top_k`         | 最多返回条数                                |
+| `rerank`        | 是否使用 rerank                             |
+| `fetch_k`       | rerank 候选池大小                           |
+| `dense_weight`  | 本次 hybrid 查询的 dense 权重               |
+| `sparse_weight` | 本次 hybrid 查询的 sparse 权重              |
+| `rrf_k`         | 本次 hybrid 查询的 RRF 参数                 |
+| `file_ids`      | 查询文件范围；不传时搜索当前 app collection |
 
 ---
 
