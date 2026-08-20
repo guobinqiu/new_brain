@@ -20,6 +20,7 @@
 - 不加 COUNT、不加页码、不加 database.enable 开关。
 - 14 个 config/*.yaml 必须全部加 `database:` 段，否则 schema 校验失败。
 - 变量命名统一：`prev_cursor` / `next_cursor` / `has_more`。
+- FileRecord/FilePage 定义于 backend/database/base.py；store 层 list_files/count_files 死代码与 backend/files 包在 Task 2 一并删除（保持每 commit 全绿）。
 
 ---
 
@@ -193,15 +194,19 @@ git commit -m "feat: 新增 database 配置模型与 psycopg 依赖"
 ### Task 2: 数据模型扩展 + Database Protocol + FakeDatabase
 
 **Files:**
-- Modify: `backend/files/base.py`
+- Modify: `backend/database/base.py`（新建文件，含 FileRecord + FilePage + Database Protocol + FakeDatabase）
+- Modify: `backend/store/base.py`（删除 list_files/count_files 声明与 `from files.base import FilePage`）
+- Modify: `backend/store/qdrant.py`、`backend/store/chroma.py`、`backend/store/milvus.py`（删除 list_files/count_files 方法及 `from store.files import ...`）
+- Delete: `backend/files/`（含 base.py、__init__.py）
+- Delete: `backend/store/files.py`
+- Delete: `backend/tests/unit/test_files_repository.py`
 - Create: `backend/database/__init__.py`
-- Create: `backend/database/base.py`
-- Create: `backend/tests/unit/test_database_base.py`
+- Create: `backend/tests/unit/test_database_base.py`（新增）
 
 **Interfaces:**
 - Consumes: `schema.DatabaseConfig`（Task 1）
 - Produces:
-  - `files.base.FileRecord`（+`s3_url`/`size`）、`FilePage`（+`prev_cursor`）
+  - `database.base.FileRecord`（+`s3_url`/`size`）、`FilePage`（+`prev_cursor`）——无其他层 import 这两个类型
   - `database.base.Database` Protocol：`start/stop/ready`、`upsert_file(app_id, file_id, filename, s3_url, *, size=None, chunk_count=0)`、`soft_delete_file(app_id, file_id) -> int`、`list_files(app_id, limit=50, cursor=None, direction="next") -> FilePage`、`purge_app(app_id) -> int`
   - `database.base.FakeDatabase`（内存实现，供测试注入）
 
@@ -281,9 +286,9 @@ def test_prev_requires_cursor():
 Run: `cd backend && .venv/bin/python -m pytest tests/unit/test_database_base.py -v`
 Expected: FAIL（`ModuleNotFoundError: No module named 'database'`）
 
-- [ ] **Step 3: 实现 files/base.py 扩展**
+- [ ] **Step 3: 实现 database/base.py 数据模型**
 
-`backend/files/base.py` 改为：
+`backend/database/base.py` 顶部（Database Protocol 之前）加入（文件头不再出现 `files.base` import，不再修改 `backend/files/base.py`）：
 
 ```python
 from __future__ import annotations
@@ -324,8 +329,6 @@ __all__ = ["Database", "FakeDatabase"]
 from __future__ import annotations
 
 from typing import Protocol
-
-from files.base import FilePage, FileRecord
 
 
 class Database(Protocol):
@@ -435,17 +438,28 @@ class FakeDatabase:
         return len(keys)
 ```
 
-- [ ] **Step 5: 运行测试确认通过**
+- [ ] **Step 5: 删除 store 死代码与 files 包**
 
-Run: `cd backend && .venv/bin/python -m pytest tests/unit/test_database_base.py tests/unit/test_files_repository.py -v`
-Expected: PASS（`test_files_repository.py` 验证 FileRecord 扩展不影响 store 层）
+- `backend/store/base.py`：删除 `list_files` 声明、`count_files` 声明、`from files.base import FilePage`（保留 get_search_documents/get_total_chunks/list_chunks 等其余接口）
+- `backend/store/qdrant.py`、`chroma.py`、`milvus.py`：删除各自 `list_files`、`count_files` 方法及顶部 `from store.files import ...`
+- 删除 `backend/store/files.py`、`backend/files/`、`backend/tests/unit/test_files_repository.py`
+- 注意：`get_total_chunks` 有真实调用方（search/pipeline.py:46、main.py:782），必须保留。
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: 运行测试确认通过**
+
+Run: `cd backend && .venv/bin/python -m pytest tests/unit/test_database_base.py -v`
+Expected: PASS（新数据模型与 FakeDatabase 测试）
+
+Run: `cd backend && .venv/bin/python -m pytest tests/unit -v`
+Expected: PASS（确认无残留 files/store.files 引用，预期全绿）
+
+- [ ] **Step 7: Commit**
 
 ```bash
 cd /Users/guobin/workspace/qdrant
-git add backend/files/base.py backend/database backend/tests/unit/test_database_base.py
-git commit -m "feat: Database Protocol + FakeDatabase + FileRecord/FilePage 扩展"
+git add backend/database backend/store backend/tests/unit/test_database_base.py
+git rm -r backend/files backend/store/files.py backend/tests/unit/test_files_repository.py
+git commit -m "feat: FileRecord/FilePage 迁入 database 组件，Database Protocol + FakeDatabase，清理 store 死代码"
 ```
 
 ---
@@ -599,7 +613,7 @@ from __future__ import annotations
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
-from files.base import FilePage, FileRecord
+from database.base import FilePage, FileRecord
 
 CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS app_files (
@@ -914,6 +928,7 @@ git commit -m "feat: database 组件接入 DI 容器、Application 生命周期�
 - Modify: `backend/main.py`（files 端点、删除 MinIO 列表函数）
 - Modify: `backend/tests/conftest.py`
 - Modify: `backend/tests/e2e/test_files_api.py`
+- Modify: `backend/tests/unit/test_qdrant_api_contract.py`（删除 test_list_storage_files_uses_minio_object_pagination）
 
 **Interfaces:**
 - Consumes: `Application.database.list_files`（Task 4）
@@ -922,6 +937,7 @@ git commit -m "feat: database 组件接入 DI 容器、Application 生命周期�
 - [ ] **Step 1: 写失败测试**（重写 e2e 列表测试，数据经 `main.application.database`（FakeDatabase）注入）
 
 > 注：conftest 的 FakeDatabase 注入已在 Task 4 Step 1 完成，此处不再重复。
+> 注：保留 `test_delete_file_api`/`test_delete_nonexistent`（monkeypatch `_delete_storage_file`，函数保留），仅替换两个列表测试。
 
 `backend/tests/e2e/test_files_api.py` 替换两个列表测试：
 
@@ -1017,9 +1033,11 @@ def _file_record(record) -> dict[str, Any]:
 
 删除不再使用的函数：`_list_storage_files`、`_storage_file_record`、`_file_id_from_object_name`（保留 `_delete_storage_file`、`_upload_file_to_storage`、`_minio_client`、`_storage_prefix`、`_storage_file_prefix`——upload/delete 仍用）。
 
+同步删除 `test_qdrant_api_contract.py::test_list_storage_files_uses_minio_object_pagination`（被测函数已删）。保留 `test_upload_file_to_storage_puts_object_in_bucket` / `test_client_delete_file_removes_index_only` / `test_storage_presign...`（对应函数保留）。
+
 - [ ] **Step 4: 运行测试确认通过**
 
-Run: `cd backend && .venv/bin/python -m pytest tests/e2e/test_files_api.py -v`
+Run: `cd backend && .venv/bin/python -m pytest tests/e2e/test_files_api.py tests/unit/test_qdrant_api_contract.py -v`
 Expected: PASS
 
 - [ ] **Step 5: Commit**

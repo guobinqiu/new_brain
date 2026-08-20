@@ -32,6 +32,7 @@
 | 6 | 分页：双向 keyset，游标为**纯 id 数字**（BIGSERIAL 主键，与插入时间同序），列表按 `created_at DESC, id DESC` 展示。 |
 | 7 | 不显示总数（不加 COUNT）。 |
 | 8 | database 组件必填，无 enable 开关。 |
+| 9 | store 层 list_files/count_files 为死代码（无生产调用方，monitor 亦不用），随迁移删除；FileRecord/FilePage 归 database 层，backend/files 包删除。 |
 
 ## 3. 架构与组件化
 
@@ -39,8 +40,8 @@
 
 ```
 backend/database/
-├── base.py      # Database Protocol + FakeDatabase（测试用内存实现）
-└── postgres.py  # PostgresDatabase：连接池 + 全部 SQL
+├── base.py      # FileRecord + FilePage + Database Protocol + FakeDatabase（测试用内存实现）
+└── postgres.py  # 连接池 + SQL
 ```
 
 ### 各层改动
@@ -52,11 +53,13 @@ backend/database/
 | `container.py` | `database` provider：`Selector` 按 type（`postgres`）选 `PostgresDatabase`；`build_database()` 支持 `import_path`。 |
 | `bootstrap.py` | `Application.__init__` 加 `self.database`；`init_connections()` 中 `_start_component("database", ...)`；`stop()` 逆序停；`component_errors` 机制自动覆盖。 |
 | `main.py` | ① `/api/monitor` 组件列表加 database 行；② index/delete/files 三处接入（见 §5）。 |
-| `files/base.py` | `FileRecord` 加 `s3_url`/`size`（默认 None）；`FilePage` 加 `prev_cursor`（默认 None），向后兼容 store 层。 |
+| `database/base.py` | `FileRecord` 加 `s3_url`/`size`（默认 None）；`FilePage` 加 `prev_cursor`（默认 None）。类型从 files/base.py 迁入，database 为唯一消费方。 |
+| `store/base.py` + `store/{qdrant,chroma,milvus}.py` | 删除 `list_files`/`count_files` 死代码及 `store/files.py`。 |
 
 ### Database Protocol（`database/base.py`）
 
 ```python
+# FileRecord/FilePage 定义于本模块（见下），Database Protocol 无跨层 import
 class Database(Protocol):
     def start(self) -> None: ...
     def stop(self) -> None: ...
@@ -182,7 +185,7 @@ LIMIT $3 + 1
 |---|---|
 | unit | `database/postgres.py` SQL 拼接（mock `ConnectionPool`）；游标方向/边界。 |
 | e2e | `FakeDatabase`（`database/base.py` 内内存实现）注入 `application.database`，**不依赖真实 PG**；更新 `test_files_api.py`（改断言 fake database 结果）、`test_config_api.py::test_monitor_returns...`（components 含 database）。 |
-| 现有回归 | `files/base.py` 字段扩展均为默认值，store 层测试不受影响。 |
+| 现有回归 | store 层 list_files/count_files/store.files/test_files_repository.py 已删除（死代码），无"store 层兼容"约束；回归重点是 test_database_base.py / test_database_postgres.py 与其余 e2e。 |
 
 ## 10. 风险与注意
 
