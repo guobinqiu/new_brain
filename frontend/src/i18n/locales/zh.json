@@ -59,7 +59,7 @@
     "uploading": "上传中",
     "files": "上传文件",
     "empty": "暂无上传文件",
-    "indexSubmitted": "已提交 {count} 个索引任务，处理完成后即可搜索",
+    "indexSubmitted": "已完成 {count} 个文件索引",
     "selectApp": "请先选择应用",
     "deletedFile": "{name} 已删除"
   },

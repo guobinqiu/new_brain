@@ -2,7 +2,7 @@
 
 ## Native 启动
 
-Native 方式只把后端和前端跑在宿主机上，默认仍使用 Docker 启动 Qdrant 和 MinIO。异步索引任务由 backend 进程内的索引消费器处理，不需要单独的 worker 进程。
+Native 方式只把后端和前端跑在宿主机上，默认仍使用 Docker 启动 Qdrant 和 MinIO。
 
 1. 启动 Qdrant 和 MinIO：
 
@@ -99,15 +99,12 @@ http://<服务器地址>:28000
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | `POST` | `/api/open/index` | 同步索引对象存储文件，完成后返回 `file_id` |
-| `POST` | `/api/open/index/jobs` | 创建异步索引任务，入队后立即返回 `file_id`，处理在 backend 进程内异步完成 |
 | `POST` | `/api/open/search` | 按 `query` 和可选 `file_ids` 搜索知识库 |
 | `DELETE` | `/api/open/files/{file_id}` | 删除当前应用向量库中的索引文件 |
 
-上游如果已经有自己的队列、限流和重试机制，可以调用同步索引；否则建议调用异步索引。索引接口接收 `presigned_url`、`s3_url`、可选 `filename` 和可选 `file_id`。上游传 `file_id` 时服务端原样保存，推荐使用 UUID；不传时由 RAG 生成 UUID。异步索引入队后立即返回 `file_id`，下载、解析、OCR、embedding 和向量库写入由 backend 进程内的索引消费器后台完成；没有任务状态查询接口，调用方用 `file_id` 通过搜索接口验证索引就绪，backend 重启会丢失队列中未完成任务，需要重新提交。搜索时不传 `file_ids` 表示全库搜索。
+索引接口接收 `presigned_url`、`s3_url`、可选 `filename` 和可选 `file_id`。上游传 `file_id` 时服务端原样保存，推荐使用 UUID；不传时由 RAG 生成 UUID。搜索时不传 `file_ids` 表示全库搜索。
 
 上游系统使用的 `app_id`、`access_key` 和 `secret_key` 由管理台创建。每个 `app_id` 对应独立 collection，业务接口根据 AK/SK 签名里的 `app_id` 自动选择当前应用的数据范围。索引前需要先在管理台为该 `app_id` 初始化数据库。
-
-异步索引由 backend 进程内的 `InlineIndexConsumer` 处理：进程内 `queue.Queue`，并发固定为 1，超时和失败重试在后台静默进行，没有独立 worker 进程，也不依赖 Celery/Redis。等待队列容量 10（满了入队端点返回 429），单任务超时 1800 秒，可重试失败最多重入队 2 次，均为硬编码默认值，不提供环境变量配置。任务不落盘，backend 重启后队列中未完成任务丢失；原始文件仍在对象存储，可以重新提交索引。
 
 业务接口每次请求都带 AK/SK 签名：
 
@@ -153,40 +150,6 @@ http://<服务器地址>:28000
   "file_id": "550e8400-e29b-41d4-a716-446655440000"
 }
 ```
-
-### POST /api/open/index/jobs
-
-创建异步索引任务。接口只入队，真正的下载、解析、OCR、embedding 和向量库写入由 backend 进程内的索引消费器后台执行。
-
-请求字段：
-
-| 字段 | 类型 | 必填 | 说明 |
-|---|---|---|---|
-| `presigned_url` | string | 是 | RAG 下载文件用的预签名 URL |
-| `s3_url` | string | 是 | 稳定对象存储地址，写入 chunk metadata 用于追溯 |
-| `filename` | string | 否 | 展示文件名；不传时从 `s3_url` 推导 |
-| `file_id` | string | 否 | 上游指定的文件 ID，推荐使用 UUID；不传时由 RAG 生成 UUID |
-
-请求：
-
-```json
-{
-  "file_id": "550e8400-e29b-41d4-a716-446655440000",
-  "presigned_url": "https://example.com/presigned",
-  "s3_url": "s3://bucket/path/to/example.pdf",
-  "filename": "example.pdf"
-}
-```
-
-响应：
-
-```json
-{
-  "file_id": "550e8400-e29b-41d4-a716-446655440000"
-}
-```
-
-入队成功即表示任务已被接受，接口立即返回 `file_id`。没有任务状态查询接口；调用方可以用 `file_id` 通过搜索接口验证索引是否就绪。backend 重启会丢失队列中未完成的任务，需要重新提交索引。
 
 ### POST /api/open/search
 

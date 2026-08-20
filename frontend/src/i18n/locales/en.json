@@ -59,7 +59,7 @@
     "uploading": "Uploading",
     "files": "Uploaded files",
     "empty": "No uploaded files",
-    "indexSubmitted": "{count} indexing task(s) submitted. They will be searchable once processed.",
+    "indexSubmitted": "{count} file(s) indexed.",
     "selectApp": "Select an app first",
     "deletedFile": "{name} deleted"
   },

@@ -138,7 +138,7 @@ async function uploadFiles(files) {
     try {
       const uploadRes = await axios.post(`${API}/upload`, form)
       const presignRes = await axios.post(`${API}/presign`, { s3_url: uploadRes.data.s3_url })
-      await axios.post(`${API}/index/jobs`, {
+      await axios.post(`${API}/index`, {
         app_id: activeAppStore.appId,
         file_id: uploadRes.data.file_id,
         presigned_url: presignRes.data.presigned_url,
