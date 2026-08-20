@@ -60,8 +60,8 @@
           </el-table-column>
         </el-table>
         <div class="docs-pager">
-          <el-button :disabled="!filesPrevCursor || filesLoading" @click="fetchFiles('prev')">{{ t('common.prevPage') }}</el-button>
-          <el-button :disabled="!filesNextCursor || filesLoading" @click="fetchFiles('next')">{{ t('common.nextPage') }}</el-button>
+          <el-button :disabled="!filesPrevCursor || filesLoading" @click="fetchFiles('prev')">&lt;</el-button>
+          <el-button :disabled="!filesNextCursor || filesLoading" @click="fetchFiles('next')">&gt;</el-button>
         </div>
       </template>
     </div>
@@ -153,7 +153,7 @@ async function fetchFiles(direction) {
   if (filesLoading.value) return
   filesLoading.value = true
   try {
-    const params = { limit: 50 }
+    const params = { limit: 10 }
     if (activeAppStore.appId) params.app_id = activeAppStore.appId
     if (direction === 'next' && filesNextCursor.value) params.cursor = filesNextCursor.value
     if (direction === 'prev' && filesPrevCursor.value) {
