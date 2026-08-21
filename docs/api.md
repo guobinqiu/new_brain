@@ -459,10 +459,11 @@ GET /api/monitor
 ### 运行日志与搜索 Trace
 
 ```http
-GET /loki/query_range
+GET /api/logs
+GET /api/traces
 ```
 
-运行日志和搜索 Trace 都由 Loki 查询，管理台经 Nginx `/loki/*` 反代访问。Nginx 使用现有 User JWT 做鉴权。
+运行日志和搜索 Trace 都由后端封装 Loki 查询。管理台使用 User JWT 访问后端接口，浏览器不直接访问 Loki。
 
 ### 上传文件列表
 

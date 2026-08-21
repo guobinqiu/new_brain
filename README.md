@@ -104,7 +104,7 @@ http://<服务器地址>/api
 
 - `/api` 由 Nginx 负载均衡到 backend 节点。
 - 管理台通过 `/api/nodes/monitor` 和 `/api/nodes/config` 聚合所有节点状态。
-- 日志页通过 `/loki` 查询集中日志。
+- 日志页通过后端接口查询集中日志。
 - 共享依赖只部署一套；所有 app 节点同构运行 backend、frontend、nginx 和 Promtail。
 - 节点差异写在各节点 `deploy/.env`：`RAG_NODE_ID` 标识当前节点，`DATABASE_URL`、`QDRANT_URL`、`S3_ENDPOINT_URL` 和 `LOKI_URL` 指向共享依赖所在节点的 IP 或域名。
 

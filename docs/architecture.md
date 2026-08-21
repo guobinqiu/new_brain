@@ -912,7 +912,8 @@ flowchart LR
   Nginx -->|"/api/*"| Backends["rag_backends upstream"]
   Backends --> B1["backend node-233"]
   Backends --> B2["backend node-90"]
-  Nginx -->|"/loki/*"| Loki["Loki"]
+  B1 -->|Loki HTTP API| Loki["Loki"]
+  B2 -->|Loki HTTP API| Loki
   P1["Promtail node-233"] --> Loki
   P2["Promtail node-90"] --> Loki
   B1 -. fan-out .-> B2
@@ -922,7 +923,6 @@ flowchart LR
 统一入口：
 
 - `/api/*`：转发到 `rag_backends`，由 Nginx 负载均衡。
-- `/loki/*`：转发到 Loki，使用 Nginx `auth_request` 复用后端 JWT 校验。
 - `/`：转发到前端。
 
 节点端口固定为 backend 宿主端口 `6000`。当前静态 upstream 包含：
@@ -1015,11 +1015,12 @@ GET /api/nodes/config
 
 Loki 只在主节点启用，其他节点的 Promtail 通过 `LOKI_URL` 推送到主节点 Loki。Loki 不可用只影响集中日志查询，不影响 RAG 检索、索引和本地 Docker 日志。
 
-日志页和链路页通过 Loki HTTP API 查询：
+日志页和链路页通过后端查询 Loki：
 
 ```text
-GET /loki/query_range
-GET /loki/label/container/values
+GET /api/logs
+GET /api/logs/labels/container
+GET /api/traces
 ```
 
 日志页支持按节点和容器过滤。链路页查询 `rag.trace` 的 `search_trace` 结构化日志，按当前 app 过滤并展示各阶段耗时。
@@ -1028,7 +1029,7 @@ GET /loki/label/container/values
 
 管理台仍使用 User JWT。节点聚合请求 fan-out 到 peer 节点时，原样透传调用方 `Authorization: Bearer ...`。
 
-Loki 不直接暴露给浏览器。Nginx 的 `/loki/*` 使用 `auth_request` 调用后端 `GET /api/config` 校验 JWT，校验通过后才反代到 Loki。
+Loki 不直接暴露给浏览器。管理台日志和链路请求先进入后端，后端完成 User JWT 校验后再访问 Loki。
 
 上游业务接口仍使用 AK/SK 签名，路径保持 `/api/open/*`。多节点监控和 Loki 日志是管理台能力，不改变上游业务 API 契约。
 

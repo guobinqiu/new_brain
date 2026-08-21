@@ -13,8 +13,8 @@ let lastTimestampNs = null
 let currentFilter = { nodeId: '', container: 'rag-backend' }
 
 export async function fetchLabelValues(label) {
-  const res = await axios.get(`/loki/label/${label}/values`)
-  return res.data?.data || []
+  const res = await axios.get(`/api/logs/labels/${label}`)
+  return res.data?.values || []
 }
 
 export async function startLogsTail(filter = {}) {
@@ -56,51 +56,19 @@ async function fetchLogs({ initial }) {
   const startNs = initial
     ? BigInt(Date.now() - INITIAL_WINDOW_MS) * 1000000n
     : BigInt(lastTimestampNs || nowNs) + 1n
-  const res = await axios.get('/loki/query_range', {
+  const res = await axios.get('/api/logs', {
     params: {
-      query: logQuery(),
+      node_id: currentFilter.nodeId || undefined,
+      container: currentFilter.container || undefined,
       start: startNs.toString(),
       end: nowNs.toString(),
       limit: 500,
       direction: initial ? 'backward' : 'forward',
     },
   })
-  const rows = parseStreams(res.data?.data?.result || [])
+  const rows = res.data?.logs || []
   if (initial) rows.reverse()
   appendRows(rows)
-}
-
-function logQuery() {
-  const labels = []
-  if (currentFilter.nodeId) labels.push(`node_id="${escapeLabel(currentFilter.nodeId)}"`)
-  if (currentFilter.container) labels.push(`container="${escapeLabel(currentFilter.container)}"`)
-  return `{${labels.join(',')}}`
-}
-
-function escapeLabel(value) {
-  return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"')
-}
-
-function parseStreams(streams) {
-  const rows = []
-  for (const stream of streams) {
-    for (const [ts, line] of stream.values || []) {
-      rows.push({ ts, time: formatTimestamp(ts), line, parsed: parseJson(line) })
-    }
-  }
-  return rows.sort((a, b) => Number(BigInt(a.ts) - BigInt(b.ts)))
-}
-
-function parseJson(line) {
-  try {
-    return JSON.parse(line)
-  } catch {
-    return null
-  }
-}
-
-function formatTimestamp(ts) {
-  return new Date(Number(BigInt(ts) / 1000000n)).toLocaleString()
 }
 
 function appendRows(rows) {

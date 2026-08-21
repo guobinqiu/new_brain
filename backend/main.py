@@ -21,6 +21,7 @@ from indexing import create_file_id, enqueue_index_job, index_file, index_presig
 from indexing.consumer import InlineIndexConsumer
 from indexing.queue import IndexQueueRejected
 from indexing.service import SUPPORTED_FILE_EXTENSIONS, filename_from_s3_url, parse_s3_url, validate_supported_file_extension
+from loki_client import label_values, log_query, ns_from_ms, parse_logs, parse_traces, query_range, trace_query
 from nodes import fetch_peers, local_result, node_id, parse_peers
 from search import SearchPlan, _SearchExecutor
 from collection_names import validate_app_id
@@ -291,6 +292,49 @@ async def nodes_monitor(authorization: str | None = Header(None), _: Principal =
         return {"nodes": [asdict(local_result(_monitor_payload()))], "generated_at": _now_iso()}
     rows = await fetch_peers(peers, "/api/monitor", authorization)
     return {"nodes": [asdict(row) for row in rows], "generated_at": _now_iso()}
+
+
+@app.get("/api/logs")
+async def logs(
+    node_id: str | None = None,
+    container: str | None = "rag-backend",
+    start: str | None = None,
+    end: str | None = None,
+    limit: int = 500,
+    direction: Literal["forward", "backward"] = "backward",
+    _: Principal = Depends(require_jwt),
+):
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    start_ns = start or ns_from_ms(now_ms - 15 * 60 * 1000)
+    end_ns = end or ns_from_ms(now_ms)
+    streams = await query_range(
+        log_query(node_id=node_id, container=container),
+        start_ns,
+        end_ns,
+        min(max(limit, 1), 1000),
+        direction,
+    )
+    return {"logs": parse_logs(streams)}
+
+
+@app.get("/api/logs/labels/{label}")
+async def log_label_values(label: str, _: Principal = Depends(require_jwt)):
+    if label not in {"container", "node_id"}:
+        raise HTTPException(400, "unsupported log label")
+    return {"values": await label_values(label)}
+
+
+@app.get("/api/traces")
+async def traces(app_id: str | None = None, limit: int = 200, _: Principal = Depends(require_jwt)):
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    streams = await query_range(
+        trace_query(),
+        ns_from_ms(now_ms - 24 * 60 * 60 * 1000),
+        ns_from_ms(now_ms),
+        min(max(limit, 1), 500),
+        "backward",
+    )
+    return {"traces": parse_traces(streams, app_id=app_id, limit=limit)}
 
 
 def _monitor_payload() -> dict[str, Any]:
