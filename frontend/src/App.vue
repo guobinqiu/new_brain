@@ -112,13 +112,14 @@ const { apps } = storeToRefs(appsStore)
 const lang = computed(() => locale.value)
 const epLocale = computed(() => (locale.value === 'zh' ? zhCn : en))
 
-const SUB_PAGES = ['/database', '/upload', '/search', '/trace']
+const SUB_PAGES = ['database', 'upload', 'search', 'trace']
 
 const routerViewKey = computed(() => (appId.value ? `${appId.value}${route.path}` : route.path))
+const routeAppPage = computed(() => route.path.split('/')[3] || '')
 
 const activeMenu = computed(() => {
-  if (appId.value && SUB_PAGES.includes(route.path)) {
-    return `/apps/${appId.value}${route.path}`
+  if (route.params.app_id && SUB_PAGES.includes(routeAppPage.value)) {
+    return `/apps/${route.params.app_id}/${routeAppPage.value}`
   }
   return route.path
 })
@@ -134,7 +135,7 @@ function onMenuSelect(index) {
       activeAppStore.appId = parts[2]
       activeAppStore.databaseStatus = null
     }
-    router.push('/' + parts[3])
+    router.push(index)
   }
 }
 
@@ -143,7 +144,7 @@ function selectApp(appId) {
     activeAppStore.appId = appId
     activeAppStore.databaseStatus = null
   }
-  router.push('/database')
+  router.push(`/apps/${appId}/database`)
 }
 
 function setLang(value) {
@@ -170,6 +171,13 @@ onMounted(() => {
 watch(authToken, value => {
   if (value) appsStore.fetchApps()
 })
+
+watch(() => route.params.app_id, value => {
+  if (value && activeAppStore.appId !== value) {
+    activeAppStore.appId = value
+    activeAppStore.databaseStatus = null
+  }
+}, { immediate: true })
 </script>
 
 <style>

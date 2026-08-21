@@ -14,6 +14,10 @@ const router = createRouter({
   routes: [
     { path: '/login', component: LoginView, meta: { public: true } },
     { path: '/apps', component: AppsView },
+    { path: '/apps/:app_id/database', component: DatabaseView },
+    { path: '/apps/:app_id/upload', component: UploadView },
+    { path: '/apps/:app_id/search', component: SearchView },
+    { path: '/apps/:app_id/trace', component: TracesView },
     { path: '/database', component: DatabaseView },
     { path: '/upload', component: UploadView },
     { path: '/search', component: SearchView },
