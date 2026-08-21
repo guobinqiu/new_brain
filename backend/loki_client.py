@@ -4,8 +4,10 @@ import json
 import os
 from datetime import datetime, timezone
 from typing import Any, Literal
+from urllib.parse import urlencode, urlsplit, urlunsplit
 
 import httpx
+import websockets
 
 
 LOKI_TIMEOUT_SECONDS = 5.0
@@ -40,6 +42,27 @@ async def label_values(label: str) -> list[str]:
         return response.json().get("data", [])
 
 
+async def tail(query: str, start: str, limit: int = 500):
+    async with websockets.connect(tail_url(query, start=start, limit=limit)) as websocket:
+        async for message in websocket:
+            streams = parse_tail_message(message)
+            if streams:
+                yield streams
+
+
+def tail_url(query: str, start: str, limit: int = 500) -> str:
+    base = urlsplit(_base_url())
+    scheme = "wss" if base.scheme == "https" else "ws"
+    params = urlencode({"query": query, "start": start, "limit": limit})
+    return urlunsplit((scheme, base.netloc, "/loki/api/v1/tail", params, ""))
+
+
+def parse_tail_message(message: str) -> list[dict[str, Any]]:
+    data = json.loads(message)
+    streams = data.get("streams", [])
+    return streams if isinstance(streams, list) else []
+
+
 def log_query(node_id: str | None = None, container: str | None = None) -> str:
     labels = []
     if node_id:
@@ -49,8 +72,11 @@ def log_query(node_id: str | None = None, container: str | None = None) -> str:
     return "{" + ",".join(labels) + "}"
 
 
-def trace_query(container: str = "rag-backend") -> str:
-    return f'{log_query(container=container)} |= "search_trace"'
+def trace_query(container: str = "rag-backend", app_id: str | None = None) -> str:
+    query = f'{log_query(container=container)} |= "search_trace"'
+    if app_id:
+        query += f' |= "\\"app_id\\": \\"{_escape_line(app_id)}\\""'
+    return query
 
 
 def parse_logs(streams: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -93,6 +119,10 @@ def _base_url() -> str:
 
 
 def _escape_label(value: str) -> str:
+    return str(value).replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _escape_line(value: str) -> str:
     return str(value).replace("\\", "\\\\").replace('"', '\\"')
 
 

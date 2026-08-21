@@ -4707,6 +4707,7 @@ dependencies = [
     { name = "sentence-transformers" },
     { name = "unstructured" },
     { name = "uvicorn", extra = ["standard"] },
+    { name = "websockets" },
 ]
 
 [package.optional-dependencies]
@@ -4767,6 +4768,7 @@ requires-dist = [
     { name = "torch", marker = "extra == 'gpu'", specifier = ">=2.13.0", index = "https://download.pytorch.org/whl/cu130", conflict = { package = "qdrant-knowledge-backend", extra = "gpu" } },
     { name = "unstructured", specifier = ">=0.24.1" },
     { name = "uvicorn", extras = ["standard"] },
+    { name = "websockets", specifier = ">=15.0.0" },
 ]
 provides-extras = ["cpu", "gpu"]
 

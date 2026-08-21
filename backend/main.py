@@ -23,7 +23,7 @@ from indexing import create_file_id, enqueue_index_job, index_file, index_presig
 from indexing.consumer import InlineIndexConsumer
 from indexing.queue import IndexQueueRejected
 from indexing.service import SUPPORTED_FILE_EXTENSIONS, filename_from_s3_url, parse_s3_url, validate_supported_file_extension
-from loki_client import label_values, log_query, ns_from_ms, parse_logs, parse_traces, query_range, trace_query
+from loki_client import label_values, log_query, ns_from_ms, parse_logs, parse_traces, query_range, tail, trace_query
 from nodes import fetch_peers, local_result, node_id, parse_peers
 from search import SearchPlan, _SearchExecutor
 from collection_names import validate_app_id
@@ -331,20 +331,30 @@ async def logs_stream(
         last_ts = None
         while True:
             now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-            start_ns = str(int(last_ts) + 1) if last_ts else ns_from_ms(now_ms - 15 * 60 * 1000)
-            streams = await query_range(
-                log_query(node_id=node_id, container=container),
-                start_ns,
-                ns_from_ms(now_ms),
-                500,
-                "forward",
-            )
-            rows = parse_logs(streams)
-            if rows:
-                last_ts = rows[-1]["ts"]
-                yield _sse_data(rows)
-            else:
-                yield ": keepalive\n\n"
+            query = log_query(node_id=node_id, container=container)
+            if not last_ts:
+                streams = await query_range(
+                    query,
+                    ns_from_ms(now_ms - 15 * 60 * 1000),
+                    ns_from_ms(now_ms),
+                    500,
+                    "backward",
+                )
+                rows = parse_logs(streams)
+                if rows:
+                    last_ts = rows[-1]["ts"]
+                    yield _sse_data(rows)
+            start_ns = str(int(last_ts) + 1) if last_ts else ns_from_ms(now_ms)
+            try:
+                async for streams in tail(query, start=start_ns, limit=500):
+                    rows = parse_logs(streams)
+                    if rows:
+                        last_ts = rows[-1]["ts"]
+                        yield _sse_data(rows)
+                    else:
+                        yield ": keepalive\n\n"
+            except Exception as exc:
+                logger.warning("Loki log tail disconnected", extra={"event": "loki_log_tail_disconnected", "error": str(exc)})
             await asyncio.sleep(2)
 
     return StreamingResponse(events(), media_type="text/event-stream")
@@ -361,7 +371,7 @@ async def log_label_values(label: str, _: Principal = Depends(require_jwt)):
 async def traces(app_id: str | None = None, limit: int = 200, _: Principal = Depends(require_jwt)):
     now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
     streams = await query_range(
-        trace_query(),
+        trace_query(app_id=app_id),
         ns_from_ms(now_ms - 24 * 60 * 60 * 1000),
         ns_from_ms(now_ms),
         min(max(limit, 1), 500),
@@ -380,21 +390,32 @@ async def traces_stream(token: str, app_id: str, limit: int = 200):
         traces_cache: list[dict[str, Any]] = []
         while True:
             now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-            start_ns = str(int(last_ts) + 1) if last_ts else ns_from_ms(now_ms - 24 * 60 * 60 * 1000)
-            streams = await query_range(
-                trace_query(),
-                start_ns,
-                ns_from_ms(now_ms),
-                500,
-                "forward",
-            )
-            rows = parse_traces(streams, app_id=app_id, limit=500)
-            if rows:
-                last_ts = max(row["ts"] for row in rows)
-                traces_cache = sorted([*rows, *traces_cache], key=lambda row: int(row["ts"]), reverse=True)[:limit]
+            query = trace_query(app_id=app_id)
+            if not last_ts:
+                streams = await query_range(
+                    query,
+                    ns_from_ms(now_ms - 24 * 60 * 60 * 1000),
+                    ns_from_ms(now_ms),
+                    500,
+                    "backward",
+                )
+                rows = parse_traces(streams, app_id=app_id, limit=500)
+                if rows:
+                    last_ts = max(row["ts"] for row in rows)
+                    traces_cache = rows[:limit]
                 yield _sse_data(traces_cache)
-            else:
-                yield ": keepalive\n\n"
+            start_ns = str(int(last_ts) + 1) if last_ts else ns_from_ms(now_ms)
+            try:
+                async for streams in tail(query, start=start_ns, limit=500):
+                    rows = parse_traces(streams, app_id=app_id, limit=500)
+                    if rows:
+                        last_ts = max(row["ts"] for row in rows)
+                        traces_cache = sorted([*rows, *traces_cache], key=lambda row: int(row["ts"]), reverse=True)[:limit]
+                        yield _sse_data(traces_cache)
+                    else:
+                        yield ": keepalive\n\n"
+            except Exception as exc:
+                logger.warning("Loki trace tail disconnected", extra={"event": "loki_trace_tail_disconnected", "error": str(exc)})
             await asyncio.sleep(2)
 
     return StreamingResponse(events(), media_type="text/event-stream")
