@@ -124,7 +124,7 @@
   },
   "logs": {
     "title": "日志",
-    "desc": "从 Loki 查询所有节点容器日志",
+    "desc": "所有节点容器日志",
     "empty": "暂无日志",
     "columns": {
       "time": "时间",

@@ -1,4 +1,6 @@
 import os
+import asyncio
+import json
 import logging
 import threading
 import uuid
@@ -12,6 +14,7 @@ from urllib.parse import urlparse
 
 from fastapi import Depends, FastAPI, Header, Request, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from minio import Minio
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from auth import Principal, authenticate_client_signature, authenticate_password, issue_token, principal_from_authorization
@@ -316,6 +319,37 @@ async def logs(
     return {"logs": parse_logs(streams)}
 
 
+@app.get("/api/logs/stream")
+async def logs_stream(
+    token: str,
+    node_id: str | None = None,
+    container: str | None = "rag-backend",
+):
+    principal_from_authorization(application.config.auth, f"Bearer {token}")
+
+    async def events():
+        last_ts = None
+        while True:
+            now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+            start_ns = str(int(last_ts) + 1) if last_ts else ns_from_ms(now_ms - 15 * 60 * 1000)
+            streams = await query_range(
+                log_query(node_id=node_id, container=container),
+                start_ns,
+                ns_from_ms(now_ms),
+                500,
+                "forward",
+            )
+            rows = parse_logs(streams)
+            if rows:
+                last_ts = rows[-1]["ts"]
+                yield _sse_data(rows)
+            else:
+                yield ": keepalive\n\n"
+            await asyncio.sleep(2)
+
+    return StreamingResponse(events(), media_type="text/event-stream")
+
+
 @app.get("/api/logs/labels/{label}")
 async def log_label_values(label: str, _: Principal = Depends(require_jwt)):
     if label not in {"container", "node_id"}:
@@ -334,6 +368,36 @@ async def traces(app_id: str | None = None, limit: int = 200, _: Principal = Dep
         "backward",
     )
     return {"traces": parse_traces(streams, app_id=app_id, limit=limit)}
+
+
+@app.get("/api/traces/stream")
+async def traces_stream(token: str, app_id: str, limit: int = 200):
+    principal_from_authorization(application.config.auth, f"Bearer {token}")
+    limit = min(max(limit, 1), 500)
+
+    async def events():
+        last_ts = None
+        traces_cache: list[dict[str, Any]] = []
+        while True:
+            now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+            start_ns = str(int(last_ts) + 1) if last_ts else ns_from_ms(now_ms - 24 * 60 * 60 * 1000)
+            streams = await query_range(
+                trace_query(),
+                start_ns,
+                ns_from_ms(now_ms),
+                500,
+                "forward",
+            )
+            rows = parse_traces(streams, app_id=app_id, limit=500)
+            if rows:
+                last_ts = max(row["ts"] for row in rows)
+                traces_cache = sorted([*rows, *traces_cache], key=lambda row: int(row["ts"]), reverse=True)[:limit]
+                yield _sse_data(traces_cache)
+            else:
+                yield ": keepalive\n\n"
+            await asyncio.sleep(2)
+
+    return StreamingResponse(events(), media_type="text/event-stream")
 
 
 def _monitor_payload() -> dict[str, Any]:
@@ -968,3 +1032,7 @@ def _iso_datetime(value) -> str | None:
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+
+
+def _sse_data(value: Any) -> str:
+    return f"data: {json.dumps(value, ensure_ascii=False)}\n\n"

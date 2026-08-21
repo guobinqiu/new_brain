@@ -59,19 +59,20 @@
 import { ref, watch, onMounted, onUnmounted } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
-import axios from '../utils/api'
 import { ms, shortTime } from '../utils/format'
 import { useActiveAppStore } from '../stores/activeApp'
+import { useAuthStore } from '../stores/auth'
 
 const TRACE_LIMIT = 200
 const { t } = useI18n()
 
 const activeAppStore = useActiveAppStore()
 const { appId } = storeToRefs(activeAppStore)
+const authStore = useAuthStore()
 
 const traces = ref([])
 const tracesLoading = ref(false)
-let tracePollTimer = null
+let traceSource = null
 
 function stageMs(trace, name) {
   const stage = (trace.stages || []).find(item => item.name === name)
@@ -85,31 +86,41 @@ function traceModeText(mode) {
   return text === key ? mode : text
 }
 
-async function fetchTraces() {
-  if (tracesLoading.value) return
+function startTraces() {
+  stopTraces()
+  traces.value = []
+  if (!appId.value) return
   tracesLoading.value = true
-  try {
-    const res = await axios.get('/api/traces', {
-      params: {
-        app_id: appId.value,
-        limit: TRACE_LIMIT,
-      },
-    })
-    traces.value = res.data?.traces || []
-  } catch (err) { console.error(err) }
-  finally { tracesLoading.value = false }
+  const params = new URLSearchParams()
+  params.set('token', authStore.authToken)
+  params.set('app_id', appId.value)
+  params.set('limit', String(TRACE_LIMIT))
+  traceSource = new EventSource(`/api/traces/stream?${params.toString()}`)
+  traceSource.onmessage = event => {
+    traces.value = JSON.parse(event.data)
+    tracesLoading.value = false
+  }
+  traceSource.onerror = () => {
+    tracesLoading.value = false
+  }
+}
+
+function stopTraces() {
+  if (traceSource) {
+    traceSource.close()
+    traceSource = null
+  }
 }
 
 onMounted(() => {
-  fetchTraces()
-  tracePollTimer = window.setInterval(fetchTraces, 1000)
+  startTraces()
 })
 
 onUnmounted(() => {
-  if (tracePollTimer) window.clearInterval(tracePollTimer)
+  stopTraces()
 })
 
 watch(appId, () => {
-  fetchTraces()
+  startTraces()
 })
 </script>

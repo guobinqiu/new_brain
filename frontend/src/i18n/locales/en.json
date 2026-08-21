@@ -124,7 +124,7 @@
   },
   "logs": {
     "title": "Logs",
-    "desc": "Container logs queried from Loki",
+    "desc": "Container logs from all nodes",
     "empty": "No logs yet",
     "columns": {
       "time": "Time",
