@@ -75,7 +75,7 @@ def log_query(node_id: str | None = None, container: str | None = None) -> str:
 def trace_query(container: str = "rag-backend", app_id: str | None = None) -> str:
     query = f'{log_query(container=container)} |= "search_trace"'
     if app_id:
-        query += f' |= "\\"app_id\\": \\"{_escape_line(app_id)}\\""'
+        query += f' | json | app_id="{_escape_label(app_id)}"'
     return query
 
 
@@ -119,10 +119,6 @@ def _base_url() -> str:
 
 
 def _escape_label(value: str) -> str:
-    return str(value).replace("\\", "\\\\").replace('"', '\\"')
-
-
-def _escape_line(value: str) -> str:
     return str(value).replace("\\", "\\\\").replace('"', '\\"')
 
 

@@ -8,7 +8,7 @@ def test_loki_log_query_escapes_labels():
     from loki_client import log_query, trace_query
 
     assert log_query(node_id='node"1', container=r"rag\backend") == r'{node_id="node\"1",container="rag\\backend"}'
-    assert trace_query(app_id="imsdom") == r'{container="rag-backend"} |= "search_trace" |= "\"app_id\": \"imsdom\""'
+    assert trace_query(app_id="imsdom") == r'{container="rag-backend"} |= "search_trace" | json | app_id="imsdom"'
 
 
 def test_loki_parse_logs_returns_rows_in_time_order():

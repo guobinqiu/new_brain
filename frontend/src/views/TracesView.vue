@@ -97,7 +97,8 @@ function startTraces() {
   params.set('limit', String(TRACE_LIMIT))
   traceSource = new EventSource(`/api/traces/stream?${params.toString()}`)
   traceSource.onmessage = event => {
-    traces.value = JSON.parse(event.data)
+    const next = JSON.parse(event.data)
+    if (next.length || !traces.value.length) traces.value = next
     tracesLoading.value = false
   }
   traceSource.onerror = () => {
