@@ -103,6 +103,47 @@ def test_create_app_api_generates_credentials(monkeypatch, tmp_path):
     assert all(item["secret_key"] for item in apps)
 
 
+def test_create_app_api_returns_duplicate_error(monkeypatch, tmp_path):
+    from auth import Principal, issue_token
+    from database.base import FakeDatabase
+    from schema import AuthConfig, AdminAuthConfig
+    import main
+
+    auth_config = AuthConfig(
+        admin=AdminAuthConfig(username="admin", password="admin123"),
+        registry_file=str(tmp_path / "apps.json"),
+    )
+    config = replace(main.application.config, auth=auth_config)
+
+    class Application:
+        def __init__(self):
+            self.config = config
+            self.ready = False
+            self.database = FakeDatabase()
+
+        def start(self):
+            pass
+
+        def stop(self):
+            pass
+
+    application = Application()
+    application.database.create_app("tenant_a")
+    monkeypatch.setattr(main, "application", application)
+    monkeypatch.setattr(main, "STARTUP_IN_BACKGROUND", False)
+    token = issue_token(auth_config, Principal(type="admin", app_id="admin"))
+
+    with TestClient(main.app) as client:
+        response = client.post(
+            "/api/apps",
+            json={"app_id": "tenant_a"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "app_id already exists"
+
+
 def test_delete_app_api_removes_credentials(monkeypatch, tmp_path):
     from auth import Principal, issue_token
     from database.base import FakeDatabase

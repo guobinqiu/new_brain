@@ -80,7 +80,7 @@ import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import axios from '../utils/api'
 import { useActiveAppStore } from '../stores/activeApp'
-import { showToast } from '../utils/toast'
+import { errorMessage, showToast } from '../utils/toast'
 import { shortTime } from '../utils/format'
 
 const API = '/api'
@@ -146,7 +146,7 @@ async function uploadFiles(files) {
       })
       submitted++
     } catch (err) {
-      showToast('error', `${file.name}: ${err.response?.data?.detail || err.message}`)
+      showToast('error', `${file.name}: ${errorMessage(err)}`)
     }
   }
   await fetchFiles()
@@ -196,7 +196,7 @@ async function deleteFile(file) {
     showToast('success', t('upload.deletedFile', { name: file.filename }))
     await fetchFiles()
   } catch (err) {
-    showToast('error', `${file.filename}: ${err.response?.data?.detail || err.message}`)
+    showToast('error', `${file.filename}: ${errorMessage(err)}`)
   } finally {
     deletingFileId.value = null
   }

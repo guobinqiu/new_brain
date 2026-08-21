@@ -69,7 +69,7 @@ import { useI18n } from 'vue-i18n'
 import { ElMessageBox } from 'element-plus'
 import axios from '../utils/api'
 import { useActiveAppStore } from '../stores/activeApp'
-import { showToast } from '../utils/toast'
+import { errorMessage, showToast } from '../utils/toast'
 import { copyText, shortTime, parseFileIds } from '../utils/format'
 
 const API = '/api'
@@ -95,7 +95,7 @@ async function fetchDatabaseStatus() {
     activeAppStore.databaseStatus = res.data
   } catch (err) {
     activeAppStore.databaseStatus = null
-    showToast('error', err.response?.data?.detail || err.message)
+    showToast('error', errorMessage(err))
   }
 }
 
@@ -107,7 +107,7 @@ async function initializeDatabase() {
     await fetchDatabaseStatus()
     await fetchChunks()
   } catch (err) {
-    showToast('error', err.response?.data?.detail || err.message)
+    showToast('error', errorMessage(err))
   }
 }
 
@@ -126,7 +126,7 @@ async function deleteDatabase() {
     chunksHasMore.value = false
     await fetchDatabaseStatus()
   } catch (err) {
-    showToast('error', err.response?.data?.detail || err.message)
+    showToast('error', errorMessage(err))
   }
 }
 

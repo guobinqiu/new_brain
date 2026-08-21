@@ -23,6 +23,7 @@ import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import axios from '../utils/api'
 import { useAuthStore } from '../stores/auth'
+import { errorMessage } from '../utils/toast'
 
 const API = '/api'
 const router = useRouter()
@@ -42,7 +43,7 @@ async function login() {
     authStore.setToken(res.data.access_token)
     router.push('/apps')
   } catch (err) {
-    loginError.value = err.response?.data?.detail || err.message
+    loginError.value = errorMessage(err)
   }
 }
 </script>

@@ -7,9 +7,9 @@
           <p>{{ t('apps.desc') }}</p>
         </div>
       </div>
-      <form class="app-create">
-        <el-input v-model.trim="newAppId" :placeholder="t('apps.appIdPlaceholder')" @keyup.enter="createApp" />
-        <el-button type="primary" :loading="creatingApp" @click="createApp">{{ creatingApp ? t('common.loading') : t('apps.create') }}</el-button>
+      <form class="app-create" @submit.prevent="createApp">
+        <el-input v-model.trim="newAppId" :placeholder="t('apps.appIdPlaceholder')" />
+        <el-button type="primary" native-type="submit" :loading="creatingApp">{{ creatingApp ? t('common.loading') : t('apps.create') }}</el-button>
       </form>
       <div v-if="apps.length" class="trace-table-wrap apps-table-wrap">
         <el-table :data="apps" style="width: 100%">
@@ -53,7 +53,7 @@ import { useI18n } from 'vue-i18n'
 import axios from '../utils/api'
 import { useActiveAppStore } from '../stores/activeApp'
 import { useAppsStore } from '../stores/apps'
-import { showToast } from '../utils/toast'
+import { errorMessage, showToast } from '../utils/toast'
 import { ElMessageBox } from 'element-plus'
 import { copyText } from '../utils/format'
 
@@ -82,7 +82,7 @@ async function createApp() {
     newAppId.value = ''
     await appsStore.fetchApps()
   } catch (err) {
-    showToast('error', err.response?.data?.detail || err.message)
+    showToast('error', errorMessage(err))
   } finally {
     creatingApp.value = false
   }
@@ -108,7 +108,7 @@ async function deleteApp(app) {
     }
     await appsStore.fetchApps()
   } catch (err) {
-    showToast('error', err.response?.data?.detail || err.message)
+    showToast('error', errorMessage(err))
   }
 }
 

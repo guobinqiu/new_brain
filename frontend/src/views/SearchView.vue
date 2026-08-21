@@ -81,7 +81,7 @@ import { useI18n } from 'vue-i18n'
 import axios from '../utils/api'
 import { useActiveAppStore } from '../stores/activeApp'
 import { parseFileIds, escapeHtml } from '../utils/format'
-import { showToast } from '../utils/toast'
+import { errorMessage, showToast } from '../utils/toast'
 
 const API = '/api'
 const { t } = useI18n()
@@ -146,7 +146,7 @@ async function doSearch() {
     }
     noResults.value = searchResults.value.length === 0
   } catch (err) {
-    showToast('error', err.response?.data?.detail || err.message || 'Search failed')
+    showToast('error', errorMessage(err, 'Search failed'))
   }
   searching.value = false
 }
