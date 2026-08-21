@@ -60,6 +60,7 @@ import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
+import axios from '../utils/api'
 import { ms, shortTime } from '../utils/format'
 import { useActiveAppStore } from '../stores/activeApp'
 import { useAuthStore } from '../stores/auth'
@@ -89,11 +90,26 @@ function traceModeText(mode) {
   return text === key ? mode : text
 }
 
-function startTraces() {
+async function fetchTraces() {
+  const res = await axios.get('/api/traces', {
+    params: {
+      app_id: currentAppId.value,
+      limit: TRACE_LIMIT,
+    },
+  })
+  traces.value = res.data.traces || []
+}
+
+async function startTraces() {
   stopTraces()
   traces.value = []
   if (!currentAppId.value) return
   tracesLoading.value = true
+  try {
+    await fetchTraces()
+  } finally {
+    tracesLoading.value = false
+  }
   const params = new URLSearchParams()
   params.set('token', authStore.authToken)
   params.set('app_id', currentAppId.value)
