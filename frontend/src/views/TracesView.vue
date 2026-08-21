@@ -1,6 +1,6 @@
 <template>
   <main class="monitor-view">
-    <div v-if="!appId" class="trace-empty">{{ t('monitor.noAppSelected') }}</div>
+    <div v-if="!currentAppId" class="trace-empty">{{ t('monitor.noAppSelected') }}</div>
     <template v-else>
     <div class="monitor-section">
       <div class="monitor-block trace-block">
@@ -56,9 +56,10 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted, onUnmounted } from 'vue'
+import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
+import { useRoute } from 'vue-router'
 import { ms, shortTime } from '../utils/format'
 import { useActiveAppStore } from '../stores/activeApp'
 import { useAuthStore } from '../stores/auth'
@@ -69,10 +70,12 @@ const { t } = useI18n()
 const activeAppStore = useActiveAppStore()
 const { appId } = storeToRefs(activeAppStore)
 const authStore = useAuthStore()
+const route = useRoute()
 
 const traces = ref([])
 const tracesLoading = ref(false)
 let traceSource = null
+const currentAppId = computed(() => route.params.app_id || appId.value)
 
 function stageMs(trace, name) {
   const stage = (trace.stages || []).find(item => item.name === name)
@@ -89,11 +92,11 @@ function traceModeText(mode) {
 function startTraces() {
   stopTraces()
   traces.value = []
-  if (!appId.value) return
+  if (!currentAppId.value) return
   tracesLoading.value = true
   const params = new URLSearchParams()
   params.set('token', authStore.authToken)
-  params.set('app_id', appId.value)
+  params.set('app_id', currentAppId.value)
   params.set('limit', String(TRACE_LIMIT))
   traceSource = new EventSource(`/api/traces/stream?${params.toString()}`)
   traceSource.onmessage = event => {
@@ -121,7 +124,7 @@ onUnmounted(() => {
   stopTraces()
 })
 
-watch(appId, () => {
+watch(currentAppId, () => {
   startTraces()
 })
 </script>
