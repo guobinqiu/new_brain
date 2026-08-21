@@ -37,6 +37,7 @@ node_modules/
 dist/
 
 # 环境与 IDE
+deploy/.env
 .DS_Store
 .idea/
 .vscode/

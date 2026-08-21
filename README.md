@@ -7,7 +7,7 @@ Native 方式只把后端和前端跑在宿主机上，默认仍使用 Docker �
 1. 启动 Qdrant、MinIO 和 PostgreSQL：
 
 ```bash
-docker compose -f deploy/cpu/docker-compose.yml up -d qdrant minio postgres
+docker compose -f deploy/svc/docker-compose.yml up -d qdrant minio postgres
 ```
 
 2. 启动后端：
@@ -33,51 +33,59 @@ http://localhost:5175
 
 ## Docker 启动
 
-Docker 部署读取仓库根 `.env`。
-
-CPU 版：
+Docker 部署读取 `deploy/.env`。首次部署先从模板生成本机配置：
 
 ```bash
-just deploy cpu build
-just deploy cpu up
+cp deploy/.env.example deploy/.env
 ```
 
-停止：
+启动共享依赖：
 
 ```bash
-just deploy cpu down
+just svc up
 ```
 
-重启：
+CPU 应用节点：
 
 ```bash
-just deploy cpu restart
+just rag cpu build
+just rag cpu up
 ```
 
-GPU 版：
+GPU 应用节点：
+
+`deploy/.env` 中设置：
+
+```env
+CONFIG_FILE=docker-gpu.yaml
+```
 
 ```bash
-just deploy gpu build
-just deploy gpu up
+just rag gpu build
+just rag gpu up
 ```
 
 国内网络构建时可以加镜像开关：
 
 ```bash
-USE_CN_MIRROR=true just deploy cpu build
-USE_CN_MIRROR=true just deploy gpu build
+USE_CN_MIRROR=true just rag cpu build
+USE_CN_MIRROR=true just rag gpu build
 ```
 
 停止：
 
 ```bash
-just deploy gpu down
+just svc down
+just rag cpu down
+just rag gpu down
 ```
 
 重启：
 
 ```bash
-just deploy gpu restart
+just svc restart
+just rag cpu restart
+just rag gpu restart
 ```
 
 Docker 前端访问地址：
@@ -97,8 +105,8 @@ http://<服务器地址>/api
 - `/api` 由 Nginx 负载均衡到 backend 节点。
 - 管理台通过 `/api/nodes/monitor` 和 `/api/nodes/config` 聚合所有节点状态。
 - 日志页通过 `/loki` 查询集中日志。
-- 节点差异写在仓库根 `.env`：主节点配置 `COMPOSE_PROFILES=monitoring` 启动 Loki，其他节点把 `LOKI_URL` 指向主节点 Loki。
-- 前端只部署在统一入口节点；其他节点只需要运行 backend、Promtail 和对应的数据服务。
+- 共享依赖只部署一套；所有 app 节点同构运行 backend、frontend、nginx 和 Promtail。
+- 节点差异写在各节点 `deploy/.env`：`RAG_NODE_ID` 标识当前节点，`DATABASE_URL`、`QDRANT_URL`、`S3_ENDPOINT_URL` 和 `LOKI_URL` 指向共享依赖所在节点的 IP 或域名。
 
 ## API
 
@@ -223,7 +231,7 @@ http://<服务器地址>/api
 CONFIG_FILE=local.yaml
 ```
 
-Docker 运行使用前面的 `just deploy cpu ...` 或 `just deploy gpu ...` 命令启动。
+Docker 运行使用前面的 `just svc ...` 或 `just rag ...` 命令启动。
 
 配置文件：
 

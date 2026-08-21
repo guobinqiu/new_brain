@@ -1034,24 +1034,32 @@ Loki 不直接暴露给浏览器。Nginx 的 `/loki/*` 使用 `auth_request` 调
 
 ## 配置与数据目录
 
-仓库根 `.env` 是 Docker 部署的统一配置入口。
+`deploy/.env.example` 是版本化配置模板；每个部署节点复制为本机 `deploy/.env` 后再按节点修改。Docker 部署只读取本机 `deploy/.env`。
 
-主节点示例：
+共享依赖节点示例：
 
 ```dotenv
 RAG_NODE_ID=node-233
 RAG_PEERS=http://19.16.1.233:6000,http://19.16.1.90:6000
-LOKI_URL=http://loki:3100
-COMPOSE_PROFILES=monitoring
-```
-
-次节点示例：
-
-```dotenv
-RAG_NODE_ID=node-90
-RAG_PEERS=http://19.16.1.233:6000,http://19.16.1.90:6000
+DATABASE_URL=postgresql://rag:rag@19.16.1.233:5432/rag
+QDRANT_URL=http://19.16.1.233:6333
+S3_ENDPOINT_URL=http://19.16.1.233:9000
 LOKI_URL=http://19.16.1.233:3100
 ```
+
+应用节点示例：
+
+```dotenv
+CONFIG_FILE=docker-cpu.yaml
+RAG_NODE_ID=node-90
+RAG_PEERS=http://19.16.1.233:6000,http://19.16.1.90:6000
+DATABASE_URL=postgresql://rag:rag@19.16.1.233:5432/rag
+QDRANT_URL=http://19.16.1.233:6333
+S3_ENDPOINT_URL=http://19.16.1.233:9000
+LOKI_URL=http://19.16.1.233:3100
+```
+
+这些依赖地址必须指向 deps 所在节点，可以是任意服务器 IP 或域名。GPU 节点把 `CONFIG_FILE` 改为 `docker-gpu.yaml`。
 
 新增数据目录：
 
@@ -1063,8 +1071,8 @@ loki_data/
 
 ## 运行约束
 
-前端只部署在统一入口节点。其他节点只需要运行 backend、Promtail 和对应的数据服务。
+svc compose 运行共享依赖；rag compose 运行同构应用节点。所有 rag 节点都运行 backend、frontend、nginx 和 Promtail。rag 节点通过 `deploy/.env` 里的 `DATABASE_URL`、`QDRANT_URL`、`S3_ENDPOINT_URL`、`LOKI_URL` 显式连接依赖节点。
 
-节点拓扑由环境变量静态配置。新增或删除节点需要更新各节点 `.env` 中的 `RAG_PEERS`，然后重启 backend / nginx / promtail 相关服务。
+节点拓扑由环境变量静态配置。新增或删除节点需要更新各节点 `deploy/.env` 中的 `RAG_PEERS`，然后重启 backend / nginx / promtail 相关服务。
 
 Loki 为单实例部署。主节点不可用时，集中日志查询不可用；各节点本地 Docker `json-file` 日志仍可通过宿主机查看。

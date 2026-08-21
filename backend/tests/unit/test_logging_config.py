@@ -50,6 +50,24 @@ def test_configure_logging_writes_stdout_and_optional_file(tmp_path):
     assert file_row["document_filename"] == "a.pdf"
 
 
+def test_configure_logging_resolves_relative_file_from_project_root(monkeypatch, tmp_path):
+    import logging_config
+    from logging_config import configure_logging
+    from schema import LoggingConfig
+
+    stream = StringIO()
+    monkeypatch.setattr(logging_config, "PROJECT_ROOT", tmp_path)
+
+    configure_logging(
+        LoggingConfig(level="INFO", file="logs/rag.log", max_bytes=1024, backup_count=2, search_trace=True),
+        stream=stream,
+    )
+
+    logging.getLogger("rag.app").info("startup", extra={"event": "startup"})
+
+    assert json.loads((tmp_path / "logs" / "rag.log").read_text(encoding="utf-8"))["event"] == "startup"
+
+
 def test_configure_logging_without_file_only_writes_stdout(tmp_path):
     from logging_config import configure_logging
     from schema import LoggingConfig

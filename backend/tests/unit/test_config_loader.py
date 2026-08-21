@@ -242,6 +242,19 @@ def test_load_app_config_can_use_config_filename(monkeypatch):
     assert config.store.url == "http://localhost:6333"
 
 
+def test_load_app_config_applies_runtime_url_overrides(monkeypatch):
+    from loader import load_app_config
+
+    monkeypatch.setenv("CONFIG_FILE", "docker-cpu.yaml")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://rag:rag@19.16.1.233:5432/rag")
+    monkeypatch.setenv("QDRANT_URL", "http://19.16.1.233:6333")
+
+    config = load_app_config()
+
+    assert config.database.url == "postgresql://rag:rag@19.16.1.233:5432/rag"
+    assert config.store.url == "http://19.16.1.233:6333"
+
+
 def test_load_app_config_supports_qdrant_profile(monkeypatch):
     from loader import load_app_config
 

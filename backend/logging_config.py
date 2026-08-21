@@ -12,6 +12,7 @@ from schema import LoggingConfig
 
 
 RESERVED_ATTRS = set(logging.makeLogRecord({}).__dict__)
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
 class JsonFormatter(logging.Formatter):
@@ -39,7 +40,7 @@ def configure_logging(config: LoggingConfig, stream: TextIO | None = None) -> No
     handlers.append(stdout_handler)
 
     if config.file:
-        path = Path(config.file)
+        path = _log_file_path(config.file)
         path.parent.mkdir(parents=True, exist_ok=True)
         file_handler = RotatingFileHandler(
             path,
@@ -61,6 +62,13 @@ def configure_logging(config: LoggingConfig, stream: TextIO | None = None) -> No
         logger.handlers = []
         logger.propagate = True
         logger.setLevel(_level(config.level))
+
+
+def _log_file_path(value: str) -> Path:
+    path = Path(value)
+    if path.is_absolute():
+        return path
+    return PROJECT_ROOT / path
 
 
 def _level(value: str) -> int:

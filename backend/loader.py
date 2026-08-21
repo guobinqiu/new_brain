@@ -28,6 +28,7 @@ def load_config_file(path: str | Path) -> AppConfig:
     available_components = _available_components(raw)
     _select_enabled_components(raw)
     _resolve_model_paths(raw)
+    _apply_runtime_overrides(raw)
     config = parse_app_config(raw)
     object.__setattr__(config, "name", config_path.stem)
     object.__setattr__(config, "available_components", available_components)
@@ -41,6 +42,17 @@ def _resolve_config_path(value: str) -> Path:
     if config_path.parts and config_path.parts[0] == "config":
         return BACKEND_DIR / config_path
     return CONFIG_DIR / config_path
+
+
+def _apply_runtime_overrides(raw: dict) -> None:
+    database_url = os.getenv("DATABASE_URL")
+    if database_url and isinstance(raw.get("database"), dict):
+        raw["database"]["url"] = database_url
+
+    qdrant_url = os.getenv("QDRANT_URL")
+    store = raw.get("store")
+    if qdrant_url and isinstance(store, dict) and store.get("type") in ("qdrant", "store/qdrant"):
+        store["url"] = qdrant_url
 
 
 def _resolve_model_paths(raw: dict) -> None:

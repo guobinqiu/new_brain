@@ -1,24 +1,18 @@
-deploy target="cpu" action="up":
-	@just _deploy_{{target}}_{{action}}
+svc action="up":
+	@just _{{action}} svc
 
-_deploy_cpu_up:
-	@docker compose --env-file "$PWD/.env" -f deploy/cpu/docker-compose.yml up -d
+rag target="cpu" action="up":
+	@just _{{action}} {{target}}
 
-_deploy_cpu_down:
-	@docker compose --env-file "$PWD/.env" -f deploy/cpu/docker-compose.yml down
+_up area:
+	@docker compose --env-file "$PWD/deploy/.env" -f deploy/{{area}}/docker-compose.yml up -d
 
-_deploy_cpu_build:
-	@docker compose --env-file "$PWD/.env" -f deploy/cpu/docker-compose.yml build
+_down area:
+	@docker compose --env-file "$PWD/deploy/.env" -f deploy/{{area}}/docker-compose.yml down
 
-_deploy_cpu_restart: _deploy_cpu_down _deploy_cpu_up
+_build area:
+	@docker compose --env-file "$PWD/deploy/.env" -f deploy/{{area}}/docker-compose.yml build
 
-_deploy_gpu_up:
-	@docker compose --env-file "$PWD/.env" -f deploy/gpu/docker-compose.yml up -d
-
-_deploy_gpu_down:
-	@docker compose --env-file "$PWD/.env" -f deploy/gpu/docker-compose.yml down
-
-_deploy_gpu_build:
-	@docker compose --env-file "$PWD/.env" -f deploy/gpu/docker-compose.yml build
-
-_deploy_gpu_restart: _deploy_gpu_down _deploy_gpu_up
+_restart area:
+	@just _down {{area}}
+	@just _up {{area}}
