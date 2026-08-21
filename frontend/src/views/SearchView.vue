@@ -76,8 +76,9 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute } from 'vue-router'
 import axios from '../utils/api'
 import { useActiveAppStore } from '../stores/activeApp'
 import { parseFileIds, escapeHtml } from '../utils/format'
@@ -86,6 +87,8 @@ import { errorMessage, showToast } from '../utils/toast'
 const API = '/api'
 const { t } = useI18n()
 const activeAppStore = useActiveAppStore()
+const route = useRoute()
+const currentAppId = computed(() => route.params.app_id || activeAppStore.appId)
 
 const query = ref('')
 const mode = ref('hybrid')
@@ -129,7 +132,7 @@ async function doSearch() {
       sparse_weight: searchConfig.value.sparse_weight,
       rrf_k: searchConfig.value.rrf_k,
     }
-    if (activeAppStore.appId) body.app_id = activeAppStore.appId
+    if (currentAppId.value) body.app_id = currentAppId.value
     if (fileIds.length) body.file_ids = fileIds
     if (rerank.value) body.fetch_k = fetchK.value
     const res = await axios.post(`${API}/search`, body)

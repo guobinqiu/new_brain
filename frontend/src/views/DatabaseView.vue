@@ -63,9 +63,10 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
+import { useRoute } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
 import axios from '../utils/api'
 import { useActiveAppStore } from '../stores/activeApp'
@@ -76,6 +77,8 @@ const API = '/api'
 const { t } = useI18n()
 const activeAppStore = useActiveAppStore()
 const { appId, databaseStatus } = storeToRefs(activeAppStore)
+const route = useRoute()
+const currentAppId = computed(() => route.params.app_id || appId.value)
 
 const databaseFileIdsText = ref('')
 const databaseAppliedFileIdsText = ref('')
@@ -86,12 +89,12 @@ const chunksLoading = ref(false)
 const chunksTableRef = ref(null)
 
 async function fetchDatabaseStatus() {
-  if (!activeAppStore.appId) {
+  if (!currentAppId.value) {
     activeAppStore.databaseStatus = null
     return
   }
   try {
-    const res = await axios.get(`${API}/apps/${activeAppStore.appId}/database`)
+    const res = await axios.get(`${API}/apps/${currentAppId.value}/database`)
     activeAppStore.databaseStatus = res.data
   } catch (err) {
     activeAppStore.databaseStatus = null
@@ -100,10 +103,10 @@ async function fetchDatabaseStatus() {
 }
 
 async function initializeDatabase() {
-  if (!activeAppStore.appId) return
+  if (!currentAppId.value) return
   try {
-    await axios.post(`${API}/apps/${activeAppStore.appId}/database`)
-    showToast('success', t('database.initialized', { appId: activeAppStore.appId }))
+    await axios.post(`${API}/apps/${currentAppId.value}/database`)
+    showToast('success', t('database.initialized', { appId: currentAppId.value }))
     await fetchDatabaseStatus()
     await fetchChunks()
   } catch (err) {
@@ -112,15 +115,15 @@ async function initializeDatabase() {
 }
 
 async function deleteDatabase() {
-  if (!activeAppStore.appId || !activeAppStore.databaseStatus?.exists) return
+  if (!currentAppId.value || !activeAppStore.databaseStatus?.exists) return
   try {
-    await ElMessageBox.confirm(t('database.deleteConfirm', { appId: activeAppStore.appId }), t('database.delete'), { type: 'warning' })
+    await ElMessageBox.confirm(t('database.deleteConfirm', { appId: currentAppId.value }), t('database.delete'), { type: 'warning' })
   } catch {
     return
   }
   try {
-    await axios.delete(`${API}/apps/${activeAppStore.appId}/database`)
-    showToast('success', t('database.deleted', { appId: activeAppStore.appId }))
+    await axios.delete(`${API}/apps/${currentAppId.value}/database`)
+    showToast('success', t('database.deleted', { appId: currentAppId.value }))
     chunks.value = []
     chunksCursor.value = null
     chunksHasMore.value = false
@@ -131,7 +134,7 @@ async function deleteDatabase() {
 }
 
 async function fetchChunks() {
-  if (!activeAppStore.appId) {
+  if (!currentAppId.value) {
     chunks.value = []
     chunksCursor.value = null
     chunksHasMore.value = false
@@ -145,13 +148,13 @@ async function fetchChunks() {
 }
 
 async function fetchNextChunks() {
-  if (!activeAppStore.appId) return
+  if (!currentAppId.value) return
   if (chunksLoading.value) return
   chunksLoading.value = true
   try {
     const body = { limit: 50 }
     if (chunksCursor.value) body.cursor = chunksCursor.value
-    if (activeAppStore.appId) body.app_id = activeAppStore.appId
+    if (currentAppId.value) body.app_id = currentAppId.value
     const fileIds = parseFileIds(databaseAppliedFileIdsText.value)
     if (fileIds.length) body.file_ids = fileIds
     const res = await axios.post(`${API}/chunks`, body)
@@ -176,6 +179,14 @@ function onChunksScroll(event) {
 }
 
 onMounted(async () => {
+  await fetchDatabaseStatus()
+  if (activeAppStore.databaseStatus?.exists) await fetchChunks()
+})
+
+watch(currentAppId, async () => {
+  chunks.value = []
+  chunksCursor.value = null
+  chunksHasMore.value = false
   await fetchDatabaseStatus()
   if (activeAppStore.databaseStatus?.exists) await fetchChunks()
 })

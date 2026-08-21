@@ -75,9 +75,10 @@
 </template>
 
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { computed, ref, onMounted, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
+import { useRoute } from 'vue-router'
 import axios from '../utils/api'
 import { useActiveAppStore } from '../stores/activeApp'
 import { errorMessage, showToast } from '../utils/toast'
@@ -87,6 +88,8 @@ const API = '/api'
 const { t } = useI18n()
 const activeAppStore = useActiveAppStore()
 const { appId } = storeToRefs(activeAppStore)
+const route = useRoute()
+const currentAppId = computed(() => route.params.app_id || appId.value)
 
 const selectedFiles = ref([])
 const uploading = ref(false)
@@ -111,7 +114,7 @@ async function onDrop(e) {
 }
 
 async function uploadSelectedFiles() {
-  if (!activeAppStore.appId) {
+  if (!currentAppId.value) {
     showToast('error', t('upload.selectApp'))
     return
   }
@@ -134,12 +137,12 @@ async function uploadFiles(files) {
   for (const file of files) {
     const form = new FormData()
     form.append('file', file)
-    form.append('app_id', activeAppStore.appId)
+    form.append('app_id', currentAppId.value)
     try {
       const uploadRes = await axios.post(`${API}/upload`, form)
       const presignRes = await axios.post(`${API}/presign`, { s3_url: uploadRes.data.s3_url })
       await axios.post(`${API}/index`, {
-        app_id: activeAppStore.appId,
+        app_id: currentAppId.value,
         file_id: uploadRes.data.file_id,
         presigned_url: presignRes.data.presigned_url,
         s3_url: uploadRes.data.s3_url,
@@ -161,7 +164,7 @@ async function fetchFiles({ append = false } = {}) {
   filesLoading.value = true
   try {
     const params = { limit: 10 }
-    if (activeAppStore.appId) params.app_id = activeAppStore.appId
+    if (currentAppId.value) params.app_id = currentAppId.value
     if (append && filesNextCursor.value) params.cursor = filesNextCursor.value
     const res = await axios.get(`${API}/files`, { params })
     const rows = res.data.files || []
@@ -191,7 +194,7 @@ async function deleteFile(file) {
   deletingFileId.value = file.id
   try {
     const params = {}
-    if (activeAppStore.appId) params.app_id = activeAppStore.appId
+    if (currentAppId.value) params.app_id = currentAppId.value
     await axios.delete(`${API}/files/${file.id}`, { params })
     showToast('success', t('upload.deletedFile', { name: file.filename }))
     await fetchFiles()
@@ -204,7 +207,7 @@ async function deleteFile(file) {
 
 onMounted(fetchFiles)
 
-watch(appId, () => {
+watch(currentAppId, () => {
   files.value = []
   filesTotal.value = 0
   filesNextCursor.value = null
