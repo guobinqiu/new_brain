@@ -6,11 +6,11 @@ import hmac
 import json
 import time
 from dataclasses import dataclass
-from typing import Literal
+from typing import Callable, Literal
 
 from fastapi import HTTPException, Request
 
-from app_registry import AppRegistry
+from app_registry import AppCredential, AppRegistry
 from schema import AuthConfig
 
 
@@ -60,14 +60,19 @@ def authenticate_password(config: AuthConfig, username: str | None, password: st
     return Principal(type="admin", app_id="")
 
 
-def authenticate_client_signature(config: AuthConfig, request: Request, body: bytes) -> Principal:
+def authenticate_client_signature(
+    config: AuthConfig,
+    request: Request,
+    body: bytes,
+    credential_lookup: Callable[[str], AppCredential | None] | None = None,
+) -> Principal:
     app_id = request.headers.get("x-app-id", "")
     access_key = request.headers.get("x-access-key", "")
     timestamp = request.headers.get("x-timestamp", "")
     signature = request.headers.get("x-signature", "")
     if not all((app_id, access_key, timestamp, signature)):
         raise HTTPException(401, "missing signature headers")
-    credential = _app_credential(config, app_id)
+    credential = credential_lookup(app_id) if credential_lookup is not None else _app_credential(config, app_id)
     if credential is None or access_key != credential.access_key:
         raise HTTPException(401, "invalid access key")
     _validate_timestamp(timestamp)

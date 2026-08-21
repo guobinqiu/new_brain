@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import secrets
+
+from psycopg import errors
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
 from database.base import FilePage, FileRecord
+from app_registry import AppCredential
+from collection_names import validate_app_id
 
 CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS app_files (
@@ -22,6 +27,16 @@ CREATE TABLE IF NOT EXISTS app_files (
     deleted_at  TIMESTAMPTZ,
     CONSTRAINT uq_app_files_app_file UNIQUE (app_id, file_id),
     CONSTRAINT ck_app_files_status CHECK (status IN ('queued', 'indexing', 'success', 'failed'))
+)
+"""
+
+CREATE_APPS_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS apps (
+    app_id      VARCHAR(64)   PRIMARY KEY,
+    access_key  VARCHAR(64)   NOT NULL UNIQUE,
+    secret_key  VARCHAR(128)  NOT NULL,
+    created_at  TIMESTAMPTZ   NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ   NOT NULL DEFAULT now()
 )
 """
 
@@ -108,6 +123,23 @@ SELECT COUNT(*) AS total FROM app_files
 WHERE app_id = %s AND deleted_at IS NULL
 """
 
+CREATE_APP_SQL = """
+INSERT INTO apps (app_id, access_key, secret_key)
+VALUES (%s, %s, %s)
+"""
+
+GET_APP_SQL = """
+SELECT app_id, access_key, secret_key FROM apps
+WHERE app_id = %s
+"""
+
+LIST_APPS_SQL = """
+SELECT app_id, access_key, secret_key FROM apps
+ORDER BY app_id ASC
+"""
+
+DELETE_APP_SQL = "DELETE FROM apps WHERE app_id = %s"
+
 class PostgresDatabase:
     def __init__(self, url: str, pool_size: int = 5):
         self.url = url
@@ -126,6 +158,7 @@ class PostgresDatabase:
         self._pool.open()
         self._pool.wait()
         with self._pool.connection() as conn:
+            conn.execute(CREATE_APPS_TABLE_SQL)
             conn.execute(CREATE_TABLE_SQL)
             conn.execute(ALTER_TABLE_SQL)
             conn.execute(CREATE_INDEX_SQL)
@@ -186,6 +219,37 @@ class PostgresDatabase:
             total=total_row["total"] if total_row else 0,
         )
 
+    def create_app(self, app_id: str) -> AppCredential:
+        validate_app_id(app_id)
+        credential = AppCredential(
+            app_id=app_id,
+            access_key=secrets.token_hex(16),
+            secret_key=secrets.token_hex(32),
+        )
+        try:
+            with self._pool.connection() as conn:
+                conn.execute(CREATE_APP_SQL, (credential.app_id, credential.access_key, credential.secret_key))
+        except errors.UniqueViolation as exc:
+            raise ValueError("app_id already exists") from exc
+        return credential
+
+    def get_app(self, app_id: str) -> AppCredential | None:
+        validate_app_id(app_id)
+        with self._pool.connection() as conn:
+            row = conn.execute(GET_APP_SQL, (app_id,)).fetchone()
+        return _app_credential(row) if row else None
+
+    def list_apps(self) -> list[AppCredential]:
+        with self._pool.connection() as conn:
+            rows = conn.execute(LIST_APPS_SQL).fetchall()
+        return [_app_credential(row) for row in rows]
+
+    def delete_app(self, app_id: str) -> bool:
+        validate_app_id(app_id)
+        with self._pool.connection() as conn:
+            cur = conn.execute(DELETE_APP_SQL, (app_id,))
+            return cur.rowcount > 0
+
 
 def _record(row: dict) -> FileRecord:
     created_at = row["created_at"]
@@ -200,4 +264,12 @@ def _record(row: dict) -> FileRecord:
         size=row["size"],
         status=row["status"],
         error=row["error"],
+    )
+
+
+def _app_credential(row: dict) -> AppCredential:
+    return AppCredential(
+        app_id=row["app_id"],
+        access_key=row["access_key"],
+        secret_key=row["secret_key"],
     )

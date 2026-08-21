@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import secrets
 
 from typing import Protocol
+
+from app_registry import AppCredential
+from collection_names import validate_app_id
 
 
 @dataclass(frozen=True)
@@ -39,6 +43,10 @@ class Database(Protocol):
     def soft_delete_file(self, app_id: str, file_id: str) -> int: ...
     def list_files(self, app_id: str, limit: int = 50, cursor: str | None = None) -> FilePage: ...
     def purge_app(self, app_id: str) -> int: ...
+    def create_app(self, app_id: str) -> AppCredential: ...
+    def get_app(self, app_id: str) -> AppCredential | None: ...
+    def list_apps(self) -> list[AppCredential]: ...
+    def delete_app(self, app_id: str) -> bool: ...
 
 
 class FakeDatabase:
@@ -50,6 +58,7 @@ class FakeDatabase:
 
     def __init__(self):
         self._rows: dict[tuple[str, str], dict] = {}
+        self._apps: dict[str, AppCredential] = {}
         self._next_id = 1
         self.ready = True
 
@@ -179,3 +188,27 @@ class FakeDatabase:
         for k in keys:
             del self._rows[k]
         return len(keys)
+
+    def create_app(self, app_id: str) -> AppCredential:
+        validate_app_id(app_id)
+        if app_id in self._apps:
+            raise ValueError("app_id already exists")
+        credential = AppCredential(
+            app_id=app_id,
+            access_key=secrets.token_hex(16),
+            secret_key=secrets.token_hex(32),
+        )
+        self._apps[app_id] = credential
+        return credential
+
+    def get_app(self, app_id: str) -> AppCredential | None:
+        return self._apps.get(app_id)
+
+    def list_apps(self) -> list[AppCredential]:
+        return [self._apps[app_id] for app_id in sorted(self._apps)]
+
+    def delete_app(self, app_id: str) -> bool:
+        if app_id not in self._apps:
+            return False
+        del self._apps[app_id]
+        return True

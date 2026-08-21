@@ -55,6 +55,7 @@ def test_app_registry_creates_persistent_credentials_and_authenticates(monkeypat
 
 def test_create_app_api_generates_credentials(monkeypatch, tmp_path):
     from auth import Principal, issue_token
+    from database.base import FakeDatabase
     from schema import AuthConfig, AdminAuthConfig
     import main
 
@@ -68,6 +69,7 @@ def test_create_app_api_generates_credentials(monkeypatch, tmp_path):
         def __init__(self):
             self.config = config
             self.ready = False
+            self.database = FakeDatabase()
 
         def start(self):
             pass
@@ -103,7 +105,7 @@ def test_create_app_api_generates_credentials(monkeypatch, tmp_path):
 
 def test_delete_app_api_removes_credentials(monkeypatch, tmp_path):
     from auth import Principal, issue_token
-    from app_registry import AppRegistry
+    from database.base import FakeDatabase
     from schema import AuthConfig, AdminAuthConfig
     import main
 
@@ -111,15 +113,16 @@ def test_delete_app_api_removes_credentials(monkeypatch, tmp_path):
         admin=AdminAuthConfig(username="admin", password="admin123"),
         registry_file=str(tmp_path / "apps.json"),
     )
-    AppRegistry(auth_config.registry_file).create_app("tenant_a")
     config = replace(main.application.config, auth=auth_config)
 
-    class Database:
+    class Database(FakeDatabase):
         def __init__(self):
+            super().__init__()
             self.purged = []
 
         def purge_app(self, app_id):
             self.purged.append(app_id)
+            return super().purge_app(app_id)
 
     class Application:
         def __init__(self):
@@ -134,6 +137,7 @@ def test_delete_app_api_removes_credentials(monkeypatch, tmp_path):
             pass
 
     application = Application()
+    application.database.create_app("tenant_a")
     monkeypatch.setattr(main, "application", application)
     monkeypatch.setattr(main, "STARTUP_IN_BACKGROUND", False)
     token = issue_token(auth_config, Principal(type="admin", app_id="admin"))

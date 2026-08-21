@@ -14,7 +14,6 @@ from fastapi import Depends, FastAPI, Header, Request, UploadFile, File, Form, H
 from fastapi.middleware.cors import CORSMiddleware
 from minio import Minio
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from app_registry import AppRegistry
 from auth import Principal, authenticate_client_signature, authenticate_password, issue_token, principal_from_authorization
 from bootstrap import Application
 from indexing import create_file_id, enqueue_index_job, index_file, index_presigned_object
@@ -171,7 +170,9 @@ def require_jwt(authorization: str | None = Header(None)) -> Principal:
 
 
 async def require_aksk(request: Request) -> Principal:
-    return authenticate_client_signature(application.config.auth, request, await request.body())
+    if not application.database.ready:
+        raise HTTPException(503, "database is not initialized")
+    return authenticate_client_signature(application.config.auth, request, await request.body(), application.database.get_app)
 
 
 @app.post("/api/login")
@@ -185,7 +186,7 @@ def login(req: LoginRequest):
 
 @app.get("/api/apps")
 def list_apps(_: Principal = Depends(require_jwt)):
-    registry = AppRegistry(application.config.auth.registry_file)
+    _require_database_ready()
     return {
         "apps": [
             {
@@ -193,18 +194,16 @@ def list_apps(_: Principal = Depends(require_jwt)):
                 "access_key": app_credential.access_key,
                 "secret_key": app_credential.secret_key,
             }
-            for app_credential in registry.list_apps()
+            for app_credential in application.database.list_apps()
         ]
     }
 
 
 @app.post("/api/apps", status_code=201)
 def create_app(req: AppCreateRequest, _: Principal = Depends(require_jwt)):
-    registry = AppRegistry(application.config.auth.registry_file)
+    _require_database_ready()
     try:
-        if registry.get_app(req.app_id) is not None:
-            raise ValueError("app_id already exists")
-        credential = registry.create_app(req.app_id)
+        credential = application.database.create_app(req.app_id)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     return {
@@ -216,9 +215,9 @@ def create_app(req: AppCreateRequest, _: Principal = Depends(require_jwt)):
 
 @app.delete("/api/apps/{app_id}")
 def delete_app(app_id: str, _: Principal = Depends(require_jwt)):
-    registry = AppRegistry(application.config.auth.registry_file)
+    _require_database_ready()
     try:
-        deleted = registry.delete_app(app_id)
+        deleted = application.database.delete_app(app_id)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     if not deleted:
@@ -554,6 +553,11 @@ def _search(req: SearchRequest, principal: Principal):
 def _require_ready():
     if not application.ready:
         raise HTTPException(503, "search is not initialized")
+
+
+def _require_database_ready():
+    if not application.database.ready:
+        raise HTTPException(503, "database is not initialized")
 
 
 def _component_config(component: Any) -> dict[str, Any] | None:

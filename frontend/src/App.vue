@@ -81,7 +81,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
@@ -164,7 +164,11 @@ function logout() {
 }
 
 onMounted(() => {
-  appsStore.fetchApps()
+  if (authToken.value) appsStore.fetchApps()
+})
+
+watch(authToken, value => {
+  if (value) appsStore.fetchApps()
 })
 </script>
 

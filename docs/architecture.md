@@ -129,7 +129,7 @@ app   -> 外部系统，绑定 AK/SK 签名里的 app_id
 collection = {app_id}_chunks
 ```
 
-应用凭证保存在 App Registry 文件中，路径由配置项 `auth.registry_file` 指定；未指定时使用项目根目录下的 `data/apps.json`。该文件是运行时数据，不进入 git。
+应用凭证保存在 PostgreSQL `apps` 表中，多节点后端共享同一份 `app_id`、`access_key`、`secret_key`。
 
 数据库初始化属于数据库管理能力，由管理台在数据库页面显式触发。索引入口不会自动创建 collection；当前 app 尚未初始化数据库时，索引请求返回 `app database is not initialized`。删除 app 只删除 AK/SK 凭证，不删除该 app 的历史向量数据。
 
@@ -1029,7 +1029,7 @@ GET /api/traces
 
 管理台仍使用 User JWT。节点聚合请求 fan-out 到 peer 节点时，原样透传调用方 `Authorization: Bearer ...`。
 
-Loki 不直接暴露给浏览器。管理台日志和链路请求先进入后端，后端完成 User JWT 校验后再访问 Loki。
+管理台日志和链路请求进入后端，后端完成 User JWT 校验后查询 Loki。
 
 上游业务接口仍使用 AK/SK 签名，路径保持 `/api/open/*`。多节点监控和 Loki 日志是管理台能力，不改变上游业务 API 契约。
 

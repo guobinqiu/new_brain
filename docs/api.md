@@ -463,7 +463,7 @@ GET /api/logs
 GET /api/traces
 ```
 
-运行日志和搜索 Trace 都由后端封装 Loki 查询。管理台使用 User JWT 访问后端接口，浏览器不直接访问 Loki。
+运行日志和搜索 Trace 都由后端封装 Loki 查询。管理台使用 User JWT 访问后端接口。
 
 ### 上传文件列表
 
