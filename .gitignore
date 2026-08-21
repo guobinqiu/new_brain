@@ -16,6 +16,7 @@ models/
 chroma_data/
 milvus_data/
 minio_data/
+loki_data/
 pg_data/
 postgres_data/
 qdrant_data/
@@ -36,7 +37,6 @@ node_modules/
 dist/
 
 # 环境与 IDE
-.env
 .DS_Store
 .idea/
 .vscode/

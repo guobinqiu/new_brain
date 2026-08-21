@@ -70,6 +70,13 @@
     "noTraces": "No searches yet",
     "noAppSelected": "Select an app first"
   },
+  "cluster": {
+    "desc": "Runtime status for all backend nodes",
+    "configDesc": "Active configuration for all backend nodes",
+    "allNodes": "All nodes",
+    "unreachable": "Unreachable",
+    "configDrift": "Config drift"
+  },
   "status": {
     "ready": "Ready",
     "loading": "Loading",
@@ -117,7 +124,7 @@
   },
   "logs": {
     "title": "Logs",
-    "desc": "Recent runtime logs and live output",
+    "desc": "Container logs queried from Loki",
     "empty": "No logs yet",
     "columns": {
       "time": "Time",

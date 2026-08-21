@@ -10,6 +10,7 @@ class TestConfigAPI:
         resp = api_client.get("/api/config")
         assert resp.status_code == 200
         cfg = resp.json()
+        assert cfg["node_id"]
         for key in ("default_mode", "top_k", "rerank", "rerank_available", "fetch_k", "dense_weight", "sparse_weight", "rrf_k"):
             assert key in cfg
         assert cfg["sparse"]["name"] == "bm25"
@@ -60,6 +61,7 @@ class TestMonitorAPI:
         assert resp.status_code == 200
         monitor = resp.json()
         assert monitor["ready"] is True
+        assert monitor["node_id"]
         assert monitor["profile"]["config_name"]
         assert monitor["profile"]["store"]["type"] == "qdrant"
         components = {component["name"]: component for component in monitor["components"]}

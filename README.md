@@ -2,19 +2,19 @@
 
 ## Native 启动
 
-Native 方式只把后端和前端跑在宿主机上，默认仍使用 Docker 启动 Qdrant 和 MinIO。
+Native 方式只把后端和前端跑在宿主机上，默认仍使用 Docker 启动 Qdrant、MinIO 和 PostgreSQL。
 
-1. 启动 Qdrant 和 MinIO：
+1. 启动 Qdrant、MinIO 和 PostgreSQL：
 
 ```bash
-docker compose -f deploy/cpu/docker-compose.yml up -d qdrant minio
+docker compose -f deploy/cpu/docker-compose.yml up -d qdrant minio postgres
 ```
 
 2. 启动后端：
 
 ```bash
 cd backend
-S3_ENDPOINT_URL=http://localhost:19000 CONFIG_FILE=local.yaml .venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8000
+S3_ENDPOINT_URL=http://localhost:9000 CONFIG_FILE=local.yaml .venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 6000
 ```
 
 3. 启动前端：
@@ -32,6 +32,8 @@ http://localhost:5175
 ```
 
 ## Docker 启动
+
+Docker 部署读取仓库根 `.env`。
 
 CPU 版：
 
@@ -81,14 +83,22 @@ just deploy gpu restart
 Docker 前端访问地址：
 
 ```text
-http://<服务器地址>:5175
+http://<服务器地址>
 ```
 
-Docker 后端 API 地址：
+Docker API 地址：
 
 ```text
-http://<服务器地址>:28000
+http://<服务器地址>/api
 ```
+
+多节点监控和日志：
+
+- `/api` 由 Nginx 负载均衡到 backend 节点。
+- 管理台通过 `/api/nodes/monitor` 和 `/api/nodes/config` 聚合所有节点状态。
+- 日志页通过 `/loki` 查询集中日志。
+- 节点差异写在仓库根 `.env`：主节点配置 `COMPOSE_PROFILES=monitoring` 启动 Loki，其他节点把 `LOKI_URL` 指向主节点 Loki。
+- 前端只部署在统一入口节点；其他节点只需要运行 backend、Promtail 和对应的数据服务。
 
 ## API
 
@@ -238,7 +248,7 @@ Docker 运行使用前面的 `just deploy cpu ...` 或 `just deploy gpu ...` 命
 本地 native 切换配置示例：
 
 ```bash
-CONFIG_FILE=milvus-bge-base.yaml .venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 8000
+CONFIG_FILE=milvus-bge-base.yaml .venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 6000
 ```
 
 ## Benchmark

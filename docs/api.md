@@ -467,10 +467,10 @@ GET /api/traces?limit=200
 ### 运行日志
 
 ```http
-GET /api/logs/stream
+GET /loki/query_range
 ```
 
-返回 `text/event-stream`。连接建立后先输出最近日志 ring buffer，再持续输出实时运行日志。
+运行日志由 Loki 查询，管理台经 Nginx `/loki/*` 反代访问。Nginx 使用现有 User JWT 做鉴权，日志不再由 backend 内存 ring buffer 输出。
 
 ### 上传文件列表
 

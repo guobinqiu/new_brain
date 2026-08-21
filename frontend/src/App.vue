@@ -91,7 +91,7 @@ import { useAuthStore } from './stores/auth'
 import { useThemeStore } from './stores/theme'
 import { useActiveAppStore } from './stores/activeApp'
 import { useAppsStore } from './stores/apps'
-import { stopLogStream } from './utils/logStream'
+import { stopLogsTail } from './utils/loki'
 
 const { t, locale } = useI18n()
 const route = useRoute()
@@ -156,7 +156,7 @@ function setTheme(value) {
 }
 
 function logout() {
-  stopLogStream()
+  stopLogsTail()
   activeAppStore.appId = ''
   activeAppStore.databaseStatus = null
   authStore.clearAuth()
@@ -251,6 +251,12 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helv
 .monitor-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
 .monitor-head h2 { font-size: 14px; font-weight: 600; color: var(--el-text-color-primary); }
 .monitor-head p { font-size: 12px; color: var(--el-text-color-secondary); margin-top: 3px; }
+.node-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 16px; }
+.node-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.node-head p { margin-top: 3px; font-size: 12px; color: var(--el-text-color-secondary); }
+.node-summary { margin-bottom: 12px; font-size: 12px; color: var(--el-text-color-secondary); }
+.log-filters { display: flex; align-items: center; gap: 8px; }
+.log-filter { width: 180px; }
 .monitor-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .monitor-grid + .monitor-block { margin-top: 18px; }
 .monitor-section > .monitor-block + .monitor-block { margin-top: 18px; }
@@ -329,8 +335,11 @@ html.dark .logs-box { background: #050b13; color: #d6e4f2; }
   .header-top { flex-direction: column; }
   .header-actions { justify-content: flex-start; }
   .monitor-grid,
+  .node-grid,
   .config-grid,
   .app-create { grid-template-columns: 1fr; }
+  .log-filters { width: 100%; flex-direction: column; align-items: stretch; }
+  .log-filter { width: 100%; }
   .search-input-wrap { flex-direction: column; }
   .results-bar { flex-wrap: wrap; gap: 8px 12px; }
 }

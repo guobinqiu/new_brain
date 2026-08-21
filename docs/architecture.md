@@ -896,3 +896,175 @@ GPU profile 的后端进程同时服务 API 和进程内索引消费器，模型
 Docker Compose 默认设置 `TZ=Asia/Shanghai`，对外展示时间和日志时间会按该时区输出。存储层仍保存 UTC 时间；部署到其他时区时通过外部 `TZ` 环境变量覆盖展示时区。
 
 数据目录按数据库产品分组。服务型数据库由独立进程持有数据目录；嵌入式文件库由后端进程直接读写，不要同时启动多个后端访问同一份嵌入式库文件。
+
+
+---
+
+# 多节点监控聚合与集中日志架构
+
+## 部署拓扑
+
+RAG backend 支持多节点部署。Nginx 只承担统一入口和负载均衡，不再为每个节点维护独立的 `/nodes/...` 路由。
+
+```mermaid
+flowchart LR
+  Browser["浏览器 / 上游系统"] --> Nginx["Nginx 统一入口"]
+  Nginx -->|"/api/*"| Backends["rag_backends upstream"]
+  Backends --> B1["backend node-233"]
+  Backends --> B2["backend node-90"]
+  Nginx -->|"/loki/*"| Loki["Loki"]
+  P1["Promtail node-233"] --> Loki
+  P2["Promtail node-90"] --> Loki
+  B1 -. fan-out .-> B2
+  B2 -. fan-out .-> B1
+```
+
+统一入口：
+
+- `/api/*`：转发到 `rag_backends`，由 Nginx 负载均衡。
+- `/loki/*`：转发到 Loki，使用 Nginx `auth_request` 复用后端 JWT 校验。
+- `/`：转发到前端。
+
+节点端口固定为 backend 宿主端口 `6000`。当前静态 upstream 包含：
+
+- `19.16.1.233:6000`
+- `19.16.1.90:6000`
+
+## 节点聚合
+
+节点列表由环境变量提供：
+
+| 变量 | 说明 |
+|---|---|
+| `RAG_NODE_ID` | 当前 backend 节点 ID |
+| `RAG_PEERS` | 全部 backend 节点 base_url，逗号分隔，包含自身 |
+
+单节点接口保留：
+
+- `GET /api/monitor`
+- `GET /api/config`
+
+聚合接口由任意一个 backend 节点执行 fan-out：
+
+- `GET /api/nodes/monitor`
+- `GET /api/nodes/config`
+
+聚合接口并发请求 `RAG_PEERS` 中所有节点，透传调用方的 User JWT。单个节点超时、连接失败或返回非 200 时，该节点标记为 `unreachable`，不会拖垮整体响应。
+
+返回结构：
+
+```json
+{
+  "nodes": [
+    {
+      "node_id": "node-233",
+      "base_url": "http://19.16.1.233:6000",
+      "status": "ok",
+      "latency_ms": 12.4,
+      "data": {},
+      "error": null
+    }
+  ],
+  "generated_at": "2026-08-21T12:00:00+08:00"
+}
+```
+
+`status` 只有两个值：
+
+- `ok`：节点响应正常，`data` 是对应单节点接口返回。
+- `unreachable`：节点不可达，`data=null`，`error` 保存原因。
+
+`/api/monitor` 和 `/api/config` 顶层都包含 `node_id`，作为聚合展示和配置漂移判断的基础字段。
+
+## 前端监控
+
+前端不再保存 backend API 节点地址，也不再提供节点切换下拉。
+
+监控页读取：
+
+```text
+GET /api/nodes/monitor
+```
+
+页面按节点并列展示：
+
+- 节点 ID
+- 节点地址
+- 节点状态
+- 响应耗时
+- 当前 profile
+- Store / Dense / Sparse / Rerank / OCR / database 组件状态
+
+配置页读取：
+
+```text
+GET /api/nodes/config
+```
+
+页面按节点并列展示当前配置，并以第一个正常节点为基准做轻量配置漂移判断。漂移判断忽略 `node_id`，其余配置不同则标记为配置不一致。
+
+## 集中日志
+
+应用日志仍输出 JSONL 到 stdout，Docker 继续使用 `json-file` driver 做本地滚动保留。集中日志由 Promtail 采集 Docker stdout 并推送到 Loki。
+
+每个节点运行一个 Promtail：
+
+- 读取本机 Docker 容器日志。
+- 只采集带 `logging=loki` label 的容器。
+- 写入 Loki 时附带 `node_id`、`container`、`stream`、`level` label。
+
+Loki 只在主节点启用，其他节点的 Promtail 通过 `LOKI_URL` 推送到主节点 Loki。Loki 不可用只影响集中日志查询，不影响 RAG 检索、索引和本地 Docker 日志。
+
+日志页不再读取 backend 内存 ring buffer，也不再使用 SSE。日志页通过 Loki HTTP API 查询：
+
+```text
+GET /loki/query_range
+GET /loki/label/container/values
+```
+
+日志页支持按节点和容器过滤，前端用短周期轮询模拟 tail，浏览器内只保留最近一段日志用于展示。
+
+## 鉴权边界
+
+管理台仍使用 User JWT。节点聚合请求 fan-out 到 peer 节点时，原样透传调用方 `Authorization: Bearer ...`。
+
+Loki 不直接暴露给浏览器。Nginx 的 `/loki/*` 使用 `auth_request` 调用后端 `GET /api/config` 校验 JWT，校验通过后才反代到 Loki。
+
+上游业务接口仍使用 AK/SK 签名，路径保持 `/api/open/*`。多节点监控和 Loki 日志是管理台能力，不改变上游业务 API 契约。
+
+## 配置与数据目录
+
+仓库根 `.env` 是 Docker 部署的统一配置入口。
+
+主节点示例：
+
+```dotenv
+RAG_NODE_ID=node-233
+RAG_PEERS=http://19.16.1.233:6000,http://19.16.1.90:6000
+LOKI_URL=http://loki:3100
+COMPOSE_PROFILES=monitoring
+```
+
+次节点示例：
+
+```dotenv
+RAG_NODE_ID=node-90
+RAG_PEERS=http://19.16.1.233:6000,http://19.16.1.90:6000
+LOKI_URL=http://19.16.1.233:3100
+```
+
+新增数据目录：
+
+```text
+loki_data/
+```
+
+该目录保存 Loki 本地数据，不入 Git。
+
+## 运行约束
+
+前端只部署在统一入口节点。其他节点只需要运行 backend、Promtail 和对应的数据服务。
+
+节点拓扑由环境变量静态配置。新增或删除节点需要更新各节点 `.env` 中的 `RAG_PEERS`，然后重启 backend / nginx / promtail 相关服务。
+
+Loki 为单实例部署。主节点不可用时，集中日志查询不可用；各节点本地 Docker `json-file` 日志仍可通过宿主机查看。

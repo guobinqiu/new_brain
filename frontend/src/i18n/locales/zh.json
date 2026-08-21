@@ -70,6 +70,13 @@
     "noTraces": "暂无查询",
     "noAppSelected": "请先在应用列表中选择一个应用"
   },
+  "cluster": {
+    "desc": "所有后端节点运行状态",
+    "configDesc": "所有后端节点当前配置",
+    "allNodes": "全部节点",
+    "unreachable": "不可达",
+    "configDrift": "配置不一致"
+  },
   "status": {
     "ready": "就绪",
     "loading": "加载",
@@ -117,7 +124,7 @@
   },
   "logs": {
     "title": "日志",
-    "desc": "最近运行日志和实时输出",
+    "desc": "从 Loki 查询所有节点容器日志",
     "empty": "暂无日志",
     "columns": {
       "time": "时间",

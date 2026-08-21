@@ -1,9 +1,8 @@
 import os
-import asyncio
 import logging
 import threading
-import json
 import uuid
+from dataclasses import asdict
 from io import BytesIO
 from collections import deque
 from datetime import datetime, timedelta, timezone
@@ -14,7 +13,6 @@ from urllib.parse import urlparse
 
 from fastapi import Depends, FastAPI, Header, Request, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
 from minio import Minio
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from app_registry import AppRegistry
@@ -24,7 +22,7 @@ from indexing import create_file_id, enqueue_index_job, index_file, index_presig
 from indexing.consumer import InlineIndexConsumer
 from indexing.queue import IndexQueueRejected
 from indexing.service import SUPPORTED_FILE_EXTENSIONS, filename_from_s3_url, parse_s3_url, validate_supported_file_extension
-from log_buffer import logs_after, recent_logs
+from nodes import fetch_peers, local_result, node_id, parse_peers
 from search import SearchPlan, _SearchExecutor
 from collection_names import validate_app_id
 from config import SEARCH_CONFIG
@@ -261,7 +259,21 @@ def delete_app_database(app_id: str, _: Principal = Depends(require_jwt)):
 
 @app.get("/api/config")
 def get_config(_: Principal = Depends(require_jwt)):
+    return _config_payload()
+
+
+@app.get("/api/nodes/config")
+async def nodes_config(authorization: str | None = Header(None), _: Principal = Depends(require_jwt)):
+    peers = parse_peers(os.getenv("RAG_PEERS"))
+    if not peers:
+        return {"nodes": [asdict(local_result(_config_payload()))], "generated_at": _now_iso()}
+    rows = await fetch_peers(peers, "/api/config", authorization)
+    return {"nodes": [asdict(row) for row in rows], "generated_at": _now_iso()}
+
+
+def _config_payload() -> dict[str, Any]:
     cfg = dict(SEARCH_CONFIG)
+    cfg["node_id"] = node_id()
     cfg["config_name"] = application.config_name
     cfg["store"] = _store_config()
     cfg["dense"] = _component_config(application.config.dense)
@@ -273,7 +285,21 @@ def get_config(_: Principal = Depends(require_jwt)):
 
 @app.get("/api/monitor")
 def monitor(_: Principal = Depends(require_jwt)):
+    return _monitor_payload()
+
+
+@app.get("/api/nodes/monitor")
+async def nodes_monitor(authorization: str | None = Header(None), _: Principal = Depends(require_jwt)):
+    peers = parse_peers(os.getenv("RAG_PEERS"))
+    if not peers:
+        return {"nodes": [asdict(local_result(_monitor_payload()))], "generated_at": _now_iso()}
+    rows = await fetch_peers(peers, "/api/monitor", authorization)
+    return {"nodes": [asdict(row) for row in rows], "generated_at": _now_iso()}
+
+
+def _monitor_payload() -> dict[str, Any]:
     return {
+        "node_id": node_id(),
         "ready": application.ready,
         "profile": _profile(),
         "components": _components(),
@@ -288,22 +314,6 @@ def traces(limit: int = 50, app_id: str | None = None, principal: Principal = De
         return _recent_search_traces(limit=limit, app_id=_app_filter(principal, app_id))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
-@app.get("/api/logs/stream")
-async def logs_stream(request: Request, _: Principal = Depends(require_jwt)):
-    async def stream():
-        initial_events, last_seq = _initial_log_events()
-        for event in initial_events:
-            yield event
-        while not await request.is_disconnected():
-            await asyncio.sleep(1)
-            rows = logs_after(last_seq)
-            for row in rows:
-                last_seq = max(last_seq, row["seq"])
-                yield _sse(row)
-
-    return StreamingResponse(stream(), media_type="text/event-stream")
 
 
 def index_chunks(
@@ -929,19 +939,6 @@ def _recent_search_traces(limit: int = 50, app_id: str | None = None) -> dict[st
     return {"traces": rows[:limit]}
 
 
-def _initial_log_events(limit: int = 200) -> tuple[list[str], int]:
-    last_seq = 0
-    events = []
-    for row in recent_logs(limit):
-        last_seq = max(last_seq, row["seq"])
-        events.append(_sse(row))
-    return events, last_seq
-
-
-def _sse(row: dict[str, Any]) -> str:
-    return f"data: {json.dumps(row, ensure_ascii=False, default=str)}\n\n"
-
-
 def _iso_datetime(value) -> str | None:
     if value is None:
         return None
@@ -950,3 +947,7 @@ def _iso_datetime(value) -> str | None:
     if value.tzinfo is None:
         value = value.replace(tzinfo=timezone.utc)
     return value.astimezone().isoformat(timespec="seconds")
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
