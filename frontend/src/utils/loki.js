@@ -45,6 +45,7 @@ export function formatLogLine(row) {
   if (!parsed) return row.line
   const pieces = [
     parsed.time || row.time || '',
+    row.container || '',
     parsed.level || '',
     parsed.logger || '',
     parsed.event || '',

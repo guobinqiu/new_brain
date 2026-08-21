@@ -15,7 +15,7 @@ def test_loki_parse_logs_returns_rows_in_time_order():
     from loki_client import parse_logs
 
     rows = parse_logs([
-        {"values": [
+        {"stream": {"node_id": "node-1", "container": "rag-backend"}, "values": [
             ["2000000000", '{"level":"INFO","message":"second"}'],
             ["1000000000", "plain"],
         ]},
@@ -23,6 +23,8 @@ def test_loki_parse_logs_returns_rows_in_time_order():
 
     assert [row["line"] for row in rows] == ["plain", '{"level":"INFO","message":"second"}']
     assert rows[0]["parsed"] is None
+    assert rows[0]["node_id"] == "node-1"
+    assert rows[0]["container"] == "rag-backend"
     assert rows[1]["parsed"]["message"] == "second"
 
 

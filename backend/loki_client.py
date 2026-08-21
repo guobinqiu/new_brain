@@ -82,10 +82,13 @@ def trace_query(container: str = "rag-backend", app_id: str | None = None) -> st
 def parse_logs(streams: list[dict[str, Any]]) -> list[dict[str, Any]]:
     rows = []
     for stream in streams:
+        labels = stream.get("stream") or {}
         for ts, line in stream.get("values") or []:
             rows.append({
                 "ts": ts,
                 "time": _format_timestamp(ts),
+                "node_id": labels.get("node_id"),
+                "container": labels.get("container"),
                 "line": line,
                 "parsed": _parse_json(line),
             })
