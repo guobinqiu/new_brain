@@ -288,7 +288,7 @@ def start(self):
 
 每个 open 端点都是对应内部端点的薄别名：路由函数只替换认证依赖（`require_jwt` vs `require_aksk`），业务逻辑收敛在同一个实现函数里，两边行为一致。
 
-对外面收敛：只暴露索引、搜索、删除共 4 个业务端点；管理面（apps、monitor、traces、config、upload、presign、files 列表等）不对外。
+对外面收敛：只暴露索引、搜索、删除共 4 个业务端点；管理面（apps、monitor、config、upload、presign、files 列表等）不对外。
 
 上游系统有自己的对象存储时，只需要调用 `POST /api/open/index/jobs`，自己生成 `presigned_url` 传入。管理台前端的本地上传链路是 upload → presign → index/jobs 三步；presign 让内部上传的文件也走统一的 `presigned_url` 契约。
 
@@ -303,7 +303,7 @@ def start(self):
 | 上传                                  | `POST /api/upload`                                                | ——（内部专用）                     |                        |
 | 生成下载签名                          | `POST /api/presign`                                               | ——（内部专用）                     |                        |
 | 文件列表                              | `GET /api/files`                                                  | ——（内部专用）                     |                        |
-| 向量数据 / 应用 / 监控 / 追踪等管理面 | `POST /api/chunks`、`/api/apps`、`/api/monitor`、`/api/traces` 等 | ——（不对外）                       |                        |
+| 向量数据 / 应用 / 监控等管理面       | `POST /api/chunks`、`/api/apps`、`/api/monitor` 等                | ——（不对外）                       |                        |
 
 两处不对称需要说明：
 
@@ -831,12 +831,12 @@ logging:
 
 ```json
 {"logger":"rag.app","event":"startup_ready","message":"Startup model preload done"}
-{"logger":"rag.trace","event":"search_trace","query":"查询内容","mode":"hybrid","elapsed_ms":123.4}
+{"logger":"rag.trace","event":"search_trace","app_id":"app_a","query":"查询内容","mode":"hybrid","elapsed_ms":123.4}
 ```
 
 `rag.app` 记录启动、关闭、模型加载、OCR 加载、上传、删除、异常等应用事件。`rag.trace` 记录一次搜索的链路信息，包括查询参数、总耗时、结果数量和阶段耗时。`search_trace: false` 时不输出搜索链路日志。
 
-后端同时维护一份内存日志 ring buffer，保存最近运行日志。SSE 日志流在连接建立后先输出最近日志，再持续输出实时运行日志。运行日志和搜索 trace 共享 JSONL 日志格式，但读取入口不同。
+运行日志和搜索 trace 都通过 JSONL 输出，由 Promtail 采集到 Loki。
 
 Docker 模式下，应用仍输出 JSONL 到 stdout。Docker Compose 使用 `json-file` driver 按大小滚动容器日志，避免日志无限增长。
 
@@ -1015,14 +1015,14 @@ GET /api/nodes/config
 
 Loki 只在主节点启用，其他节点的 Promtail 通过 `LOKI_URL` 推送到主节点 Loki。Loki 不可用只影响集中日志查询，不影响 RAG 检索、索引和本地 Docker 日志。
 
-日志页不再读取 backend 内存 ring buffer，也不再使用 SSE。日志页通过 Loki HTTP API 查询：
+日志页和链路页通过 Loki HTTP API 查询：
 
 ```text
 GET /loki/query_range
 GET /loki/label/container/values
 ```
 
-日志页支持按节点和容器过滤，前端用短周期轮询模拟 tail，浏览器内只保留最近一段日志用于展示。
+日志页支持按节点和容器过滤。链路页查询 `rag.trace` 的 `search_trace` 结构化日志，按当前 app 过滤并展示各阶段耗时。
 
 ## 鉴权边界
 

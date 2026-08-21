@@ -79,29 +79,3 @@ class TestMonitorAPI:
         assert monitor["capabilities"]["search_modes"] == ["dense", "sparse", "hybrid"]
         assert monitor["capabilities"]["config_write"] is False
         assert monitor["capabilities"]["restart"] is False
-
-    def test_traces_returns_search_trace_list_after_search(self, app_api_client, api_client, test_txt_path, monkeypatch):
-        """``GET /api/traces`` exposes recent search traces for diagnostics."""
-        from tests.e2e.test_search_api import _index_ready_file
-
-        file_id = _index_ready_file(app_api_client, test_txt_path, monkeypatch)
-        app_api_client.post(
-            "/api/open/search",
-            json={"query": "人工智能", "mode": "hybrid", "top_k": 5, "file_ids": [file_id]},
-        )
-
-        resp = api_client.get("/api/traces", params={"app_id": app_api_client.app_id})
-
-        assert resp.status_code == 200
-        traces = resp.json()["traces"]
-        assert len(traces) >= 1
-        trace = traces[0]
-        assert trace["trace_id"]
-        assert trace["name"] == "search"
-        assert trace["query"] == "人工智能"
-        assert trace["elapsed_ms"] >= 0
-        assert trace["result_count"] >= 0
-        stage_names = {stage["name"] for stage in trace["stages"]}
-        assert "prepare_plan" in stage_names
-        assert "dedupe" in stage_names
-        assert "format_response" in stage_names

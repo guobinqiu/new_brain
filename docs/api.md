@@ -456,21 +456,13 @@ GET /api/monitor
 
 `/api/monitor` 是轻量状态接口，不读取向量 chunk，不统计文件数或 chunk 数。
 
-### 搜索 Trace
-
-```http
-GET /api/traces?limit=200
-```
-
-返回最近搜索请求的链路耗时。后端只保留最近 200 条内存 trace，接口不用于长期历史查询。
-
-### 运行日志
+### 运行日志与搜索 Trace
 
 ```http
 GET /loki/query_range
 ```
 
-运行日志由 Loki 查询，管理台经 Nginx `/loki/*` 反代访问。Nginx 使用现有 User JWT 做鉴权，日志不再由 backend 内存 ring buffer 输出。
+运行日志和搜索 Trace 都由 Loki 查询，管理台经 Nginx `/loki/*` 反代访问。Nginx 使用现有 User JWT 做鉴权。
 
 ### 上传文件列表
 

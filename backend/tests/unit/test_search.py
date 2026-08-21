@@ -161,6 +161,7 @@ def test_executor_invokes_runnable_with_file_id_langsmith_metadata(monkeypatch):
     assert "mode:hybrid" in captured["config"]["tags"]
     assert captured["config"]["metadata"] == {
         "query": "query",
+        "app_id": None,
         "mode": "hybrid",
         "top_k": 3,
         "rerank": True,
@@ -192,7 +193,7 @@ def test_executor_logs_search_trace_with_file_ids_when_enabled(monkeypatch):
             return [{"content": "answer", "metadata": {}}]
 
     executor = search_mod._SearchExecutor(
-        search_mod.SearchPlan("query", mode="dense", top_k=1, file_ids=["file_a"]),
+        search_mod.SearchPlan("query", app_id="imsdom", mode="dense", top_k=1, file_ids=["file_a"]),
         store=FakeStore(),
         search_trace=True,
     )
@@ -209,6 +210,7 @@ def test_executor_logs_search_trace_with_file_ids_when_enabled(monkeypatch):
     assert row["logger"] == "rag.trace"
     assert row["event"] == "search_trace"
     assert row["query"] == "query"
+    assert row["app_id"] == "imsdom"
     assert row["mode"] == "dense"
     assert row["file_ids"] == ["file_a"]
 

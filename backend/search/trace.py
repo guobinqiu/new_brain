@@ -40,6 +40,7 @@ class SearchTrace:
             "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
             "name": "search",
             "query": plan.query,
+            "app_id": plan.app_id,
             "mode": plan.mode,
             "top_k": plan.top_k,
             "rerank": plan.rerank,

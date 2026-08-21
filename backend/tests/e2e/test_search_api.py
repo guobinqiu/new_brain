@@ -130,7 +130,7 @@ class TestSearchAPI:
                 assert key in result
             assert result["metadata"]["file_id"] == file_id
 
-    def test_search_returns_elapsed_ms(self, app_api_client, api_client, test_txt_path, monkeypatch):
+    def test_search_returns_elapsed_ms(self, app_api_client, test_txt_path, monkeypatch):
         """``POST /api/open/search`` response includes an ``elapsed_ms`` field."""
         file_id = _index_ready_file(app_api_client, test_txt_path, monkeypatch)
 
@@ -140,8 +140,6 @@ class TestSearchAPI:
         assert "elapsed_ms" in data
         assert isinstance(data["elapsed_ms"], (int, float))
         assert data["elapsed_ms"] >= 0
-        traces = api_client.get("/api/traces", params={"app_id": app_api_client.app_id}).json()
-        assert data["elapsed_ms"] == traces["traces"][0]["elapsed_ms"]
 
     def test_search_response_does_not_include_trace(self, app_api_client, test_txt_path, monkeypatch):
         """``POST /api/open/search`` is a public API and does not expose diagnostics."""

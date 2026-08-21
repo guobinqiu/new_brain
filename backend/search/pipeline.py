@@ -88,6 +88,7 @@ class _SearchRetriever(BaseRetriever):
 @dataclass(frozen=True)
 class SearchPlan:
     query: str
+    app_id: str | None = None
     mode: str = "hybrid"
     top_k: int = 5
     rerank: bool = False
@@ -143,6 +144,7 @@ class _SearchExecutor:
             ],
             "metadata": {
                 "query": self.plan.query,
+                "app_id": self.plan.app_id,
                 "mode": self.plan.mode,
                 "top_k": self.plan.top_k,
                 "rerank": self.plan.rerank,

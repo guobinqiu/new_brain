@@ -4,7 +4,6 @@ import threading
 import uuid
 from dataclasses import asdict
 from io import BytesIO
-from collections import deque
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from contextlib import asynccontextmanager, nullcontext
@@ -113,9 +112,6 @@ class ChunksQueryRequest(BaseModel):
 application = Application()
 STARTUP_IN_BACKGROUND = True
 STARTUP_RETRY_MAX_INTERVAL_SECONDS = 30
-SEARCH_TRACE_LIMIT = 200
-_search_traces = deque(maxlen=SEARCH_TRACE_LIMIT)
-_search_traces_lock = threading.Lock()
 _index_consumer: InlineIndexConsumer | None = None
 
 
@@ -308,14 +304,6 @@ def _monitor_payload() -> dict[str, Any]:
     }
 
 
-@app.get("/api/traces")
-def traces(limit: int = 50, app_id: str | None = None, principal: Principal = Depends(require_jwt)):
-    try:
-        return _recent_search_traces(limit=limit, app_id=_app_filter(principal, app_id))
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-
 def index_chunks(
     path: str,
     filename: str,
@@ -488,6 +476,7 @@ def _search(req: SearchRequest, principal: Principal):
     effective_rerank = bool(req.rerank and application.rerank is not None)
     plan = SearchPlan(
         req.query,
+        app_id=search_principal.app_id,
         mode=req.mode,
         top_k=req.top_k,
         rerank=effective_rerank,
@@ -505,7 +494,6 @@ def _search(req: SearchRequest, principal: Principal):
         search_trace=application.config.logging.search_trace,
     )
     results = executor.execute()
-    _append_search_trace(executor.trace.result, app_id=search_principal.app_id)
     elapsed_ms = executor.trace.result["elapsed_ms"] if executor.trace.result else 0
     return {
         "results": results,
@@ -918,25 +906,6 @@ def _upload_file_to_storage(app_id: str, file_id: str, filename: str, content: b
         content_type=content_type,
     )
     return f"s3://{bucket}/{object_name}"
-
-
-def _append_search_trace(trace: dict[str, Any] | None, app_id: str) -> None:
-    if trace is None:
-        return
-    trace = {**trace, "app_id": app_id}
-    with _search_traces_lock:
-        _search_traces.appendleft(trace)
-
-
-def _recent_search_traces(limit: int = 50, app_id: str | None = None) -> dict[str, Any]:
-    if limit <= 0:
-        raise ValueError("limit must be greater than 0")
-    limit = min(limit, 200)
-    with _search_traces_lock:
-        rows = list(_search_traces)
-    if app_id:
-        rows = [row for row in rows if row.get("app_id") == app_id]
-    return {"traces": rows[:limit]}
 
 
 def _iso_datetime(value) -> str | None:

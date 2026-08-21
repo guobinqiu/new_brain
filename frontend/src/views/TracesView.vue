@@ -63,8 +63,8 @@ import axios from '../utils/api'
 import { ms, shortTime } from '../utils/format'
 import { useActiveAppStore } from '../stores/activeApp'
 
-const API = '/api'
 const TRACE_LIMIT = 200
+const TRACE_WINDOW_MS = 24 * 60 * 60 * 1000
 const { t } = useI18n()
 
 const activeAppStore = useActiveAppStore()
@@ -90,12 +90,48 @@ async function fetchTraces() {
   if (tracesLoading.value) return
   tracesLoading.value = true
   try {
-    const params = { limit: TRACE_LIMIT }
-    if (appId.value) params.app_id = appId.value
-    const res = await axios.get(`${API}/traces`, { params })
-    traces.value = res.data.traces || []
+    const res = await axios.get('/loki/query_range', {
+      params: {
+        query: '{container="rag-backend"} |= "search_trace"',
+        start: (BigInt(Date.now() - TRACE_WINDOW_MS) * 1000000n).toString(),
+        end: (BigInt(Date.now()) * 1000000n).toString(),
+        limit: TRACE_LIMIT,
+        direction: 'backward',
+      },
+    })
+    traces.value = parseTraceStreams(res.data?.data?.result || [])
   } catch (err) { console.error(err) }
   finally { tracesLoading.value = false }
+}
+
+function parseTraceStreams(streams) {
+  const rows = []
+  for (const stream of streams) {
+    for (const [ts, line] of stream.values || []) {
+      const parsed = parseJson(line)
+      if (!parsed || parsed.event !== 'search_trace') continue
+      if (appId.value && parsed.app_id !== appId.value) continue
+      rows.push({
+        ...parsed,
+        ts,
+        name: parsed.trace_name || parsed.name,
+      })
+    }
+  }
+  return rows.sort((a, b) => {
+    const left = BigInt(a.ts)
+    const right = BigInt(b.ts)
+    if (left === right) return 0
+    return left < right ? 1 : -1
+  }).slice(0, TRACE_LIMIT)
+}
+
+function parseJson(line) {
+  try {
+    return JSON.parse(line)
+  } catch {
+    return null
+  }
 }
 
 onMounted(() => {

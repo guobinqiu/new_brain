@@ -196,23 +196,6 @@ def test_admin_index_job_requires_file_id():
         )
 
 
-def test_recent_search_traces_returns_recent_rows(monkeypatch):
-    import main
-
-    main._search_traces.clear()
-    main._search_traces.extend(
-        [
-            {"trace_id": "trace-1"},
-            {"trace_id": "trace-2"},
-            {"trace_id": "trace-3"},
-        ]
-    )
-
-    page = main._recent_search_traces(limit=2)
-
-    assert page == {"traces": [{"trace_id": "trace-1"}, {"trace_id": "trace-2"}]}
-
-
 def test_generated_file_id_is_standard_uuid():
     from indexing.service import create_file_id
 
