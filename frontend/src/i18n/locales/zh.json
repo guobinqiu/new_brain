@@ -125,6 +125,7 @@
   "logs": {
     "title": "日志",
     "desc": "所有节点容器日志",
+    "allContainers": "全部服务",
     "empty": "暂无日志",
     "columns": {
       "time": "时间",

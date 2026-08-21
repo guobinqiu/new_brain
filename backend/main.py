@@ -299,7 +299,7 @@ async def nodes_monitor(authorization: str | None = Header(None), _: Principal =
 @app.get("/api/logs")
 async def logs(
     node_id: str | None = None,
-    container: str | None = "rag-backend",
+    container: str | None = None,
     start: str | None = None,
     end: str | None = None,
     limit: int = 500,
@@ -323,7 +323,7 @@ async def logs(
 async def logs_stream(
     token: str,
     node_id: str | None = None,
-    container: str | None = "rag-backend",
+    container: str | None = None,
 ):
     principal_from_authorization(application.config.auth, f"Bearer {token}")
 

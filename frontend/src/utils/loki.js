@@ -8,7 +8,7 @@ export const logs = ref([])
 export const logsBox = ref(null)
 
 let source = null
-let currentFilter = { nodeId: '', container: 'rag-backend' }
+let currentFilter = { nodeId: '', container: '' }
 
 export async function fetchLabelValues(label) {
   const res = await axios.get(`/api/logs/labels/${label}`)
@@ -19,7 +19,7 @@ export async function startLogsTail(filter = {}) {
   stopLogsTail()
   currentFilter = {
     nodeId: filter.nodeId || '',
-    container: filter.container || 'rag-backend',
+    container: filter.container || '',
   }
   logs.value = []
   const token = useAuthStore().authToken

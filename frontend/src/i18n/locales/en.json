@@ -125,6 +125,7 @@
   "logs": {
     "title": "Logs",
     "desc": "Container logs from all nodes",
+    "allContainers": "All services",
     "empty": "No logs yet",
     "columns": {
       "time": "Time",
