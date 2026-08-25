@@ -131,16 +131,8 @@ main() {
     return
   fi
 
-  if [[ ! -x "$ROOT_DIR/backend/.venv/bin/modelscope" ]]; then
-    echo "ModelScope CLI not found: $ROOT_DIR/backend/.venv/bin/modelscope" >&2
-    echo "Install backend dependencies first." >&2
-    exit 1
-  fi
-  if [[ ! -x "$ROOT_DIR/backend/.venv/bin/mineru-models-download" ]]; then
-    echo "MinerU model downloader not found: $ROOT_DIR/backend/.venv/bin/mineru-models-download" >&2
-    echo "Install backend dependencies first." >&2
-    exit 1
-  fi
+  echo "安装模型下载工具"
+  (cd "$ROOT_DIR/backend" && uv pip install modelscope "mineru[core]")
 
   mkdir -p "$MODELS_DIR"
   echo "模型目录: $MODELS_DIR"
