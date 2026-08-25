@@ -133,7 +133,7 @@ main() {
 
   echo "安装模型下载工具"
   curl -LsSf https://astral.sh/uv/install.sh | sh && source "$HOME/.local/bin/env"
-  (cd "$ROOT_DIR/backend" && uv pip install modelscope "mineru[core]")
+  (cd "$ROOT_DIR/backend" && uv venv .venv && uv pip install modelscope "mineru[core]")
 
   mkdir -p "$MODELS_DIR"
   echo "模型目录: $MODELS_DIR"
