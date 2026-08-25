@@ -11,9 +11,18 @@ from schema import ParserConfig
 
 
 @dataclass
-class _Block:
-    type: str
+class TextBlock:
     text: str
+
+
+@dataclass
+class TableBlock:
+    text: str
+    before: str = ""
+    after: str = ""
+
+
+Block = TextBlock | TableBlock
 
 
 def read_table_chunks(output_dir: Path, parser_config: ParserConfig) -> list[str]:
@@ -39,6 +48,10 @@ def html_table_to_rows(html: str) -> list[list[str]]:
 
 def table_html_to_chunks(html: str, parser_config: ParserConfig, title: str = "") -> list[str]:
     return _table_rows_to_chunks(title, html_table_to_rows(html), parser_config)
+
+
+def table_html_to_blocks(html: str, parser_config: ParserConfig, title: str = "") -> list[Block]:
+    return _table_rows_to_blocks(title, html_table_to_rows(html), parser_config)
 
 
 def strip_html_tags(text: str) -> str:
@@ -73,10 +86,10 @@ def _content_list_to_chunks(data, parser_config: ParserConfig) -> list[str]:
         if not isinstance(item, dict):
             continue
         blocks.extend(_content_item_to_blocks(item, parser_config))
-    return _blocks_to_chunks(blocks, parser_config)
+    return blocks_to_chunks(blocks, parser_config)
 
 
-def _content_item_to_blocks(item: dict, parser_config: ParserConfig) -> list[_Block]:
+def _content_item_to_blocks(item: dict, parser_config: ParserConfig) -> list[Block]:
     item_type = item.get("type")
     if item_type == "table":
         return _table_item_to_blocks(item, _text_value(item.get("table_caption")), parser_config)
@@ -87,21 +100,21 @@ def _content_item_to_blocks(item: dict, parser_config: ParserConfig) -> list[_Bl
     text = clean_table_text(text)
     if not text:
         return []
-    return [_Block("text", text)]
+    return [TextBlock(text)]
 
 
-def _blocks_to_chunks(blocks: list[_Block], parser_config: ParserConfig) -> list[str]:
+def blocks_to_chunks(blocks: list[Block], parser_config: ParserConfig) -> list[str]:
     chunks = []
     text_blocks = []
     for index, block in enumerate(blocks):
-        if block.type != "table":
+        if isinstance(block, TextBlock):
             text_blocks.append(block.text)
             continue
         chunks.extend(_text_blocks_to_chunks(text_blocks, parser_config))
         text_blocks = []
-        before = _limit_text(blocks[index - 1].text, parser_config.table.before_text_size, head=False) if index > 0 and blocks[index - 1].type == "text" else ""
-        after = _limit_text(blocks[index + 1].text, parser_config.table.after_text_size, head=True) if index + 1 < len(blocks) and blocks[index + 1].type == "text" else ""
-        chunks.append(_table_chunk_with_context(block.text, before, after))
+        block.before = _limit_text(blocks[index - 1].text, parser_config.table.before_text_size, head=False) if index > 0 and isinstance(blocks[index - 1], TextBlock) else ""
+        block.after = _limit_text(blocks[index + 1].text, parser_config.table.after_text_size, head=True) if index + 1 < len(blocks) and isinstance(blocks[index + 1], TextBlock) else ""
+        chunks.append(_table_chunk_with_context(block.text, block.before, block.after))
     chunks.extend(_text_blocks_to_chunks(text_blocks, parser_config))
     return chunks
 
@@ -123,7 +136,7 @@ def _table_chunk_with_context(content: str, before: str, after: str) -> str:
     return "\n\n".join(parts)
 
 
-def _table_item_to_blocks(item: dict, caption: str, parser_config: ParserConfig) -> list[_Block]:
+def _table_item_to_blocks(item: dict, caption: str, parser_config: ParserConfig) -> list[Block]:
     table_body = item.get("table_body") or item.get("html")
     if isinstance(table_body, str) and table_body.strip():
         return _table_rows_to_blocks(caption, html_table_to_rows(table_body), parser_config)
@@ -138,10 +151,10 @@ def _table_item_to_blocks(item: dict, caption: str, parser_config: ParserConfig)
 
 
 def _table_rows_to_chunks(title: str, rows: list[list[str]], parser_config: ParserConfig) -> list[str]:
-    return _blocks_to_chunks(_table_rows_to_blocks(title, rows, parser_config), parser_config)
+    return blocks_to_chunks(_table_rows_to_blocks(title, rows, parser_config), parser_config)
 
 
-def _table_rows_to_blocks(title: str, rows: list[list[str]], parser_config: ParserConfig) -> list[_Block]:
+def _table_rows_to_blocks(title: str, rows: list[list[str]], parser_config: ParserConfig) -> list[Block]:
     if not rows:
         return []
     blocks = []
@@ -149,12 +162,12 @@ def _table_rows_to_blocks(title: str, rows: list[list[str]], parser_config: Pars
         if block_type == "text":
             text = clean_table_text(logical_title).strip()
             if text:
-                blocks.append(_Block("text", text))
+                blocks.append(TextBlock(text))
             continue
         for chunk in split_table(logical_title, header, body, parser_config.table.chunk_size):
             content = clean_table_text(chunk["content"]).strip()
             if content:
-                blocks.append(_Block("table", content))
+                blocks.append(TableBlock(content))
     return blocks
 
 
