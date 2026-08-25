@@ -7,10 +7,7 @@ Native 方式只把后端和前端跑在宿主机上，默认仍使用 Docker �
 准备模型：
 
 ```bash
-cd backend
-uv sync --extra cpu
-cd ..
-just models dense rapidocr mineru
+just models all
 ```
 
 1. 启动 Qdrant、MinIO 和 PostgreSQL：
