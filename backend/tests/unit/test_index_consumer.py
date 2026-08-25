@@ -6,7 +6,7 @@ import time
 
 import pytest
 
-import indexing.consumer as consumer_mod
+import index.consumer as consumer_mod
 from collection_names import collection_name_for_app, current_collection
 
 

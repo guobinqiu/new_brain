@@ -17,7 +17,7 @@
           <el-table-column label="access_key" min-width="260" show-overflow-tooltip>
             <template #default="{ row }">
               <div class="copy-cell">
-                <span class="chunk-id" :title="row.access_key">{{ row.access_key }}</span>
+                <span class="chunk-id">{{ row.access_key }}</span>
                 <el-button size="small" @click="copyText(row.access_key)">{{ t('common.copy') }}</el-button>
               </div>
             </template>
@@ -25,7 +25,7 @@
           <el-table-column label="secret_key" min-width="260" show-overflow-tooltip>
             <template #default="{ row }">
               <div class="copy-cell">
-                <span class="chunk-id" :title="row.secret_key">{{ row.secret_key }}</span>
+                <span class="chunk-id">{{ row.secret_key }}</span>
                 <el-button size="small" @click="copyText(row.secret_key)">{{ t('common.copy') }}</el-button>
               </div>
             </template>

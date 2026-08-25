@@ -14,6 +14,8 @@ class TestConfigAPI:
         for key in ("default_mode", "top_k", "rerank", "rerank_available", "fetch_k", "dense_weight", "sparse_weight", "rrf_k"):
             assert key in cfg
         assert cfg["sparse"]["name"] == "bm25"
+        assert {"name": "fast", "available": True} in cfg["parser"]["available"]
+        assert any(item["name"] == "standard" and isinstance(item["available"], bool) for item in cfg["parser"]["available"])
 
     def test_get_config_includes_components(self, api_client):
         """``GET /api/config`` returns the active component profile."""
@@ -74,6 +76,7 @@ class TestMonitorAPI:
         assert components["Rerank"]["status"] in {"disabled", "ready"}
         assert components["OCR"]["status"] == "ready"
         assert components["OCR"]["model"] == "rapidocr"
+        assert components["Parser"]["status"] in {"ready", "disabled"}
         assert "database" in components
         assert all(component["status"] in {"ready", "loading", "disabled", "error"} for component in components.values())
         assert monitor["capabilities"]["search_modes"] == ["dense", "sparse", "hybrid"]

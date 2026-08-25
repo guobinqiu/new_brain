@@ -55,6 +55,15 @@ search:
   dense_weight: 0.7
   sparse_weight: 0.3
   rrf_k: 80
+parser:
+  type: standard
+  text:
+    chunk_size: 500
+    chunk_overlap: 80
+  table:
+    chunk_size: 1000
+    before_text_size: 160
+    after_text_size: 160
 logging:
   level: DEBUG
   file: logs/test-rag.jsonl
@@ -80,6 +89,12 @@ ocr: test_ocr
     assert config.search.top_k == 12
     assert config.search.fetch_k == 48
     assert config.search.dense_weight == 0.7
+    assert config.parser.type == "standard"
+    assert config.parser.text.chunk_size == 500
+    assert config.parser.text.chunk_overlap == 80
+    assert config.parser.table.chunk_size == 1000
+    assert config.parser.table.before_text_size == 160
+    assert config.parser.table.after_text_size == 160
     assert config.logging.level == "DEBUG"
     assert config.logging.file == "logs/test-rag.jsonl"
     assert config.logging.max_bytes == 2048

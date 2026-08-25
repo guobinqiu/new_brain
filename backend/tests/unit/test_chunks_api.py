@@ -1,8 +1,9 @@
-from main import ChunksQueryRequest
+from api.runtime import runtime
+from api.services import files as service
+from api.schemas import ChunksQueryRequest
 
 
 def test_chunks_filters_by_file_ids(monkeypatch):
-    import main
     from auth import Principal
 
     class Store:
@@ -22,16 +23,15 @@ def test_chunks_filters_by_file_ids(monkeypatch):
                 "has_more": False,
             }
 
-    monkeypatch.setattr(main.application, "store", Store())
-    monkeypatch.setattr(main.application, "ready", True)
+    monkeypatch.setattr(runtime.application, "store", Store())
+    monkeypatch.setattr(runtime.application, "ready", True)
 
-    page = main.chunks(ChunksQueryRequest(limit=10, file_ids=["file-a", "file-b"]), principal=Principal(type="app", app_id="tenant_filter"))
+    page = service.chunks(ChunksQueryRequest(limit=10, file_ids=["file-a", "file-b"]), principal=Principal(type="app", app_id="tenant_filter"))
 
     assert page["chunks"][0]["file_id"] == "file-a"
 
 
 def test_admin_chunks_can_select_app_collection(monkeypatch):
-    import main
     from auth import Principal
 
     calls = []
@@ -64,10 +64,10 @@ def test_admin_chunks_can_select_app_collection(monkeypatch):
                 "has_more": False,
             }
 
-    monkeypatch.setattr(main.application, "store", Store())
-    monkeypatch.setattr(main.application, "ready", True)
+    monkeypatch.setattr(runtime.application, "store", Store())
+    monkeypatch.setattr(runtime.application, "ready", True)
 
-    page = main.chunks(ChunksQueryRequest(limit=10, app_id="tenant_a"), principal=Principal(type="admin", app_id="imsdom"))
+    page = service.chunks(ChunksQueryRequest(limit=10, app_id="tenant_a"), principal=Principal(type="admin", app_id="imsdom"))
 
     assert page["chunks"][0]["file_id"] == "file-a"
     assert calls == [
@@ -80,7 +80,6 @@ def test_admin_chunks_can_select_app_collection(monkeypatch):
 
 
 def test_chunks_query_accepts_file_ids_in_body(monkeypatch):
-    import main
     from auth import Principal
 
     class Store:
@@ -98,15 +97,14 @@ def test_chunks_query_accepts_file_ids_in_body(monkeypatch):
                 "has_more": False,
             }
 
-    monkeypatch.setattr(main.application, "store", Store())
-    monkeypatch.setattr(main.application, "ready", True)
+    monkeypatch.setattr(runtime.application, "store", Store())
+    monkeypatch.setattr(runtime.application, "ready", True)
 
-    page = main.chunks(main.ChunksQueryRequest(file_ids=["file-a", "file-b"]), principal=Principal(type="admin", app_id="imsdom"))
+    page = service.chunks(ChunksQueryRequest(file_ids=["file-a", "file-b"]), principal=Principal(type="admin", app_id="imsdom"))
 
     assert page["chunks"][0]["file_id"] == "file-a"
 
 def test_chunks_returns_file_id_without_transform(monkeypatch):
-    import main
     from auth import Principal
 
     class Store:
@@ -123,10 +121,10 @@ def test_chunks_returns_file_id_without_transform(monkeypatch):
                 "has_more": False,
             }
 
-    monkeypatch.setattr(main.application, "store", Store())
-    monkeypatch.setattr(main.application, "ready", True)
+    monkeypatch.setattr(runtime.application, "store", Store())
+    monkeypatch.setattr(runtime.application, "ready", True)
 
-    page = main.chunks(main.ChunksQueryRequest(), principal=Principal(type="admin", app_id="imsdom"))
+    page = service.chunks(ChunksQueryRequest(), principal=Principal(type="admin", app_id="imsdom"))
 
     assert page["chunks"][0]["file_id"] == "file-a"
     assert page["chunks"][0]["created_at"] == "2026-08-17T10:00:00+08:00"

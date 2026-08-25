@@ -7,25 +7,10 @@ from datetime import timedelta
 pytestmark = pytest.mark.unit
 
 
-def test_index_chunks_returns_file_id_after_sync_index(monkeypatch, tmp_path):
-    import main
-
-    indexed = []
-    monkeypatch.setattr(main, "_require_ready", lambda: None)
-    monkeypatch.setattr(main, "create_file_id", lambda: "abc123")
-    monkeypatch.setattr(main, "index_file", lambda application, file_id, path, filename, extra_metadata=None: indexed.append((application, file_id, path, filename, extra_metadata)) or 3)
-
-    path = tmp_path / "faq.txt"
-    path.write_text("content", encoding="utf-8")
-
-    result = main.index_chunks(str(path), filename="faq.txt")
-
-    assert result == {"file_id": "abc123"}
-    assert indexed == [(main.application, "abc123", path, "faq.txt", None)]
-
-
 def test_index_object_indexes_presigned_object_synchronously(monkeypatch):
-    import main
+    from api.runtime import runtime
+    from api.services import files as service
+    from api.schemas import ObjectIndexRequest
     from auth import Principal
 
     calls = []
@@ -62,18 +47,18 @@ def test_index_object_indexes_presigned_object_synchronously(monkeypatch):
         def upsert_file(self, app_id, file_id, filename, s3_url, **kwargs):
             calls.append(("upsert", app_id, file_id, filename, s3_url, kwargs))
 
-    monkeypatch.setattr(main, "_require_ready", lambda: None)
-    monkeypatch.setattr(main, "create_file_id", lambda: "abc123")
-    monkeypatch.setattr(main.application, "store", Store())
-    monkeypatch.setattr(main.application, "database", Database())
+    monkeypatch.setattr(service, "require_ready", lambda: None)
+    monkeypatch.setattr(service, "create_file_id", lambda: "abc123")
+    monkeypatch.setattr(runtime.application, "store", Store())
+    monkeypatch.setattr(runtime.application, "database", Database())
     monkeypatch.setattr(
-        main,
+        service,
         "index_presigned_object",
         lambda application, file_id, presigned_url, s3_url, filename: calls.append(("index", file_id, s3_url, filename)) or (3, 10),
     )
 
-    result = main.index_object(
-        main.ObjectIndexRequest(
+    result = service.index_object(
+        ObjectIndexRequest(
             presigned_url="https://example.com/presigned",
             s3_url="s3://rag/docs/a.txt",
             filename="a.txt",
@@ -95,7 +80,9 @@ def test_index_object_indexes_presigned_object_synchronously(monkeypatch):
 
 
 def test_create_index_job_enqueues_async_job(monkeypatch):
-    import main
+    from api.runtime import runtime
+    from api.services import files as service
+    from api.schemas import AdminIndexJobRequest
     from auth import Principal
 
     enqueued = []
@@ -111,18 +98,18 @@ def test_create_index_job_enqueues_async_job(monkeypatch):
         def mark_file_failed(self, app_id, file_id, error):
             enqueued.append(("failed", app_id, file_id, error))
 
-    monkeypatch.setattr(main, "_require_ready", lambda: None)
-    monkeypatch.setattr(main, "create_file_id", lambda: "abc123")
-    monkeypatch.setattr(main.application, "store", Store())
-    monkeypatch.setattr(main.application, "database", Database())
+    monkeypatch.setattr(service, "require_ready", lambda: None)
+    monkeypatch.setattr(service, "create_file_id", lambda: "abc123")
+    monkeypatch.setattr(runtime.application, "store", Store())
+    monkeypatch.setattr(runtime.application, "database", Database())
     monkeypatch.setattr(
-        main,
+        service,
         "enqueue_index_job",
         lambda **kwargs: enqueued.append(kwargs) or {"file_id": kwargs["file_id"]},
     )
 
-    result = main.create_index_job(
-        main.AdminIndexJobRequest(
+    result = service.create_index_job(
+        AdminIndexJobRequest(
             presigned_url="https://example.com/presigned",
             s3_url="s3://rag/docs/a.txt",
             filename="a.txt",
@@ -145,10 +132,43 @@ def test_create_index_job_enqueues_async_job(monkeypatch):
     assert all("job_id" not in kwargs for kwargs in enqueued)
 
 
+def test_index_file_uses_application_parser(tmp_path):
+    from index.service import index_file
+
+    calls = []
+
+    class Parser:
+        def parse_file(self, path, *, original_filename, ocr, parser_type):
+            calls.append((path, original_filename, ocr, parser_type))
+            return [{"id": "550e8400-e29b-41d4-a716-446655440000", "content": "hello", "metadata": {"filename": original_filename, "chunk_index": 0}}]
+
+    class Store:
+        def add_file_chunks(self, chunks, file_id):
+            calls.append(("store", chunks, file_id))
+            return len(chunks)
+
+    class Application:
+        parser = Parser()
+        store = Store()
+        ocr = object()
+
+    path = tmp_path / "a.txt"
+    path.write_text("hello", encoding="utf-8")
+
+    count = index_file(Application(), "file-1", path, "a.txt", parser="table")
+
+    assert count == 1
+    assert calls[0] == (str(path), "a.txt", Application.ocr, "table")
+    assert calls[1][0] == "store"
+
+
 def test_create_index_job_returns_429_when_queue_rejects(monkeypatch):
-    import main
+    from fastapi import HTTPException
+    from api.runtime import runtime
+    from api.services import files as service
+    from api.schemas import AdminIndexJobRequest
     from auth import Principal
-    from indexing.queue import IndexQueueRejected
+    from index.queue import IndexQueueRejected
 
     calls = []
 
@@ -159,15 +179,15 @@ def test_create_index_job_returns_429_when_queue_rejects(monkeypatch):
         def mark_file_failed(self, app_id, file_id, error):
             calls.append(("failed", app_id, file_id, error))
 
-    monkeypatch.setattr(main, "_require_ready", lambda: None)
-    monkeypatch.setattr(main, "_require_app_database", lambda principal: None)
-    monkeypatch.setattr(main, "create_file_id", lambda: "abc123")
-    monkeypatch.setattr(main.application, "database", Database())
-    monkeypatch.setattr(main, "enqueue_index_job", lambda **kwargs: (_ for _ in ()).throw(IndexQueueRejected("queue full")))
+    monkeypatch.setattr(service, "require_ready", lambda: None)
+    monkeypatch.setattr(service, "require_app_database", lambda principal: None)
+    monkeypatch.setattr(service, "create_file_id", lambda: "abc123")
+    monkeypatch.setattr(runtime.application, "database", Database())
+    monkeypatch.setattr(service, "enqueue_index_job", lambda **kwargs: (_ for _ in ()).throw(IndexQueueRejected("queue full")))
 
-    with pytest.raises(main.HTTPException) as exc:
-        main.create_index_job(
-            main.AdminIndexJobRequest(
+    with pytest.raises(HTTPException) as exc:
+        service.create_index_job(
+            AdminIndexJobRequest(
                 presigned_url="https://example.com/presigned",
                 s3_url="s3://rag/docs/a.txt",
                 filename="a.txt",
@@ -185,11 +205,11 @@ def test_create_index_job_returns_429_when_queue_rejects(monkeypatch):
 
 
 def test_admin_index_job_requires_file_id():
-    import main
+    from api.schemas import AdminIndexJobRequest
     from pydantic import ValidationError
 
     with pytest.raises(ValidationError):
-        main.AdminIndexJobRequest(
+        AdminIndexJobRequest(
             presigned_url="https://example.com/presigned",
             s3_url="s3://rag/docs/a.txt",
             filename="a.txt",
@@ -197,7 +217,7 @@ def test_admin_index_job_requires_file_id():
 
 
 def test_generated_file_id_is_standard_uuid():
-    from indexing.service import create_file_id
+    from index.service import create_file_id
 
     file_id = create_file_id()
 
@@ -205,7 +225,8 @@ def test_generated_file_id_is_standard_uuid():
 
 
 def test_storage_presign_uses_minio_and_public_endpoint(monkeypatch):
-    import main
+    from api.services import files as service
+    from api.schemas import PresignRequest
 
     class FakeMinio:
         def presigned_get_object(self, bucket, object_name, expires):
@@ -214,11 +235,11 @@ def test_storage_presign_uses_minio_and_public_endpoint(monkeypatch):
             assert expires == timedelta(seconds=120)
             return "http://minio:9000/rag/docs/a.pdf?token=abc"
 
-    monkeypatch.setattr(main, "_minio_client", lambda: FakeMinio())
+    monkeypatch.setattr(service, "minio_client", lambda: FakeMinio())
     monkeypatch.setenv("S3_ENDPOINT_URL", "http://minio:9000")
     monkeypatch.delenv("S3_PUBLIC_ENDPOINT_URL", raising=False)
 
-    result = main.presign_object(main.PresignRequest(s3_url="s3://rag/docs/a.pdf", expires_in=120))
+    result = service.presign_object(PresignRequest(s3_url="s3://rag/docs/a.pdf", expires_in=120))
 
     assert result == {"presigned_url": "http://minio:9000/rag/docs/a.pdf?token=abc"}
 
@@ -236,14 +257,14 @@ def test_sync_and_async_index_routes_are_separate():
 
     routes = [(route.path, route.methods) for route in main.app.routes if hasattr(route, "methods")]
 
-    assert any(path == "/api/open/index" and "POST" in methods for path, methods in routes)
-    assert any(path == "/api/open/index/jobs" and "POST" in methods for path, methods in routes)
-    assert any(path == "/api/index" and "POST" in methods for path, methods in routes)
-    assert any(path == "/api/index/jobs" and "POST" in methods for path, methods in routes)
+    assert any(path == "/api/open/files" and "POST" in methods for path, methods in routes)
+    assert any(path == "/api/open/files/jobs" and "POST" in methods for path, methods in routes)
+    assert any(path == "/api/files" and "POST" in methods for path, methods in routes)
+    assert any(path == "/api/files/jobs" and "POST" in methods for path, methods in routes)
 
 
-def test_upload_file_to_storage_puts_object_in_bucket(monkeypatch):
-    import main
+def testupload_file_to_storage_puts_object_in_bucket(monkeypatch):
+    from api.services import files as service
 
     calls = []
 
@@ -258,11 +279,11 @@ def test_upload_file_to_storage_puts_object_in_bucket(monkeypatch):
         def put_object(self, bucket, object_name, data, length, content_type):
             calls.append(("put_object", bucket, object_name, data.read(), length, content_type))
 
-    monkeypatch.setattr(main, "_minio_client", lambda: FakeMinio())
-    monkeypatch.setattr(main, "create_file_id", lambda: "abc123")
+    monkeypatch.setattr(service, "minio_client", lambda: FakeMinio())
+    monkeypatch.setattr(service, "create_file_id", lambda: "abc123")
     monkeypatch.setenv("S3_BUCKET", "rag")
 
-    result = main._upload_file_to_storage("imsdom", "abc123", "docs/a.txt", b"hello", "text/plain")
+    result = service.upload_file_to_storage("imsdom", "abc123", "docs/a.txt", b"hello", "text/plain")
 
     assert result == "s3://rag/uploads/imsdom/abc123/a.txt"
     assert calls == [
@@ -273,15 +294,15 @@ def test_upload_file_to_storage_puts_object_in_bucket(monkeypatch):
 
 
 def test_client_delete_file_removes_index_only(monkeypatch):
-    import main
+    from api.services import files as service
     from auth import Principal
 
     calls = []
 
-    monkeypatch.setattr(main, "_delete_index_file", lambda file_id, principal: calls.append(("index", file_id, principal.app_id)) or {"deleted_chunks": 2})
-    monkeypatch.setattr(main, "_delete_storage_file", lambda app_id, file_id: calls.append(("storage", app_id, file_id)) or 1)
+    monkeypatch.setattr(service, "delete_index_file", lambda file_id, principal: calls.append(("index", file_id, principal.app_id)) or {"deleted_chunks": 2})
+    monkeypatch.setattr(service, "delete_storage_file", lambda app_id, file_id: calls.append(("storage", app_id, file_id)) or 1)
 
-    result = main.client_delete_file("file-a", Principal(type="app", app_id="imsdom"))
+    result = service.client_delete_file("file-a", Principal(type="app", app_id="imsdom"))
 
     assert result == {"deleted_chunks": 2}
     assert calls == [("index", "file-a", "imsdom")]

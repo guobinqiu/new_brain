@@ -140,10 +140,8 @@ def _start_application(batch: BenchmarkBatch, tmp_path: Path, start_ocr: bool = 
 
 
 def _rebuild_index(application) -> None:
-    from document_parser import parse_file
-
     application.store.delete_file_chunks(FILE_ID)
-    chunks = parse_file(str(DOCUMENT_PATH), original_filename=DOCUMENT_PATH.name, ocr=None)
+    chunks = application.parser.parse_file(str(DOCUMENT_PATH), original_filename=DOCUMENT_PATH.name, ocr=None)
     application.store.add_file_chunks(chunks, file_id=FILE_ID)
 
 

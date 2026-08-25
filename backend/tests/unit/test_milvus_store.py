@@ -67,6 +67,9 @@ class FakeMilvusClient:
         self.queries.append((collection_name, kwargs))
         if kwargs.get("output_fields") == ["pk"]:
             return [{"pk": "pk1"}]
+        if hasattr(self, "query_rows"):
+            rows = self.query_rows[min(len(self.queries) - 1, len(self.query_rows) - 1)]
+            return rows
         return [{"pk": "pk1", "text": "hello", "file_id": "file1", "filename": "a.txt", "chunk_index": 0}]
 
     def delete(self, collection_name, ids, timeout=None):
@@ -291,24 +294,41 @@ def test_milvus_search_and_query_use_configured_timeout(monkeypatch):
     assert client.queries[0][1]["timeout"] == 30
 
 
-def test_milvus_list_chunks_uses_query_limit_offset(monkeypatch):
+def test_milvus_list_chunks_uses_keyset_cursor(monkeypatch):
     from collection_names import app_collection
     from store import milvus
 
     client = FakeMilvusClient("http://localhost:19530", timeout=30)
+    client.query_rows = [
+        [
+            {"pk": "pk1", "text": "hello", "file_id": "file-a", "filename": "a.txt", "chunk_index": 0},
+            {"pk": "pk2", "text": "world", "file_id": "file-a", "filename": "a.txt", "chunk_index": 1},
+        ],
+        [{"pk": "pk2", "text": "world", "file_id": "file-a", "filename": "a.txt", "chunk_index": 1}],
+    ]
     monkeypatch.setattr(milvus, "_client", client)
     monkeypatch.setattr(milvus, "_timeout", 30)
 
     with app_collection("imsdom"):
-        page = milvus.list_chunks(file_ids=["file-a"], limit=2, cursor="5")
+        first_page = milvus.list_chunks(file_ids=["file-a"], limit=1)
+        page = milvus.list_chunks(file_ids=["file-a"], limit=2, cursor=first_page["next_cursor"])
 
-    assert [document["id"] for document in page["documents"]] == ["pk1"]
+    assert [document["id"] for document in page["documents"]] == ["pk2"]
     assert page["next_cursor"] is None
     assert page["has_more"] is False
     assert client.queries[0][0] == "imsdom_chunks"
     assert client.queries[0][1]["filter"] == "file_id in ['file-a']"
-    assert client.queries[0][1]["limit"] == 3
-    assert client.queries[0][1]["offset"] == 5
+    assert client.queries[0][1]["limit"] == 2
+    assert client.queries[0][1]["order_by"] == [
+        {"field": "file_id", "order": "asc"},
+        {"field": "chunk_index", "order": "asc"},
+        {"field": "pk", "order": "asc"},
+    ]
+    assert "offset" not in client.queries[0][1]
+    assert "chunk_index > 0" in client.queries[1][1]["filter"]
+    assert client.queries[1][1]["limit"] == 3
+    assert client.queries[1][1]["order_by"] == client.queries[0][1]["order_by"]
+    assert "offset" not in client.queries[1][1]
     assert client.queries[0][1]["timeout"] == 30
 
 

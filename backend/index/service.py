@@ -7,7 +7,6 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import httpx
-from document_parser import parse_file
 
 
 SUPPORTED_FILE_EXTENSIONS = (".pdf", ".txt", ".md", ".markdown", ".docx", ".png", ".jpg", ".jpeg", ".webp", ".bmp")
@@ -17,8 +16,8 @@ def create_file_id() -> str:
     return str(uuid.uuid4())
 
 
-def index_file(application, file_id: str, path: str | Path, filename: str, extra_metadata: dict | None = None) -> int:
-    chunks = parse_file(str(path), original_filename=filename, ocr=application.ocr)
+def index_file(application, file_id: str, path: str | Path, filename: str, extra_metadata: dict | None = None, parser: str | None = None) -> int:
+    chunks = application.parser.parse_file(str(path), original_filename=filename, ocr=application.ocr, parser_type=parser)
     created_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     for chunk in chunks:
         chunk_metadata = chunk.setdefault("metadata", {})
@@ -29,7 +28,7 @@ def index_file(application, file_id: str, path: str | Path, filename: str, extra
     return count
 
 
-def index_presigned_object(application, file_id: str, presigned_url: str, s3_url: str, filename: str | None = None) -> tuple[int, int]:
+def index_presigned_object(application, file_id: str, presigned_url: str, s3_url: str, filename: str | None = None, parser: str | None = None) -> tuple[int, int]:
     """返回 ``(chunk_count, file_size)``。"""
     resolved_filename = filename or filename_from_s3_url(s3_url)
     ext = Path(resolved_filename).suffix.lower()
@@ -37,7 +36,7 @@ def index_presigned_object(application, file_id: str, presigned_url: str, s3_url
     path = Path(download_presigned_file(presigned_url, ext))
     try:
         file_size = path.stat().st_size
-        count = index_file(application, file_id, path, resolved_filename, extra_metadata={"s3_url": s3_url})
+        count = index_file(application, file_id, path, resolved_filename, extra_metadata={"s3_url": s3_url}, parser=parser)
         return count, file_size
     finally:
         try:

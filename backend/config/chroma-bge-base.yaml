@@ -26,11 +26,20 @@ sparse:
   import_path: sparse.bm25.BM25Sparse
 search:
   default_mode: hybrid
-  top_k: 20
-  fetch_k: 50
+  top_k: 5
+  fetch_k: 20
   dense_weight: 0.5
   sparse_weight: 0.5
   rrf_k: 60
+parser:
+  type: standard
+  text:
+    chunk_size: 500
+    chunk_overlap: 80
+  table:
+    chunk_size: 1000
+    before_text_size: 160
+    after_text_size: 160
 rerank:
   bge_base:
     enable: true

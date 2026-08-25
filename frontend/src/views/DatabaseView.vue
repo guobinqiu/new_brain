@@ -30,16 +30,16 @@
           <el-table-column label="file_id" min-width="170" show-overflow-tooltip>
             <template #default="{ row }">
               <div class="copy-cell">
-                <span class="chunk-id" :title="row.file_id">{{ row.file_id }}</span>
-                <el-button size="small" @click="copyText(row.file_id)">{{ t('common.copy') }}</el-button>
+                <span class="chunk-id">{{ row.file_id }}</span>
+                <el-button :icon="CopyDocument" circle size="small" @click.stop="copyText(row.file_id)" />
               </div>
             </template>
           </el-table-column>
           <el-table-column label="s3_url" min-width="240" show-overflow-tooltip>
             <template #default="{ row }">
               <div class="copy-cell">
-                <span class="chunk-id" :title="row.s3_url">{{ row.s3_url }}</span>
-                <el-button size="small" @click="copyText(row.s3_url)">{{ t('common.copy') }}</el-button>
+                <span class="chunk-id">{{ row.s3_url }}</span>
+                <el-button :icon="CopyDocument" circle size="small" @click.stop="copyText(row.s3_url)" />
               </div>
             </template>
           </el-table-column>
@@ -48,11 +48,16 @@
             <template #default="{ row }">{{ shortTime(row.created_at) }}</template>
           </el-table-column>
           <el-table-column prop="chunk_index" label="chunk_index" width="92" />
-          <el-table-column label="content" min-width="260" show-overflow-tooltip>
+          <el-table-column label="content" min-width="260">
             <template #default="{ row }">
               <div class="copy-cell">
-                <span class="chunk-content" :title="row.content">{{ row.content }}</span>
-                <el-button size="small" @click="copyText(row.content)">{{ t('common.copy') }}</el-button>
+                <el-tooltip placement="top" popper-class="chunk-content-tooltip">
+                  <template #content>
+                    <div class="chunk-content-tooltip-body">{{ row.content }}</div>
+                  </template>
+                  <span class="chunk-content">{{ row.content }}</span>
+                </el-tooltip>
+                <el-button :icon="CopyDocument" circle size="small" @click.stop="copyText(row.content)" />
               </div>
             </template>
           </el-table-column>
@@ -68,6 +73,7 @@ import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
+import { CopyDocument } from '@element-plus/icons-vue'
 import axios from '../utils/api'
 import { useActiveAppStore } from '../stores/activeApp'
 import { errorMessage, showToast } from '../utils/toast'

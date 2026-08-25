@@ -56,7 +56,7 @@ flowchart LR
   Auth --> Entry["服务入口"]
   Entry --> App["Application"]
   App --> Search["SearchPipeline"]
-  App --> Parser["Document Parser"]
+  App --> Parser["ParserService"]
 
   Parser --> OCR["OCR"]
   Parser --> Store["Store 接口"]
@@ -170,7 +170,7 @@ sequenceDiagram
   participant Client as 外部系统或管理入口
   participant Entry as 写入入口
   participant Consumer as InlineIndexConsumer
-  participant Parser as DocumentParser
+  participant Parser as ParserService
   participant Store as Store
   participant DB as 向量库
 
@@ -195,7 +195,7 @@ sequenceDiagram
   Client->>Entry: 用 file_id 搜索验证索引就绪
 ```
 
-写入入口可以同步执行索引，也可以创建异步任务。两种入口都接收 `presigned_url + s3_url`，并允许外部系统传入 UUID 格式的 `file_id`；不传时由 RAG 生成。管理台本地上传链路先通过上传接口生成 `file_id` 并写入对象存储路径，再调用 `/api/index/jobs`，因此管理台异步索引必须传入上传阶段返回的 `file_id`。文件名默认可从对象存储地址推导，也允许调用方指定展示名。同步索引成功返回代表已经写入向量库。异步索引入队后立即返回 `file_id`，backend 进程内的索引消费器后台完成下载、解析、切分、embedding 并写入向量库；文件状态可通过管理台文件列表查看。同步入口和异步消费器复用同一套索引执行逻辑。对象存储索引使用 `presigned_url` 做一次性下载，不把临时下载 URL 写入 chunk metadata；稳定的 `s3_url` 会写入 chunk metadata 用于追溯。文件表的 `created_at` 在索引请求进入系统时生成，`indexed_at` 在索引成功时生成；chunk 的 `created_at` 在索引写入时生成并写入 chunk metadata。存储层统一保存 UTC 时间，对外返回前再转换成本机或容器时区。
+写入入口可以同步执行索引，也可以创建异步任务。两种入口都接收 `presigned_url + s3_url`，并允许外部系统传入 UUID 格式的 `file_id`；不传时由 RAG 生成。管理台本地上传链路先通过上传接口生成 `file_id` 并写入对象存储路径，再调用 `/api/files/jobs`，因此管理台异步索引必须传入上传阶段返回的 `file_id`。文件名默认可从对象存储地址推导，也允许调用方指定展示名。同步索引成功返回代表已经写入向量库。异步索引入队后立即返回 `file_id`，backend 进程内的索引消费器后台完成下载、解析、切分、embedding 并写入向量库；文件状态可通过管理台文件列表查看。同步入口和异步消费器复用同一套索引执行逻辑。对象存储索引使用 `presigned_url` 做一次性下载，不把临时下载 URL 写入 chunk metadata；稳定的 `s3_url` 会写入 chunk metadata 用于追溯。文件表的 `created_at` 在索引请求进入系统时生成，`indexed_at` 在索引成功时生成；chunk 的 `created_at` 在索引写入时生成并写入 chunk metadata。存储层统一保存 UTC 时间，对外返回前再转换成本机或容器时区。
 
 异步索引任务保存在 backend 进程内的 `queue.Queue`（标准库线程安全队列）里，容量 10（硬编码默认值，不走环境变量）。入队端点在请求线程里直接 `put_nowait`，消费器在普通工作线程里阻塞读取任务，两端跨线程安全。任务入队成功即被接受，由进程内消费器串行消费，实际索引并发固定为 1；队列已满时入队请求返回 429。RAG 不假设所有上游系统都有自己的队列、限流和重试能力；内部队列是 RAG 服务的资源保护边界，用来削峰并控制 OCR、embedding 和向量库写入并发。进程内队列不做持久化，backend 重启后未完成的任务会丢失；原始文件仍在对象存储，可以重新触发索引。每个 `app_id` 对应独立 collection，外部系统只要按 UUID 规约生成 `file_id`，就不会和其他 app 的同名文件发生跨系统冲突。
 
@@ -230,10 +230,10 @@ flowchart TB
 
 监控能力按三类组织：
 
-- 组件：Store、Dense、Sparse、Rerank、OCR 的状态和绑定模型。
+- 组件：Store、Dense、Sparse、Rerank、OCR、Parser 的状态和绑定模型。
 - 链路：最近若干次搜索的总耗时和各阶段耗时。
 
-组件状态统一为四态：`ready` 表示组件已加载完成，`loading` 表示启用但尚未 ready，`disabled` 表示配置未启用，`error` 表示启动或加载失败。Sparse 作为一个组件表达，显示运行 profile 绑定的 sparse 类型和模型。
+组件状态统一为四态：`ready` 表示组件已加载完成，`loading` 表示启用但尚未 ready，`disabled` 表示配置未启用，`error` 表示启动或加载失败。Sparse 作为一个组件表达，显示运行 profile 绑定的 sparse 类型和模型。Parser 显示当前默认解析模式；Parser 配置里声明 `standard` 和 `fast` 等解析模式是否可用。
 
 模型切换属于配置管理能力，不属于运行监控能力。
 
@@ -241,11 +241,11 @@ flowchart TB
 
 ### 2.7 进程内索引消费器
 
-异步索引由 backend 进程内的 `InlineIndexConsumer`（`indexing/consumer.py`）消费，没有独立 index-worker 进程，也没有 Celery/Redis。FastAPI lifespan 启动消费器；索引与查询共享同一份 `Application`，模型只在 backend 进程内加载一份。
+异步索引由 backend 进程内的 `InlineIndexConsumer`（`index/consumer.py`）消费，没有独立 index-worker 进程，也没有 Celery/Redis。FastAPI lifespan 启动消费器；索引与查询共享同一份 `Application`，模型只在 backend 进程内加载一份。
 
 | 边界                              | 实现                                                                                                                                                           |
 | --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 入队                              | `indexing.queue.enqueue_index_job()` 向进程内 `queue.Queue`（`maxsize=10`，硬编码）`put_nowait`；入队前写 `app_files.status=queued`                            |
+| 入队                              | `index.queue.enqueue_index_job()` 向进程内 `queue.Queue`（`maxsize=10`，硬编码）`put_nowait`；入队前写 `app_files.status=queued`                            |
 | 消费                              | `InlineIndexConsumer`，lifespan 启动 1 个普通 daemon 线程，并发固定为 1                                                                                        |
 | 执行                              | 工作线程同步执行下载、OCR、embedding 和向量库写入，不再包 executor 假超时                                                                                     |
 | 重试                              | job 字典内 `retry_count`，小于 2 时重新入队尾（最多重试 2 次，硬编码），超过后写 `app_files.status=failed`                                                     |
@@ -290,14 +290,14 @@ def start(self):
 
 对外面收敛：只暴露索引、搜索、删除共 4 个业务端点；管理面（apps、monitor、config、upload、presign、files 列表等）不对外。
 
-上游系统有自己的对象存储时，只需要调用 `POST /api/open/index/jobs`，自己生成 `presigned_url` 传入。管理台前端的本地上传链路是 upload → presign → index/jobs 三步；presign 让内部上传的文件也走统一的 `presigned_url` 契约。
+上游系统有自己的对象存储时，只需要调用 `POST /api/open/files/jobs`，自己生成 `presigned_url` 传入。管理台前端的本地上传链路是 upload → presign → files/jobs 三步；presign 让内部上传的文件也走统一的 `presigned_url` 契约。
 
 对内与对外端点对照：
 
 | 业务                                  | 对内（JWT，前端用）                                               | 对外（AKSK，上游用）               | 共用实现               |
 | ------------------------------------- | ----------------------------------------------------------------- | ---------------------------------- | ---------------------- |
-| 同步索引                              | `POST /api/index`                                                 | `POST /api/open/index`             | `_index_object()`      |
-| 异步索引                              | `POST /api/index/jobs`                                            | `POST /api/open/index/jobs`        | `_create_index_job()`  |
+| 同步索引                              | `POST /api/files`                                                 | `POST /api/open/files`             | `_index_object()`      |
+| 异步索引                              | `POST /api/files/jobs`                                            | `POST /api/open/files/jobs`        | `_create_index_job()`  |
 | 搜索                                  | `POST /api/search`                                                | `POST /api/open/search`            | `_search()`            |
 | 删文件                                | `DELETE /api/files/{file_id}`                                     | `DELETE /api/open/files/{file_id}` | `_delete_index_file()` |
 | 上传                                  | `POST /api/upload`                                                | ——（内部专用）                     |                        |
@@ -308,7 +308,7 @@ def start(self):
 两处不对称需要说明：
 
 - 删除语义：内部删文件在共用 `_delete_index_file()` 之外还会删除 MinIO/S3 中 `uploads/{app_id}/{file_id}/` 前缀下的原始对象；open 删除只清理当前 app 向量库里的 chunks（见 2.6）。
-- 异步索引请求模型：内部 `/api/index/jobs` 接收 `AdminIndexJobRequest`（继承 `ObjectIndexRequest`，`file_id` 必填，用于回传上传接口生成的文件 ID）；open 侧接收 `ObjectIndexRequest`，`file_id` 可选。两者共用 `_create_index_job()`。
+- 异步索引请求模型：内部 `/api/files/jobs` 接收 `AdminIndexJobRequest`（继承 `ObjectIndexRequest`，`file_id` 必填，用于回传上传接口生成的文件 ID）；open 侧接收 `ObjectIndexRequest`，`file_id` 可选。两者共用 `_create_index_job()`。
 
 ---
 
@@ -389,11 +389,17 @@ Milvus 的索引策略按运行形态区分：
 ```text
 backend/
   main.py
+  api/
+    routes/
+    service.py
+    runtime.py
+    schemas.py
   bootstrap.py
   container.py
   loader.py
   schema.py
   config/
+  index/
   dense/
   sparse/
   store/
@@ -407,15 +413,27 @@ backend/
 
 | 模块                 | 职责                                                                             |
 | -------------------- | -------------------------------------------------------------------------------- |
-| `main.py`            | FastAPI 应用、鉴权、写入、搜索、删除、列表和配置入口                             |
+| `main.py`            | FastAPI 应用装配、生命周期绑定和路由注册                                        |
+| `api/routes/`        | HTTP 路由入口，按 auth、apps、config、files、monitor、logs、traces、search 拆分 |
+| `api/services/`      | HTTP 业务编排，按 auth、apps、config、files、health、monitor、logs、traces、search 分域 |
+| `api/runtime.py`     | 进程级 Runtime，持有当前 Application、启动策略和内置索引消费器                  |
+| `api/schemas.py`     | HTTP 请求模型                                                                    |
 | `bootstrap.py`       | 创建 Application，管理组件启动和关闭                                             |
 | `container.py`       | DI 容器，按配置组装组件并注入依赖                                                |
 | `config.py`          | 应用配置入口，暴露搜索参数、模型路径、向量库配置                                 |
 | `device.py`          | 检测当前可用计算设备；有 GPU 时优先使用 GPU，否则使用 CPU                        |
-| `download_models.py` | 下载或准备本地模型目录                                                           |
+| `scripts/download_models.sh` | 下载或准备本地模型目录                                                           |
 | `loader.py`          | 读取运行环境指定的 yaml profile                                                  |
 | `schema.py`          | 校验配置结构和默认值                                                             |
-| `document_parser.py` | 文件解析、OCR 调用、文本清理、chunk 生成                                         |
+| `index/`             | 文件索引领域，负责索引请求校验、入队、消费、对象存储下载、解析和写入向量库       |
+| `parser/`           | 文件解析、OCR 调用、文本清理、表格归一化和 chunk 生成                           |
+| `parser/service.py` | Parser 调度器，根据 `parser.type` 或请求覆盖值选择具体 parser                   |
+| `parser/text.py`    | 普通文本解析器                                                                  |
+| `parser/text_splitter.py` | 文本清理和普通文本 chunk 切片工具                                             |
+| `parser/table.py`   | 表格优先解析器组件入口                                                          |
+| `parser/mineru.py`  | MinerU PDF 解析适配，负责模型配置、加载和调用 MinerU SDK                       |
+| `parser/table_transform.py` | 表格结构归一化，把 MinerU JSON/HTML 表格转换为紧凑 key-value 文本              |
+| `parser/table_splitter.py` | 表格 chunk 切片，按行边界控制 chunk 大小                                      |
 | `dense/`             | 生成 dense 向量                                                                  |
 | `sparse/`            | 执行应用内 sparse 检索，或生成 sparse vector                                     |
 | `store/`             | 连接向量库，负责写入、删除、列表、dense 查询、可选 sparse 查询                   |
@@ -439,7 +457,7 @@ backend/
 启动目标流程：
 
 ```text
-1. 读取运行环境指定的配置 profile
+1. 读取运行环境指定的配置文件
 2. 解析 yaml
 3. 校验配置
 4. 创建 DI 容器
@@ -691,16 +709,44 @@ chunk 文本会随分块一起写入向量库。不同向量库的原生字段�
 
 ## 12. 文档解析与切片
 
-上传文件先解析成纯文本，再切成 chunk 写入 store。
+上传文件先解析成文本或结构化表格，再切成 chunk 写入 store。解析模式由 `parser.type` 决定，请求体里的 `parser` 可以在单次索引时覆盖默认解析模式；`standard` 是标准解析，内部使用表格优先解析，PDF 表格由 MinerU pipeline 处理，模型由 `scripts/download_models.sh mineru` 准备；`fast` 是快速解析，内部使用普通文本解析。
+
+Parser 是 `Application` 生命周期内的正式组件，由 `container.py` 构造并注入 OCR。`Application.load_models()` 启动 Parser；索引阶段通过 `application.parser.parse_file()` 解析文件，不直接调用全局解析函数。
+
+Parser 代码按领域边界拆分：`parser/service.py` 是调度器，对外解析模式 `standard` / `fast` 在这里映射到内部解析器 `table` / `text`；`parser/text.py` 是普通文本解析器；`parser/text_splitter.py` 是文本清理和普通文本 chunk 切片工具；`parser/table.py` 是表格优先解析器组件入口；`parser/mineru.py` 是 MinerU PDF 适配；`parser/table_transform.py` 负责把 MinerU JSON/HTML 表格转换成 key-value 紧凑文本；`parser/table_splitter.py` 负责按表格行边界切 chunk。MinerU 是 `table` 解析器的 PDF 实现细节，不作为独立业务 parser 暴露。
+
+MinerU 使用 pipeline 后端。运行时模型根目录是实体目录 `models/mineru/pipeline`，`models/mineru/mineru.json` 的 `models-dir.pipeline` 指向该目录。后端判断 MinerU 可用时检查 Python 包、配置文件和 pipeline 模型目录。
+
+模型加载和模型使用分离：应用启动阶段加载 dense、sparse、rerank、OCR 和可用的 MinerU 模型；索引阶段只使用已经加载的模型，不在请求处理中懒加载 MinerU，也不通过子进程执行 MinerU CLI。MinerU 调用走 Python SDK，复用当前进程里的 pipeline 模型单例。
+
+MinerU 的主输入是 PDF，系统优先读取 MinerU 输出的 `*_content_list.json`。普通文本块直接归一化为 text block；表格块里的 `table_body` 是 MinerU JSON 内嵌的 HTML 表格字符串，系统会先把 HTML 解析成一张或多张逻辑表，再转换成 table block。block 只保存 `type` 和 `text`，上下文截取在生成 chunk 时临时计算。生成最终 chunk 时，普通正文走文本切片，表格走表格行切片，不把正文和表格合并后再统一切。表格 chunk 只从相邻 text block 获取上下文：前一个 text block 截取尾部 `before_text_size`，后一个 text block 截取头部 `after_text_size`，相邻上下文和表格主体用空行分隔。相邻 block 是 table 时不互相拼接。表格块内部如果出现“标题行 + 新表头”，会拆成多张逻辑表再分别切片。向量库 `content` 保存检索友好的 chunk 文本，不直接保存 HTML。
 
 切片参数由配置决定：
 
-| 参数       | 含义                  |
-| ---------- | --------------------- |
-| chunk size | 单个 chunk 的目标长度 |
-| overlap    | 相邻 chunk 的重叠长度 |
+```yaml
+parser:
+  type: standard
+  text:
+    chunk_size: 500
+    chunk_overlap: 80
+  table:
+    chunk_size: 1000
+    before_text_size: 160
+    after_text_size: 160
+```
+
+| 参数                    | 含义                                      |
+| ----------------------- | ----------------------------------------- |
+| `parser.type`           | 默认解析模式，支持 `standard` / `fast`     |
+| `text.chunk_size`       | 普通文本 chunk 字符上限                   |
+| `text.chunk_overlap`    | 普通文本相邻 chunk 重叠字符数             |
+| `table.chunk_size`       | 表格 chunk 字符上限                       |
+| `table.before_text_size` | 表格 chunk 前方文本上下文的字符上限       |
+| `table.after_text_size`  | 表格 chunk 后方文本上下文的字符上限       |
 
 切片按中文文档常见边界拆分，优先使用段落、换行、中文句号、感叹号、问号、分号、逗号和空格。
+
+表格切片按行边界贪心累加：小表格完整写入一个 chunk；大表格逐行加入当前 chunk，加入后不超过 `table.chunk_size` 就继续累加，超过就先写出当前 chunk，再用当前行开启新 chunk。普通行不会从中间切断，单行超过 `table.chunk_size` 时才截断到上限长度。表格切片不做行 overlap，每个 chunk 重新带上表格标题和表头；表格行号和截断状态不写入向量库 metadata。
 
 解析后的文本会做 Unicode 归一化，并去掉中文字符之间由 PDF 提取产生的多余空格。
 
@@ -830,7 +876,7 @@ logging:
 日志格式统一是 JSONL，一行一条 JSON。普通应用日志和搜索链路日志使用同一个格式，通过 `logger` 和 `event` 区分：
 
 ```json
-{"logger":"rag.app","event":"startup_ready","message":"Startup model preload done"}
+{"logger":"rag.app","event":"startup_ready","message":"Startup model load done"}
 {"logger":"rag.trace","event":"search_trace","app_id":"app_a","query":"查询内容","mode":"hybrid","elapsed_ms":123.4}
 ```
 
@@ -1005,7 +1051,7 @@ GET /api/nodes/config
 
 ## 集中日志
 
-应用日志仍输出 JSONL 到 stdout，Docker 继续使用 `json-file` driver 做本地滚动保留。集中日志由 Promtail 采集 Docker stdout 并推送到 Loki。
+应用日志仍输出 JSONL 到 stdout，Docker 使用 `json-file` driver 做小容量本地滚动保留。集中日志由 Promtail 采集 Docker stdout 并推送到 Loki。
 
 每个节点运行一个 Promtail：
 
@@ -1015,7 +1061,9 @@ GET /api/nodes/config
 
 Loki 只在主节点启用，其他节点的 Promtail 通过 `LOKI_URL` 推送到主节点 Loki。Loki 不可用只影响集中日志查询，不影响 RAG 检索、索引和本地 Docker 日志。
 
-日志页和链路页通过后端查询 Loki：
+Loki 日志保留 30 天。Docker 本地日志只作为 Promtail 采集来源和节点本地排障兜底，不作为长期日志存储。
+
+日志页和链路页通过后端按时间范围查询 Loki：
 
 ```text
 GET /api/logs
@@ -1023,7 +1071,7 @@ GET /api/logs/labels/container
 GET /api/traces
 ```
 
-日志页支持按节点和容器过滤。链路页查询 `rag.trace` 的 `search_trace` 结构化日志，按当前 app 过滤并展示各阶段耗时。
+日志页支持按节点、容器和时间范围过滤。链路页查询 `rag.trace` 的 `search_trace` 结构化日志，按当前 app 和时间范围过滤并展示各阶段耗时。日志和链路列表使用 Loki 时间游标继续加载：首次查询当前时间范围内最新一批记录，继续加载时把上一批最早记录前一纳秒作为下一次查询的 `end`。
 
 ## 鉴权边界
 

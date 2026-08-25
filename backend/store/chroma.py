@@ -1,6 +1,8 @@
 """Chroma-backed document storage through LangChain Chroma."""
 from __future__ import annotations
 
+import base64
+import json
 import uuid
 from collections import defaultdict
 from pathlib import Path
@@ -389,14 +391,14 @@ def list_chunks(file_ids: list[str] | None = None, limit: int = 50, cursor: str 
     if limit <= 0:
         raise ValueError("limit must be greater than 0")
     limit = min(limit, 200)
-    start = int(cursor) if cursor else 0
-    rows = _collection_get_page(build_file_filter(file_ids), limit=limit + 1, offset=start)
-    ids = rows.get("ids") or []
-    documents = _rows_to_documents(rows)
+    rows = _collection_get(build_file_filter(file_ids))
+    documents = sorted(_rows_to_documents(rows), key=_chunk_sort_key)
+    start = _chunk_cursor_position(documents, cursor)
+    page_rows = documents[start:start + limit]
     return {
-        "documents": documents[:limit],
-        "next_cursor": str(start + limit) if len(ids) > limit else None,
-        "has_more": len(ids) > limit,
+        "documents": page_rows,
+        "next_cursor": _encode_chunk_cursor(page_rows[-1]) if start + limit < len(documents) and page_rows else None,
+        "has_more": start + limit < len(documents),
     }
 
 
@@ -413,6 +415,43 @@ def _rows_to_documents(rows: dict) -> list[dict]:
             "metadata": metadata,
         })
     return results
+
+
+def _chunk_sort_key(document: dict) -> tuple[str, int, str]:
+    metadata = document["metadata"]
+    return (str(metadata["file_id"]), int(metadata["chunk_index"]), str(document["id"]))
+
+
+def _chunk_cursor_position(documents: list[dict], cursor: str | None) -> int:
+    if not cursor:
+        return 0
+    cursor_key = _decode_chunk_cursor(cursor)
+    for index, document in enumerate(documents):
+        if _chunk_sort_key(document) > cursor_key:
+            return index
+    return len(documents)
+
+
+def _encode_chunk_cursor(document: dict) -> str:
+    metadata = document["metadata"]
+    data = {
+        "file_id": str(metadata["file_id"]),
+        "chunk_index": int(metadata["chunk_index"]),
+        "chunk_id": str(document["id"]),
+    }
+    raw = json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _decode_chunk_cursor(cursor: str) -> tuple[str, int, str]:
+    padded = cursor + "=" * (-len(cursor) % 4)
+    try:
+        data = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8"))
+    except Exception as exc:
+        raise ValueError("invalid cursor") from exc
+    if not isinstance(data, dict) or not {"file_id", "chunk_index", "chunk_id"} <= data.keys():
+        raise ValueError("invalid cursor")
+    return (str(data["file_id"]), int(data["chunk_index"]), str(data["chunk_id"]))
 
 
 def build_file_filter(file_ids: list[str] | None = None) -> dict | None:
@@ -450,12 +489,6 @@ def _collection_get(metadata_filter: dict | None) -> dict:
     return _collection().get(where=metadata_filter, include=["documents", "metadatas"])
 
 
-def _collection_get_page(metadata_filter: dict | None, *, limit: int, offset: int) -> dict:
-    if metadata_filter is None:
-        return _collection().get(limit=limit, offset=offset, include=["documents", "metadatas"])
-    return _collection().get(where=metadata_filter, limit=limit, offset=offset, include=["documents", "metadatas"])
-
-
 def _collection():
     return _get_chroma_client().get_collection(_chunks_collection())
 
@@ -481,4 +514,4 @@ def _query_rows_to_items(rows: dict) -> list[dict]:
 
 
 def _point_id(chunk_id: str) -> str:
-    return str(uuid.uuid5(uuid.NAMESPACE_URL, chunk_id))
+    return chunk_id

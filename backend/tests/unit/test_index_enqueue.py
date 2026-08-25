@@ -1,4 +1,4 @@
-"""indexing.queue.enqueue_index_job 单元测试（架构 C）。
+"""index.queue.enqueue_index_job 单元测试（架构 C）。
 
 契约来源：docs/architecture-c-inline-index-worker.md §4.5：
 
@@ -8,7 +8,7 @@
   字典放入 ``InlineIndexConsumer`` 注册的进程级 ``queue.Queue``。
 - 队列满 -> ``IndexQueueRejected``（API 层映射为 429）。
 - 无 ``job_id``（返回只有 ``{"file_id"}``）。
-- 不 import redis / indexing.repository（进程内队列，无 broker）。
+- 不 import redis / index.repository（进程内队列，无 broker）。
 """
 from __future__ import annotations
 
@@ -18,9 +18,9 @@ import queue
 
 import pytest
 
-import indexing.consumer as consumer_mod
-import indexing.queue as queue_mod
-from indexing.queue import IndexQueueRejected, enqueue_index_job
+import index.consumer as consumer_mod
+import index.queue as queue_mod
+from index.queue import IndexQueueRejected, enqueue_index_job
 
 
 class _FakeConsumer:

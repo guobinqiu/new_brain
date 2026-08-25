@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from schema import ParserConfig
 from tests.benchmark import test_search_benchmark as benchmark
 
 
@@ -74,9 +75,14 @@ def test_search_accuracy_matrix(tmp_path):
 
 
 def _parse_document_chunks() -> list[dict]:
-    from document_parser import parse_file
+    from parser.service import ParserService
 
-    return parse_file(str(DOCUMENT_PATH), original_filename=DOCUMENT_PATH.name, ocr=None)
+    parser = ParserService(ParserConfig())
+    parser.start()
+    try:
+        return parser.parse_file(str(DOCUMENT_PATH), original_filename=DOCUMENT_PATH.name, ocr=None)
+    finally:
+        parser.stop()
 
 
 def _rebuild_index(application, chunks: list[dict]) -> None:

@@ -19,6 +19,10 @@
         </div>
       </el-upload>
       <div class="upload-options">
+        <el-radio-group v-model="parserMode" size="small">
+          <el-radio-button label="standard" :disabled="!parserStandardAvailable">{{ t('upload.parserStandard') }}</el-radio-button>
+          <el-radio-button label="fast">{{ t('upload.parserFast') }}</el-radio-button>
+        </el-radio-group>
         <div class="upload-actions">
           <el-button type="primary" :disabled="!appId || selectedFiles.length === 0 || uploading" :loading="uploading" @click="uploadSelectedFiles">{{ uploading ? t('upload.uploading') : t('upload.submit') }}</el-button>
         </div>
@@ -45,13 +49,13 @@
         >
           <el-table-column label="file_id" min-width="240" show-overflow-tooltip>
             <template #default="{ row }">
-              <span class="chunk-id" :title="row.id">{{ row.id }}</span>
+              <span class="chunk-id">{{ row.id }}</span>
             </template>
           </el-table-column>
           <el-table-column prop="filename" label="filename" min-width="220" show-overflow-tooltip />
           <el-table-column label="s3_url" min-width="260" show-overflow-tooltip>
             <template #default="{ row }">
-              <span class="chunk-id" :title="row.s3_url">{{ row.s3_url }}</span>
+              <span class="chunk-id">{{ row.s3_url }}</span>
             </template>
           </el-table-column>
           <el-table-column label="created_at" min-width="160">
@@ -98,8 +102,11 @@ const filesTotal = ref(0)
 const filesNextCursor = ref(null)
 const filesLoading = ref(false)
 const deletingFileId = ref(null)
+const parserMode = ref('standard')
+const parserAvailable = ref(['fast'])
 const uploadRef = ref(null)
 const filesTableRef = ref(null)
+const parserStandardAvailable = computed(() => parserAvailable.value.includes('standard'))
 
 // el-upload on-change：(uploadFile, uploadFiles)，uploadFiles 为 UploadFile 数组，raw 为原始 File
 function onFileChange(file, fileList) {
@@ -141,12 +148,14 @@ async function uploadFiles(files) {
     try {
       const uploadRes = await axios.post(`${API}/upload`, form)
       const presignRes = await axios.post(`${API}/presign`, { s3_url: uploadRes.data.s3_url })
-      await axios.post(`${API}/index`, {
+      const body = {
         app_id: currentAppId.value,
         file_id: uploadRes.data.file_id,
         presigned_url: presignRes.data.presigned_url,
         s3_url: uploadRes.data.s3_url,
-      })
+      }
+      if (parserMode.value === 'fast') body.parser = 'fast'
+      await axios.post(`${API}/files`, body)
       submitted++
     } catch (err) {
       showToast('error', `${file.name}: ${errorMessage(err)}`)
@@ -205,7 +214,20 @@ async function deleteFile(file) {
   }
 }
 
-onMounted(fetchFiles)
+async function fetchConfig() {
+  try {
+    const res = await axios.get(`${API}/config`)
+    parserAvailable.value = (res.data.parser?.available || [])
+      .filter(item => item.available)
+      .map(item => item.name)
+    if (!parserStandardAvailable.value && parserMode.value === 'standard') parserMode.value = 'fast'
+  } catch (err) { console.error(err) }
+}
+
+onMounted(() => {
+  fetchConfig()
+  fetchFiles()
+})
 
 watch(currentAppId, () => {
   files.value = []

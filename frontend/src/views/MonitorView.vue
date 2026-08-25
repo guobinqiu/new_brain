@@ -15,9 +15,6 @@
               <div class="block-title">{{ node.node_id }}</div>
               <p>{{ node.base_url }}</p>
             </div>
-            <el-tag :type="node.status === 'ok' ? 'success' : 'danger'" size="small">
-              {{ node.status === 'ok' ? `${node.latency_ms}ms` : t('cluster.unreachable') }}
-            </el-tag>
           </div>
           <template v-if="node.status === 'ok'">
             <div class="node-summary">{{ node.data?.profile?.config_name || '-' }} · {{ node.data?.profile?.store?.type || '-' }}</div>

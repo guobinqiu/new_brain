@@ -105,9 +105,21 @@ def test_profiles_define_search_result_and_candidate_limits():
     for path in CONFIG_DIR.glob("*.yaml"):
         config = _read_config(path.name)
 
-        assert config["search"]["top_k"] == 20
-        assert config["search"]["fetch_k"] == 50
+        assert config["search"]["top_k"] == 5
+        assert config["search"]["fetch_k"] == 20
         assert config["search"]["fetch_k"] >= config["search"]["top_k"]
+
+
+def test_config_files_define_parser_defaults():
+    for path in CONFIG_DIR.glob("*.yaml"):
+        parser = _read_config(path.name)["parser"]
+
+        assert parser["type"] == "standard"
+        assert parser["text"]["chunk_size"] == 500
+        assert parser["text"]["chunk_overlap"] == 80
+        assert parser["table"]["chunk_size"] == 1000
+        assert parser["table"]["before_text_size"] == 160
+        assert parser["table"]["after_text_size"] == 160
 
 
 def test_profiles_define_store_type_from_filename():

@@ -33,7 +33,10 @@
     "copy": "复制",
     "delete": "删除",
     "deleting": "删除中",
-    "actions": "操作"
+    "search": "查询",
+    "actions": "操作",
+    "startTime": "开始时间",
+    "endTime": "结束时间"
   },
   "search": {
     "topK": "返回条数",
@@ -61,6 +64,8 @@
     "empty": "暂无上传文件",
     "indexSubmitted": "已完成 {count} 个文件索引",
     "selectApp": "请先选择应用",
+    "parserStandard": "标准解析",
+    "parserFast": "快速解析",
     "deletedFile": "{name} 已删除"
   },
   "monitor": {
@@ -100,7 +105,6 @@
   "trace": {
     "title": "查询链路",
     "desc": "最近搜索请求的阶段耗时",
-    "limitNote": "仅显示最近 {count} 条",
     "empty": "暂无查询",
     "columns": {
       "time": "时间",
@@ -139,6 +143,7 @@
     "title": "配置",
     "searchDefaults": "搜索默认值",
     "components": "组件配置",
+    "parser": "解析配置",
     "storage": "存储路径"
   },
   "apps": {

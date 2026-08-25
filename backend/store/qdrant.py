@@ -1,6 +1,8 @@
 """Qdrant-backed document storage and collection management."""
 from __future__ import annotations
 
+import base64
+import json
 import os
 import threading
 import time
@@ -311,15 +313,17 @@ def _ensure_sparse_vector(client: QdrantClient, collection_name: str) -> None:
 
 def ensure_payload_indexes(collection_name: str | None = None):
     client = get_qdrant_client()
-    _ensure_payload_index(client, collection_name or _chunks_collection(), "metadata.file_id")
+    target_collection = collection_name or _chunks_collection()
+    _ensure_payload_index(client, target_collection, "metadata.file_id", models.PayloadSchemaType.KEYWORD)
+    _ensure_payload_index(client, target_collection, "metadata.chunk_index", models.PayloadSchemaType.INTEGER)
 
 
-def _ensure_payload_index(client: QdrantClient, collection_name: str, field_name: str):
+def _ensure_payload_index(client: QdrantClient, collection_name: str, field_name: str, field_schema: models.PayloadSchemaType):
     try:
         client.create_payload_index(
             collection_name=collection_name,
             field_name=field_name,
-            field_schema=models.PayloadSchemaType.KEYWORD,
+            field_schema=field_schema,
         )
     except Exception:
         pass
@@ -419,12 +423,14 @@ def list_chunks(file_ids: list[str] | None = None, limit: int = 50, cursor: str 
     if limit <= 0:
         raise ValueError("limit must be greater than 0")
     limit = min(limit, 200)
+    scroll_filter = _combine_chunk_filters(build_file_filter(file_ids), _chunk_cursor_filter(cursor))
     try:
-        rows, offset = get_qdrant_client().scroll(
+        rows, _ = get_qdrant_client().scroll(
             collection_name=_chunks_collection(),
-            scroll_filter=build_file_filter(file_ids),
-            limit=limit,
-            offset=cursor,
+            scroll_filter=scroll_filter,
+            limit=limit + 1,
+            order_by="metadata.chunk_index",
+            offset=None,
             with_payload=True,
             with_vectors=False,
         )
@@ -432,10 +438,11 @@ def list_chunks(file_ids: list[str] | None = None, limit: int = 50, cursor: str 
         if _is_collection_not_found(exc):
             return {"documents": [], "next_cursor": None, "has_more": False}
         raise
+    page_rows = rows[:limit]
     return {
-        "documents": [_record_to_document(row) for row in rows],
-        "next_cursor": str(offset) if offset is not None else None,
-        "has_more": offset is not None,
+        "documents": [_record_to_document(row) for row in page_rows],
+        "next_cursor": _encode_chunk_cursor(page_rows[-1]) if len(rows) > limit and page_rows else None,
+        "has_more": len(rows) > limit,
     }
 
 
@@ -445,6 +452,48 @@ def build_file_filter(file_ids: list[str] | None = None) -> models.Filter | None
     if not file_ids:
         raise ValueError("file_ids cannot be empty")
     return _file_payload_filter(file_ids=file_ids)
+
+
+def _chunk_cursor_filter(cursor: str | None) -> models.Filter | None:
+    if not cursor:
+        return None
+    data = _decode_chunk_cursor(cursor)
+    return models.Filter(must=[
+        models.FieldCondition(key="metadata.chunk_index", range=models.Range(gt=int(data["chunk_index"]))),
+    ])
+
+
+def _combine_chunk_filters(*filters: models.Filter | None) -> models.Filter | None:
+    active = [metadata_filter for metadata_filter in filters if metadata_filter is not None]
+    if not active:
+        return None
+    must = []
+    for metadata_filter in active:
+        must.extend(metadata_filter.must or [])
+    return models.Filter(must=must)
+
+
+def _encode_chunk_cursor(row) -> str:
+    payload = row.payload or {}
+    metadata = _metadata_from_payload(payload)
+    data = {
+        "file_id": str(metadata["file_id"]),
+        "chunk_index": int(metadata["chunk_index"]),
+        "chunk_id": str(row.id),
+    }
+    raw = json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _decode_chunk_cursor(cursor: str) -> dict:
+    padded = cursor + "=" * (-len(cursor) % 4)
+    try:
+        data = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8"))
+    except Exception as exc:
+        raise ValueError("invalid cursor") from exc
+    if not isinstance(data, dict) or not {"file_id", "chunk_index", "chunk_id"} <= data.keys():
+        raise ValueError("invalid cursor")
+    return data
 
 
 def _record_to_document(row) -> dict:
@@ -579,4 +628,4 @@ def _document_lock(file_id: str):
 
 
 def _point_id(chunk_id: str) -> str:
-    return str(uuid.uuid5(uuid.NAMESPACE_URL, chunk_id))
+    return chunk_id

@@ -1,4 +1,5 @@
 import pytest
+from uuid import UUID
 
 
 def _create_minimal_pdf(path: str, text: str):
@@ -44,66 +45,88 @@ def _create_minimal_pdf(path: str, text: str):
         f.write(trailer.encode("ascii"))
 
 
+class _TempDir:
+    def __init__(self, path):
+        self.path = path
+
+    def __enter__(self):
+        self.path.mkdir(exist_ok=True)
+        return str(self.path)
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+
+def _parse_file(filepath: str, original_filename: str | None = None, ocr=None, parser=None, parser_type: str | None = None) -> list[dict]:
+    from parser.service import ParserService
+    from schema import ParserConfig
+
+    parser_service = ParserService(parser or ParserConfig(), ocr=ocr)
+    parser_service.start()
+    try:
+        return parser_service.parse_file(
+            filepath,
+            original_filename=original_filename,
+            ocr=ocr,
+            parser_type=parser_type,
+        )
+    finally:
+        parser_service.stop()
+
+
 # =============================================================================
-# 1. Document Parser Tests
+# 1. Parser Service Tests
 # =============================================================================
 
 
-class TestDocumentParser:
-    """document_parser.py – file parsing and chunking behaviour."""
+class TestParserService:
+    """parser.service – file parsing and chunking behaviour."""
 
     def test_parse_txt_file(self, test_txt_path):
         """Parse a .txt file → returns chunks with expected structure."""
-        from document_parser import parse_file
-
-        chunks = parse_file(test_txt_path)
+        chunks = _parse_file(test_txt_path)
 
         assert len(chunks) > 0
         for c in chunks:
             assert "content" in c
             assert "metadata" in c
             assert "id" in c
+            UUID(c["id"])
             assert c["metadata"].get("filename") == "test_ai.txt"
             assert "chunk_index" in c["metadata"]
             # Each chunk should be at most the default chunk size.
-            assert len(c["content"]) <= 250
+            assert len(c["content"]) <= 500
 
     def test_parse_md_file(self, tmp_path):
         """Parse a .md file."""
-        from document_parser import parse_file
-
         md_file = tmp_path / "readme.md"
         md_file.write_text(
             "# Title\n\nThis is a **markdown** file.\n\n人工智能测试。\n",
             encoding="utf-8",
         )
-        chunks = parse_file(str(md_file))
+        chunks = _parse_file(str(md_file))
         assert len(chunks) > 0
         assert chunks[0]["metadata"]["filename"] == "readme.md"
 
     def test_parse_docx_file(self, tmp_path):
         """Parse a .docx file."""
         from docx import Document
-        from document_parser import parse_file
-
         docx_file = tmp_path / "test.docx"
         doc = Document()
         doc.add_paragraph("人工智能是计算机科学的一个重要分支。")
         doc.add_paragraph("AGI is the goal of AI research.")
         doc.save(str(docx_file))
 
-        chunks = parse_file(str(docx_file))
+        chunks = _parse_file(str(docx_file))
         assert len(chunks) > 0
         assert chunks[0]["metadata"]["filename"] == "test.docx"
 
     def test_parse_pdf_file(self, tmp_path):
         """Parse a .pdf file via OCR with ASCII text."""
-        from document_parser import parse_file
-
         pdf_file = tmp_path / "test.pdf"
         _create_minimal_pdf(str(pdf_file), "PDF test for parsing AGI content")
 
-        chunks = parse_file(str(pdf_file))
+        chunks = _parse_file(str(pdf_file))
         assert len(chunks) > 0
         assert chunks[0]["metadata"]["filename"] == "test.pdf"
         # Verify actual text survived extraction
@@ -112,36 +135,30 @@ class TestDocumentParser:
 
     def test_parse_unsupported_type_raises(self, tmp_path):
         """Unsupported file extensions raise ``ValueError``."""
-        from document_parser import parse_file
-
         bad = tmp_path / "data.xyz"
         bad.write_text("some content")
         with pytest.raises(ValueError, match="Unsupported file type"):
-            parse_file(str(bad))
+            _parse_file(str(bad))
 
     def test_parse_empty_file_raises(self, tmp_path):
         """An empty file raises ``ValueError``."""
-        from document_parser import parse_file
-
         empty = tmp_path / "empty.txt"
         empty.write_text("")
         with pytest.raises(ValueError, match="Empty file"):
-            parse_file(str(empty))
+            _parse_file(str(empty))
 
     def test_preserves_original_filename(self, tmp_path):
         """The ``original_filename`` parameter is stored in metadata."""
-        from document_parser import parse_file
-
         src = tmp_path / "src.txt"
         src.write_text("Hello world. " * 100, encoding="utf-8")
 
-        chunks = parse_file(str(src), original_filename="my-upload.txt")
+        chunks = _parse_file(str(src), original_filename="my-upload.txt")
         for c in chunks:
             assert c["metadata"]["filename"] == "my-upload.txt"
 
     def test_chunk_overlap(self, tmp_path):
         """Consecutive chunks have overlapping text (~50 chars of overlap)."""
-        from document_parser import chunk_text
+        from parser.text import chunk_text
 
         # Create a long enough text so we get at least 2 chunks
         text = "这是一个测试段落。" * 200
@@ -155,14 +172,458 @@ class TestDocumentParser:
         # They should share at least a few characters (overlap region)
         assert len(tail_of_0) > 0 and len(head_of_1) > 0
 
+    def test_parse_file_uses_parser_text_config(self, tmp_path):
+        from schema import ParserConfig, ParserTableConfig, ParserTextConfig
+
+        src = tmp_path / "long.txt"
+        src.write_text("人工智能。" * 200, encoding="utf-8")
+
+        chunks = _parse_file(
+            str(src),
+            parser=ParserConfig(
+                type="text",
+                text=ParserTextConfig(chunk_size=120, chunk_overlap=20),
+                table=ParserTableConfig(chunk_size=1000),
+            ),
+        )
+
+        assert len(chunks) > 1
+        assert max(len(chunk["content"]) for chunk in chunks) <= 120
+
+    def test_split_table_keeps_small_table_whole(self):
+        from parser.table import split_table
+
+        chunks = split_table(
+            title="表格：指标",
+            header=["年份", "营收"],
+            rows=[["2024", "100"], ["2025", "120"]],
+            chunk_size=1200,
+        )
+
+        assert len(chunks) == 1
+        assert "年份: 2024；营收: 100" in chunks[0]["content"]
+        assert "年份: 2025；营收: 120" in chunks[0]["content"]
+        assert chunks[0]["metadata"] == {}
+
+    def test_split_table_cuts_at_row_boundary_and_repeats_header(self):
+        from parser.table import split_table
+
+        chunks = split_table(
+            title="表格：指标",
+            header=["年份", "营收"],
+            rows=[["2024", "1" * 20], ["2025", "2" * 20], ["2026", "3" * 20]],
+            chunk_size=45,
+        )
+
+        assert len(chunks) == 3
+        assert all(chunk["content"].startswith("表格：指标\n") for chunk in chunks)
+        assert "2024" in chunks[0]["content"]
+        assert "2025" in chunks[1]["content"]
+        assert "2026" in chunks[2]["content"]
+
+    def test_split_table_truncates_single_long_row(self):
+        from parser.table import split_table
+
+        chunks = split_table(
+            title="表格：指标",
+            header=["年份", "备注"],
+            rows=[["2024", "很长" * 100]],
+            chunk_size=80,
+        )
+
+        assert len(chunks) == 1
+        assert len(chunks[0]["content"]) <= 80
+        assert chunks[0]["metadata"] == {}
+
+    def test_split_table_does_not_overlap_rows(self):
+        from parser.table import split_table
+
+        chunks = split_table(
+            title="表格：指标",
+            header=["年份", "备注"],
+            rows=[["2024", "1" * 10], ["2025", "2" * 10], ["2026", "3" * 10]],
+            chunk_size=45,
+        )
+
+        assert len(chunks) == 3
+        assert all(len(chunk["content"]) <= 45 for chunk in chunks)
+        assert "2024" in chunks[0]["content"]
+        assert "2024" not in chunks[1]["content"]
+        assert "2025" in chunks[1]["content"]
+        assert "2025" not in chunks[2]["content"]
+        assert "2026" in chunks[2]["content"]
+
+    def test_split_table_keeps_adding_rows_after_new_chunk(self):
+        from parser.table import split_table
+
+        chunks = split_table(
+            title="表格",
+            header=["列"],
+            rows=[["1" * 15], ["2" * 5], ["3" * 5]],
+            chunk_size=24,
+        )
+
+        assert len(chunks) == 2
+        assert "111111111111111" in chunks[0]["content"]
+        assert "22222" not in chunks[0]["content"]
+        assert "22222" in chunks[1]["content"]
+        assert "33333" in chunks[1]["content"]
+
+    def test_table_parser_reads_content_list_json(self, tmp_path, monkeypatch):
+        import json
+        import parser.mineru
+        from schema import ParserConfig, ParserTableConfig, ParserTextConfig
+
+        pdf_file = tmp_path / "json-table.pdf"
+        _create_minimal_pdf(str(pdf_file), "table")
+
+        def fake_do_parse(output_dir, filepath, filename):
+            output_dir = tmp_path / "mineru-output"
+            output_dir.mkdir(exist_ok=True)
+            (output_dir / "json-table_content_list.json").write_text(
+                json.dumps([
+                    {"type": "text", "text": "JSON 正文"},
+                    {
+                        "type": "table",
+                        "table_body": (
+                            '<table><tr><td>向量库</td><td colspan="2">能力</td></tr>'
+                            "<tr><td>Qdrant</td><td>快</td><td>过滤</td></tr></table>"
+                        ),
+                    },
+                    {"type": "image", "img_path": "images/a.jpg"},
+                ]),
+                encoding="utf-8",
+            )
+            (output_dir / "json-table.md").write_text("坏的 markdown", encoding="utf-8")
+
+        monkeypatch.setattr(parser.mineru, "table_parser_available", lambda: True)
+        monkeypatch.setattr(parser.mineru, "load_table_parser", lambda: None)
+        monkeypatch.setattr(parser.mineru.tempfile, "TemporaryDirectory", lambda prefix: _TempDir(tmp_path / "mineru-output"))
+        monkeypatch.setattr(parser.mineru, "_mineru_do_parse", fake_do_parse)
+
+        chunks = _parse_file(
+            str(pdf_file),
+            parser_type="table",
+            parser=ParserConfig(
+                type="text",
+                text=ParserTextConfig(chunk_size=500, chunk_overlap=80),
+                table=ParserTableConfig(chunk_size=1000),
+            ),
+        )
+
+        combined = "\n".join(chunk["content"] for chunk in chunks)
+        for chunk in chunks:
+            UUID(chunk["id"])
+        assert "JSON 正文" in combined
+        assert "Qdrant" in combined
+        assert "坏的 markdown" not in combined
+        assert "images/" not in combined
+        assert "<table" not in combined
+        assert "|" not in combined
+        assert "向量库: Qdrant；能力: 快；列3: 过滤" in combined
+
+    def test_table_parser_keeps_json_blocks_separate(self, tmp_path, monkeypatch):
+        import json
+        import parser.mineru
+        from schema import ParserConfig, ParserTableConfig, ParserTextConfig
+
+        pdf_file = tmp_path / "json-blocks.pdf"
+        _create_minimal_pdf(str(pdf_file), "table")
+
+        def fake_do_parse(output_dir, filepath, filename):
+            output_dir = tmp_path / "mineru-output"
+            output_dir.mkdir(exist_ok=True)
+            (output_dir / "json-blocks_content_list.json").write_text(
+                json.dumps([
+                    {"type": "text", "text": "第一段文本" * 20},
+                    {
+                        "type": "table",
+                        "table_body": (
+                            "<table>"
+                            "<tr><td>向量库</td><td>小型数据集</td><td>扩展性说明</td></tr>"
+                            "<tr><td>FAISS</td><td>V</td><td>X</td></tr>"
+                            "<tr><td>Weaviate</td><td>V</td><td>V强支持</td></tr>"
+                            "</table>"
+                        ),
+                    },
+                    {"type": "text", "text": "第二段文本" * 20},
+                ]),
+                encoding="utf-8",
+            )
+
+        monkeypatch.setattr(parser.mineru, "table_parser_available", lambda: True)
+        monkeypatch.setattr(parser.mineru, "load_table_parser", lambda: None)
+        monkeypatch.setattr(parser.mineru.tempfile, "TemporaryDirectory", lambda prefix: _TempDir(tmp_path / "mineru-output"))
+        monkeypatch.setattr(parser.mineru, "_mineru_do_parse", fake_do_parse)
+
+        chunks = _parse_file(
+            str(pdf_file),
+            parser_type="table",
+            parser=ParserConfig(
+                type="text",
+                text=ParserTextConfig(chunk_size=80, chunk_overlap=10),
+                table=ParserTableConfig(chunk_size=1000),
+            ),
+        )
+
+        table_chunks = [chunk for chunk in chunks if "向量库: FAISS" in chunk["content"]]
+        assert len(table_chunks) == 1
+        assert table_chunks[0]["content"].startswith("第一段文本")
+        assert "\n向量库: FAISS" in table_chunks[0]["content"]
+        assert "\n\n第二段文本" in table_chunks[0]["content"]
+        assert "向量库: Weaviate；小型数据集: V；扩展性说明: V强支持" in table_chunks[0]["content"]
+
+    def test_table_parser_splits_merged_tables_inside_html_table(self):
+        from parser.table_transform import table_html_to_chunks
+        from schema import ParserConfig, ParserTableConfig, ParserTextConfig
+
+        chunks = table_html_to_chunks(
+            (
+                "<table>"
+                "<tr><td>向量库</td><td>小型数据集(&lt;100万)</td><td>中型数据集(100万-1亿)</td><td>大型数据集(&gt;1亿)</td><td>扩展性说明</td></tr>"
+                "<tr><td>FAISS</td><td>V</td><td>X</td><td>X</td><td>X</td></tr>"
+                "<tr><td>Pinecone</td><td>✓ 推荐</td><td>✓推荐</td><td>V强烈推荐</td><td>Serverless架构自动扩展，但大规模下成本较高。</td></tr>"
+                "<tr><td>2. 查询类型对比</td></tr>"
+                "<tr><td>向量库</td><td>稠密向量搜索</td><td>稀疏向量/关键词搜索</td><td>混合检索(Hybrid）</td><td>多模态检索</td></tr>"
+                "<tr><td>Chroma</td><td>V</td><td>X</td><td>X</td><td>！基础支持</td></tr>"
+                "</table>"
+            ),
+            ParserConfig(
+                type="text",
+                text=ParserTextConfig(chunk_size=500, chunk_overlap=80),
+                table=ParserTableConfig(chunk_size=1000),
+            ),
+        )
+
+        assert len(chunks) == 3
+        assert chunks[0].endswith("2. 查询类型对比")
+        assert chunks[1] == "2. 查询类型对比"
+        assert chunks[2].startswith("2. 查询类型对比\n\n向量库: Chroma")
+        combined = "\n".join(chunks)
+        assert "向量库: Pinecone；小型数据集(<100万): ✓ 推荐；中型数据集(100万-1亿): ✓推荐；大型数据集(>1亿): V强烈推荐" in combined
+        assert "向量库: 2. 查询类型对比" not in combined
+        assert "向量库: 向量库" not in combined
+
+    def test_table_parser_adds_neighbor_text_context_to_table(self, tmp_path, monkeypatch):
+        import json
+        import parser.mineru
+        from schema import ParserConfig, ParserTableConfig, ParserTextConfig
+
+        pdf_file = tmp_path / "json-heading-table.pdf"
+        _create_minimal_pdf(str(pdf_file), "table")
+
+        def fake_do_parse(output_dir, filepath, filename):
+            output_dir = tmp_path / "mineru-output"
+            output_dir.mkdir(exist_ok=True)
+            (output_dir / "json-heading-table_content_list.json").write_text(
+                json.dumps([
+                    {"type": "text", "text": "2. 查询类型对比"},
+                    {
+                        "type": "table",
+                        "table_body": (
+                            "<table>"
+                            "<tr><td>向量库</td><td>稠密向量搜索</td></tr>"
+                            "<tr><td>Chroma</td><td>V</td></tr>"
+                            "</table>"
+                        ),
+                    },
+                    {"type": "text", "text": "说明：V 表示支持，X 表示不支持"},
+                ]),
+                encoding="utf-8",
+            )
+
+        monkeypatch.setattr(parser.mineru, "table_parser_available", lambda: True)
+        monkeypatch.setattr(parser.mineru, "load_table_parser", lambda: None)
+        monkeypatch.setattr(parser.mineru.tempfile, "TemporaryDirectory", lambda prefix: _TempDir(tmp_path / "mineru-output"))
+        monkeypatch.setattr(parser.mineru, "_mineru_do_parse", fake_do_parse)
+
+        chunks = _parse_file(
+            str(pdf_file),
+            parser_type="table",
+            parser=ParserConfig(
+                type="text",
+                text=ParserTextConfig(chunk_size=80, chunk_overlap=10),
+                table=ParserTableConfig(chunk_size=1000, before_text_size=160, after_text_size=160),
+            ),
+        )
+
+        assert len(chunks) == 3
+        assert chunks[0]["content"] == "2. 查询类型对比"
+        assert chunks[1]["content"] == "2. 查询类型对比\n\n向量库: Chroma；稠密向量搜索: V\n\n说明：V 表示支持，X 表示不支持"
+        assert chunks[2]["content"] == "说明：V 表示支持，X 表示不支持"
+
+    def test_table_parser_merges_adjacent_text_blocks_before_chunking(self, tmp_path, monkeypatch):
+        import json
+        import parser.mineru
+        from schema import ParserConfig, ParserTableConfig, ParserTextConfig
+
+        pdf_file = tmp_path / "json-text-text-table.pdf"
+        _create_minimal_pdf(str(pdf_file), "table")
+
+        def fake_do_parse(output_dir, filepath, filename):
+            output_dir = tmp_path / "mineru-output"
+            output_dir.mkdir(exist_ok=True)
+            (output_dir / "json-text-text-table_content_list.json").write_text(
+                json.dumps([
+                    {"type": "text", "text": "第一段正文"},
+                    {"type": "text", "text": "第二段正文"},
+                    {
+                        "type": "table",
+                        "table_body": (
+                            "<table>"
+                            "<tr><td>向量库</td><td>规模</td></tr>"
+                            "<tr><td>Qdrant</td><td>中</td></tr>"
+                            "</table>"
+                        ),
+                    },
+                ]),
+                encoding="utf-8",
+            )
+
+        monkeypatch.setattr(parser.mineru, "table_parser_available", lambda: True)
+        monkeypatch.setattr(parser.mineru, "load_table_parser", lambda: None)
+        monkeypatch.setattr(parser.mineru.tempfile, "TemporaryDirectory", lambda prefix: _TempDir(tmp_path / "mineru-output"))
+        monkeypatch.setattr(parser.mineru, "_mineru_do_parse", fake_do_parse)
+
+        chunks = _parse_file(
+            str(pdf_file),
+            parser_type="table",
+            parser=ParserConfig(
+                type="text",
+                text=ParserTextConfig(chunk_size=100, chunk_overlap=10),
+                table=ParserTableConfig(chunk_size=1000, before_text_size=160, after_text_size=160),
+            ),
+        )
+
+        assert chunks[0]["content"] == "第一段正文\n第二段正文"
+        assert chunks[1]["content"] == "第二段正文\n\n向量库: Qdrant；规模: 中"
+
+    def test_table_parser_does_not_add_neighbor_table_context_to_table(self, tmp_path, monkeypatch):
+        import json
+        import parser.mineru
+        from schema import ParserConfig, ParserTableConfig, ParserTextConfig
+
+        pdf_file = tmp_path / "json-table-table.pdf"
+        _create_minimal_pdf(str(pdf_file), "table")
+
+        def fake_do_parse(output_dir, filepath, filename):
+            output_dir = tmp_path / "mineru-output"
+            output_dir.mkdir(exist_ok=True)
+            (output_dir / "json-table-table_content_list.json").write_text(
+                json.dumps([
+                    {
+                        "type": "table",
+                        "table_body": (
+                            "<table>"
+                            "<tr><td>库</td><td>规模</td></tr>"
+                            "<tr><td>Qdrant</td><td>中</td></tr>"
+                            "</table>"
+                        ),
+                    },
+                    {
+                        "type": "table",
+                        "table_body": (
+                            "<table>"
+                            "<tr><td>库</td><td>查询</td></tr>"
+                            "<tr><td>Milvus</td><td>强</td></tr>"
+                            "</table>"
+                        ),
+                    },
+                ]),
+                encoding="utf-8",
+            )
+
+        monkeypatch.setattr(parser.mineru, "table_parser_available", lambda: True)
+        monkeypatch.setattr(parser.mineru, "load_table_parser", lambda: None)
+        monkeypatch.setattr(parser.mineru.tempfile, "TemporaryDirectory", lambda prefix: _TempDir(tmp_path / "mineru-output"))
+        monkeypatch.setattr(parser.mineru, "_mineru_do_parse", fake_do_parse)
+
+        chunks = _parse_file(
+            str(pdf_file),
+            parser_type="table",
+            parser=ParserConfig(
+                type="text",
+                text=ParserTextConfig(chunk_size=80, chunk_overlap=10),
+                table=ParserTableConfig(chunk_size=1000, before_text_size=160, after_text_size=160),
+            ),
+        )
+
+        assert chunks[0]["content"] == "库: Qdrant；规模: 中"
+        assert chunks[1]["content"] == "库: Milvus；查询: 强"
+
+    def test_table_parser_adds_between_text_context_to_both_tables(self, tmp_path, monkeypatch):
+        import json
+        import parser.mineru
+        from schema import ParserConfig, ParserTableConfig, ParserTextConfig
+
+        pdf_file = tmp_path / "json-table-heading-table.pdf"
+        _create_minimal_pdf(str(pdf_file), "table")
+
+        def fake_do_parse(output_dir, filepath, filename):
+            output_dir = tmp_path / "mineru-output"
+            output_dir.mkdir(exist_ok=True)
+            (output_dir / "json-table-heading-table_content_list.json").write_text(
+                json.dumps([
+                    {
+                        "type": "table",
+                        "table_body": (
+                            "<table>"
+                            "<tr><td>库</td><td>规模</td></tr>"
+                            "<tr><td>Qdrant</td><td>中</td></tr>"
+                            "</table>"
+                        ),
+                    },
+                    {"type": "text", "text": "7. 架构类型对比"},
+                    {
+                        "type": "table",
+                        "table_body": (
+                            "<table>"
+                            "<tr><td>库</td><td>架构</td></tr>"
+                            "<tr><td>Milvus</td><td>分布式</td></tr>"
+                            "</table>"
+                        ),
+                    },
+                ]),
+                encoding="utf-8",
+            )
+
+        monkeypatch.setattr(parser.mineru, "table_parser_available", lambda: True)
+        monkeypatch.setattr(parser.mineru, "load_table_parser", lambda: None)
+        monkeypatch.setattr(parser.mineru.tempfile, "TemporaryDirectory", lambda prefix: _TempDir(tmp_path / "mineru-output"))
+        monkeypatch.setattr(parser.mineru, "_mineru_do_parse", fake_do_parse)
+
+        chunks = _parse_file(
+            str(pdf_file),
+            parser_type="table",
+            parser=ParserConfig(
+                type="text",
+                text=ParserTextConfig(chunk_size=80, chunk_overlap=10),
+                table=ParserTableConfig(chunk_size=1000, before_text_size=160, after_text_size=160),
+            ),
+        )
+
+        assert chunks[0]["content"] == "库: Qdrant；规模: 中\n\n7. 架构类型对比"
+        assert chunks[1]["content"] == "7. 架构类型对比"
+        assert chunks[2]["content"] == "7. 架构类型对比\n\n库: Milvus；架构: 分布式"
+
+    def test_table_parser_falls_back_to_text_for_non_pdf(self, tmp_path):
+        from schema import ParserConfig
+
+        text_file = tmp_path / "table-mode.txt"
+        text_file.write_text("普通文本也可以选择表格优先解析。", encoding="utf-8")
+
+        chunks = _parse_file(str(text_file), parser=ParserConfig(type="text"), parser_type="table")
+
+        assert chunks
+        assert "普通文本" in chunks[0]["content"]
+
     def test_parse_image_file(self, test_img_path):
         """``parse_file()`` handles .png images and returns text chunks via OCR."""
-        from document_parser import parse_file
         from ocr.rapid import RapidOCR
 
         ocr = RapidOCR()
         ocr.start()
-        chunks = parse_file(test_img_path, ocr=ocr)
+        chunks = _parse_file(test_img_path, ocr=ocr)
         assert len(chunks) > 0
         for c in chunks:
             assert "content" in c

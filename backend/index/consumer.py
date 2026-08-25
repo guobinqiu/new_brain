@@ -1,16 +1,11 @@
-"""进程内索引消费器（架构 C）。
-
-backend 进程内使用 queue.Queue + 单工作线程消费索引任务，替代原 Celery
-index-worker。``_index_object`` 从原 ``indexing/tasks.py`` 的 celery 封装迁移而来；
-该文件连同 ``indexing/celery_app.py``、``indexing/repository.py`` 已一并删除。
-"""
+"""进程内索引消费器。"""
 from __future__ import annotations
 
 import logging
 import queue as _queue
 import threading
 
-from indexing.service import index_presigned_object
+from index.service import index_presigned_object
 
 logger = logging.getLogger("rag.index_consumer")
 
@@ -143,19 +138,20 @@ class InlineIndexConsumer:
 
 
 def _index_object(application, job) -> dict:
-    """从 indexing/tasks.py L47-64 迁移而来；入参为 job 字典 + application。
-
-    app 集合不存在时抛 ``ValueError``（不可重试）。
-    """
+    """执行单个索引任务；app 集合不存在时抛 ``ValueError``。"""
     app_id = job["app_id"]
     file_id = job["file_id"]
     presigned_url = job["presigned_url"]
     s3_url = job["s3_url"]
     filename = job.get("filename")
+    parser = job.get("parser")
     if not application.store.app_collection_exists(app_id):
         raise ValueError("app database is not initialized")
     with application.store.app_context(app_id):
-        count, file_size = index_presigned_object(application, file_id, presigned_url, s3_url, filename)
+        if parser is None:
+            count, file_size = index_presigned_object(application, file_id, presigned_url, s3_url, filename)
+        else:
+            count, file_size = index_presigned_object(application, file_id, presigned_url, s3_url, filename, parser=parser)
     logger.info(
         "Object indexed",
         extra={

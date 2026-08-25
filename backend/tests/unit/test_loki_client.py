@@ -21,11 +21,11 @@ def test_loki_parse_logs_returns_rows_in_time_order():
         ]},
     ])
 
-    assert [row["line"] for row in rows] == ["plain", '{"level":"INFO","message":"second"}']
-    assert rows[0]["parsed"] is None
+    assert [row["line"] for row in rows] == ['{"level":"INFO","message":"second"}', "plain"]
+    assert rows[0]["parsed"]["message"] == "second"
     assert rows[0]["node_id"] == "node-1"
     assert rows[0]["container"] == "rag-backend"
-    assert rows[1]["parsed"]["message"] == "second"
+    assert rows[1]["parsed"] is None
 
 
 def test_loki_parse_traces_filters_by_app_id_and_sorts_desc():
@@ -43,24 +43,8 @@ def test_loki_parse_traces_filters_by_app_id_and_sorts_desc():
     assert rows[0]["created_at"]
 
 
-def test_loki_tail_url_uses_websocket_endpoint(monkeypatch):
-    from loki_client import tail_url
+def test_loki_timestamp_to_ns_accepts_ui_milliseconds():
+    from loki_client import timestamp_to_ns
 
-    monkeypatch.setenv("LOKI_URL", "http://loki:3100")
-
-    url = tail_url('{container="rag-backend"}', start="1000000000", limit=500)
-
-    assert url.startswith("ws://loki:3100/loki/api/v1/tail?")
-    assert "query=%7Bcontainer%3D%22rag-backend%22%7D" in url
-    assert "start=1000000000" in url
-    assert "limit=500" in url
-
-
-def test_loki_parse_tail_message_returns_streams():
-    from loki_client import parse_tail_message
-
-    streams = parse_tail_message(
-        '{"streams":[{"stream":{"container":"rag-backend"},"values":[["1000000000","line"]]}]}'
-    )
-
-    assert streams == [{"stream": {"container": "rag-backend"}, "values": [["1000000000", "line"]]}]
+    assert timestamp_to_ns("1797422400123", 0) == "1797422400123000000"
+    assert timestamp_to_ns("1797422400123000000", 0) == "1797422400123000000"

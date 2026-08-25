@@ -157,6 +157,22 @@ def test_container_selects_tesseract_ocr_adapter(tmp_path):
     assert isinstance(ocr, TesseractOCR)
 
 
+def test_container_builds_parser_component(tmp_path):
+    from container import create_container
+    from loader import load_config_file
+    from parser.service import ParserService
+
+    config = load_config_file(_config_file(tmp_path))
+    container = create_container(config)
+    ocr = container.ocr()
+
+    parser = container.parser(ocr=ocr)
+
+    assert isinstance(parser, ParserService)
+    assert parser.ocr is ocr
+    assert parser.config is config.parser
+
+
 def test_container_injects_store_into_search_pipeline(tmp_path):
     from container import create_container
     from loader import load_config_file

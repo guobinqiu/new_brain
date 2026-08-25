@@ -7,6 +7,9 @@ from dataclasses import replace
 import pytest
 from fastapi.testclient import TestClient
 
+from api.services import common as service
+from api.runtime import runtime
+
 
 pytestmark = pytest.mark.unit
 
@@ -63,7 +66,7 @@ def test_create_app_api_generates_credentials(monkeypatch, tmp_path):
         admin=AdminAuthConfig(username="admin", password="admin123"),
         registry_file=str(tmp_path / "apps.json"),
     )
-    config = replace(main.application.config, auth=auth_config)
+    config = replace(runtime.application.config, auth=auth_config)
 
     class Application:
         def __init__(self):
@@ -78,8 +81,8 @@ def test_create_app_api_generates_credentials(monkeypatch, tmp_path):
             pass
 
     application = Application()
-    monkeypatch.setattr(main, "application", application)
-    monkeypatch.setattr(main, "STARTUP_IN_BACKGROUND", False)
+    monkeypatch.setattr(runtime, "application", application)
+    monkeypatch.setattr(runtime, "startup_in_background", False)
     token = issue_token(auth_config, Principal(type="admin", app_id="admin"))
 
     with TestClient(main.app) as client:
@@ -113,7 +116,7 @@ def test_create_app_api_returns_duplicate_error(monkeypatch, tmp_path):
         admin=AdminAuthConfig(username="admin", password="admin123"),
         registry_file=str(tmp_path / "apps.json"),
     )
-    config = replace(main.application.config, auth=auth_config)
+    config = replace(runtime.application.config, auth=auth_config)
 
     class Application:
         def __init__(self):
@@ -129,8 +132,8 @@ def test_create_app_api_returns_duplicate_error(monkeypatch, tmp_path):
 
     application = Application()
     application.database.create_app("tenant_a")
-    monkeypatch.setattr(main, "application", application)
-    monkeypatch.setattr(main, "STARTUP_IN_BACKGROUND", False)
+    monkeypatch.setattr(runtime, "application", application)
+    monkeypatch.setattr(runtime, "startup_in_background", False)
     token = issue_token(auth_config, Principal(type="admin", app_id="admin"))
 
     with TestClient(main.app) as client:
@@ -154,7 +157,7 @@ def test_delete_app_api_removes_credentials(monkeypatch, tmp_path):
         admin=AdminAuthConfig(username="admin", password="admin123"),
         registry_file=str(tmp_path / "apps.json"),
     )
-    config = replace(main.application.config, auth=auth_config)
+    config = replace(runtime.application.config, auth=auth_config)
 
     class Database(FakeDatabase):
         def __init__(self):
@@ -179,8 +182,8 @@ def test_delete_app_api_removes_credentials(monkeypatch, tmp_path):
 
     application = Application()
     application.database.create_app("tenant_a")
-    monkeypatch.setattr(main, "application", application)
-    monkeypatch.setattr(main, "STARTUP_IN_BACKGROUND", False)
+    monkeypatch.setattr(runtime, "application", application)
+    monkeypatch.setattr(runtime, "startup_in_background", False)
     token = issue_token(auth_config, Principal(type="admin", app_id="admin"))
 
     with TestClient(main.app) as client:
@@ -200,7 +203,7 @@ def test_app_database_status_and_empty_delete(monkeypatch, tmp_path):
         admin=AdminAuthConfig(username="admin", password="admin123"),
         registry_file=str(tmp_path / "apps.json"),
     )
-    config = replace(main.application.config, auth=auth_config)
+    config = replace(runtime.application.config, auth=auth_config)
 
     class Store:
         def __init__(self):
@@ -237,8 +240,8 @@ def test_app_database_status_and_empty_delete(monkeypatch, tmp_path):
             pass
 
     application = Application()
-    monkeypatch.setattr(main, "application", application)
-    monkeypatch.setattr(main, "STARTUP_IN_BACKGROUND", False)
+    monkeypatch.setattr(runtime, "application", application)
+    monkeypatch.setattr(runtime, "startup_in_background", False)
     token = issue_token(auth_config, Principal(type="admin", app_id="admin"))
 
     with TestClient(main.app) as client:
@@ -261,7 +264,7 @@ def test_app_database_delete_allows_non_empty_database(monkeypatch, tmp_path):
         admin=AdminAuthConfig(username="admin", password="admin123"),
         registry_file=str(tmp_path / "apps.json"),
     )
-    config = replace(main.application.config, auth=auth_config)
+    config = replace(runtime.application.config, auth=auth_config)
 
     class Store:
         def app_collection_exists(self, app_id):
@@ -291,9 +294,9 @@ def test_app_database_delete_allows_non_empty_database(monkeypatch, tmp_path):
             pass
 
     application = Application()
-    monkeypatch.setattr(main, "application", application)
-    monkeypatch.setattr(main, "STARTUP_IN_BACKGROUND", False)
-    monkeypatch.setattr(main, "_scoped_store", lambda principal: type("ScopedStore", (), {"get_total_chunks": lambda self, file_ids=None: 2})())
+    monkeypatch.setattr(runtime, "application", application)
+    monkeypatch.setattr(runtime, "startup_in_background", False)
+    monkeypatch.setattr(service, "scoped_store", lambda principal: type("ScopedStore", (), {"get_total_chunks": lambda self, file_ids=None: 2})())
     token = issue_token(auth_config, Principal(type="admin", app_id="admin"))
 
     with TestClient(main.app) as client:

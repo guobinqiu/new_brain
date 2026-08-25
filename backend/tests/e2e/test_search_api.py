@@ -1,22 +1,24 @@
 import pytest
 from pathlib import Path
 
+from api.runtime import runtime
+from api.services import files as service
+from index import index_file
+
 
 pytestmark = pytest.mark.e2e
 
 
 def _index_ready_file(api_client, test_txt_path, monkeypatch, filename="test_ai.txt"):
-    import main
-
     s3_url = f"s3://rag/{filename}"
 
     def index_object(application, file_id, presigned_url, s3_url, filename):
-        main.index_file(main.application, file_id, Path(test_txt_path), filename, extra_metadata={"s3_url": s3_url})
+        index_file(runtime.application, file_id, Path(test_txt_path), filename, extra_metadata={"s3_url": s3_url})
         return 1, Path(test_txt_path).stat().st_size
 
-    monkeypatch.setattr(main, "index_presigned_object", index_object)
+    monkeypatch.setattr(service, "index_presigned_object", index_object)
     resp = api_client.post(
-        "/api/open/index",
+        "/api/open/files",
         json={
             "presigned_url": "https://example.com/presigned",
             "s3_url": s3_url,
@@ -26,8 +28,8 @@ def _index_ready_file(api_client, test_txt_path, monkeypatch, filename="test_ai.
     assert resp.status_code == 200, resp.text
     file_id = resp.json()["file_id"]
     assert resp.json() == {"file_id": file_id}
-    with main.application.store.app_context(api_client.app_id):
-        documents = main.application.store.get_search_documents(main.application.store.build_file_filter([file_id]))
+    with runtime.application.store.app_context(api_client.app_id):
+        documents = runtime.application.store.get_search_documents(runtime.application.store.build_file_filter([file_id]))
     assert documents
     return file_id
 
@@ -71,12 +73,10 @@ class TestSearchAPI:
 
     def test_search_without_file_ids_searches_all_files(self, app_api_client, test_txt_path, monkeypatch):
         """``POST /api/open/search`` without file_ids searches the full index."""
-        import main
-
         file_id = _index_ready_file(app_api_client, test_txt_path, monkeypatch)
-        with main.application.store.app_context(app_api_client.app_id):
-            main.application.store.add_file_chunks(
-                [{"id": "other-file-chunk", "content": "人工智能 other file", "metadata": {"filename": "other.txt", "chunk_index": 0}}],
+        with runtime.application.store.app_context(app_api_client.app_id):
+            runtime.application.store.add_file_chunks(
+                [{"id": "550e8400-e29b-41d4-a716-446655440000", "content": "人工智能 other file", "metadata": {"filename": "other.txt", "chunk_index": 0}}],
                 file_id="other-file",
             )
 

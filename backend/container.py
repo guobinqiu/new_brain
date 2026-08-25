@@ -12,6 +12,7 @@ from ocr.base import OCR
 from ocr.paddle import PaddleOCR
 from ocr.rapid import RapidOCR
 from ocr.tesseract import TesseractOCR
+from parser.service import ParserService
 from rerank.base import Rerank
 from rerank.cross_encoder import CrossEncoderRerank
 from schema import AppConfig
@@ -143,6 +144,12 @@ class ApplicationContainer(containers.DeclarativeContainer):
     )
 
     search = providers.Singleton(SearchPipeline, store=store, sparse=sparse)
+
+    parser = providers.Singleton(
+        ParserService,
+        config=providers.Callable(lambda app_config: app_config.parser, config),
+        ocr=providers.Dependency(instance_of=OCR),
+    )
 
     database = providers.Selector(
         database_type,

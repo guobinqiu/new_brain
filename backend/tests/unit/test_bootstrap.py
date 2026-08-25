@@ -29,11 +29,12 @@ def test_application_starts_public_components_in_order():
         search=FakeComponent("search"),
         rerank=FakeComponent("rerank"),
         ocr=FakeComponent("ocr"),
+        parser=FakeComponent("parser"),
         database=FakeComponent("database"),
     )
     application.start()
 
-    assert calls == ["dense", "sparse", "rerank", "ocr", "store", "search", "database"]
+    assert calls == ["dense", "sparse", "rerank", "ocr", "parser", "store", "search", "database"]
     assert application.ready is True
 
 
@@ -61,13 +62,14 @@ def test_application_splits_model_loading_from_runtime_connections():
         search=FakeComponent("search"),
         rerank=FakeComponent("rerank"),
         ocr=FakeComponent("ocr"),
+        parser=FakeComponent("parser"),
         database=FakeComponent("database"),
     )
 
     application.load_models()
     application.init_connections()
 
-    assert calls == ["dense", "sparse", "rerank", "ocr", "store", "search", "database"]
+    assert calls == ["dense", "sparse", "rerank", "ocr", "parser", "store", "search", "database"]
     assert application.ready is True
 
 
@@ -87,6 +89,7 @@ def test_application_selects_production_components():
     assert isinstance(application.search, SearchPipeline)
     assert application.rerank is None
     assert isinstance(application.ocr, RapidOCR)
+    assert application.parser.__class__.__name__ == "ParserService"
 
 
 def test_application_selects_configured_dense_and_bm25_sparse():

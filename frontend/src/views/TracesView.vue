@@ -6,10 +6,19 @@
       <div class="monitor-block trace-block">
         <div class="block-title job-title">
           <span>{{ t('monitor.traces') }}</span>
-          <span class="trace-note">{{ t('trace.limitNote', { count: TRACE_LIMIT }) }}</span>
+          <el-date-picker
+            v-model="timeRange"
+            type="datetimerange"
+            value-format="x"
+            size="small"
+            class="trace-time-range"
+            :start-placeholder="t('common.startTime')"
+            :end-placeholder="t('common.endTime')"
+          />
+          <el-button size="small" type="primary" :loading="tracesLoading" @click="loadTraces">{{ t('common.search') }}</el-button>
         </div>
         <template v-if="traces.length">
-          <el-table :data="traces" max-height="320" v-loading="tracesLoading">
+          <el-table ref="tracesTableRef" :data="traces" max-height="320" v-loading="tracesLoading" @scroll="onTracesScroll">
             <el-table-column :label="t('trace.columns.time')" min-width="150">
               <template #default="{ row }">{{ shortTime(row.created_at) }}</template>
             </el-table-column>
@@ -56,26 +65,33 @@
 </template>
 
 <script setup>
-import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
+import { computed, ref, watch, onMounted } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { ms, shortTime } from '../utils/format'
 import { useActiveAppStore } from '../stores/activeApp'
-import { useAuthStore } from '../stores/auth'
+import axios from '../utils/api'
 
-const TRACE_LIMIT = 200
+const TRACE_LIMIT = 500
 const { t } = useI18n()
 
 const activeAppStore = useActiveAppStore()
 const { appId } = storeToRefs(activeAppStore)
-const authStore = useAuthStore()
 const route = useRoute()
 
 const traces = ref([])
 const tracesLoading = ref(false)
-let traceSource = null
+const tracesHasMore = ref(false)
+const tracesNextEnd = ref(null)
+const tracesTableRef = ref(null)
+const timeRange = ref(defaultRange())
 const currentAppId = computed(() => route.params.app_id || appId.value)
+
+function defaultRange() {
+  const end = Date.now()
+  return [end - 24 * 60 * 60 * 1000, end]
+}
 
 function stageMs(trace, name) {
   const stage = (trace.stages || []).find(item => item.name === name)
@@ -89,42 +105,52 @@ function traceModeText(mode) {
   return text === key ? mode : text
 }
 
-function startTraces() {
-  stopTraces()
+async function loadTraces() {
   traces.value = []
+  tracesHasMore.value = false
+  tracesNextEnd.value = null
+  await fetchNextTraces()
+}
+
+async function fetchNextTraces() {
   if (!currentAppId.value) return
+  if (tracesLoading.value) return
   tracesLoading.value = true
-  const params = new URLSearchParams()
-  params.set('token', authStore.authToken)
-  params.set('app_id', currentAppId.value)
-  params.set('limit', String(TRACE_LIMIT))
-  traceSource = new EventSource(`/api/traces/stream?${params.toString()}`)
-  traceSource.onmessage = event => {
-    const next = JSON.parse(event.data)
-    if (next.length || !traces.value.length) traces.value = next
-    tracesLoading.value = false
-  }
-  traceSource.onerror = () => {
+  try {
+    const params = {
+      app_id: currentAppId.value,
+      limit: TRACE_LIMIT,
+    }
+    if (timeRange.value?.length === 2) {
+      params.start = timeRange.value[0]
+      params.end = timeRange.value[1]
+    }
+    if (tracesNextEnd.value != null) params.end = tracesNextEnd.value
+    const res = await axios.get('/api/traces', {
+      params,
+    })
+    traces.value = traces.value.concat(res.data?.traces || [])
+    tracesHasMore.value = Boolean(res.data?.has_more)
+    tracesNextEnd.value = res.data?.next_end || null
+  } finally {
     tracesLoading.value = false
   }
 }
 
-function stopTraces() {
-  if (traceSource) {
-    traceSource.close()
-    traceSource = null
+function onTracesScroll(event) {
+  const wrap = tracesTableRef.value?.scrollBarRef?.wrapRef
+  if (!wrap || tracesLoading.value || !tracesHasMore.value) return
+  const scrollTop = event?.scrollTop ?? wrap.scrollTop
+  if (scrollTop + wrap.clientHeight >= wrap.scrollHeight - 24) {
+    fetchNextTraces()
   }
 }
 
 onMounted(() => {
-  startTraces()
-})
-
-onUnmounted(() => {
-  stopTraces()
+  loadTraces()
 })
 
 watch(currentAppId, () => {
-  startTraces()
+  loadTraces()
 })
 </script>

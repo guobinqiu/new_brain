@@ -4,10 +4,8 @@ import json
 import os
 from datetime import datetime, timezone
 from typing import Any, Literal
-from urllib.parse import urlencode, urlsplit, urlunsplit
 
 import httpx
-import websockets
 
 
 LOKI_TIMEOUT_SECONDS = 5.0
@@ -42,27 +40,6 @@ async def label_values(label: str) -> list[str]:
         return response.json().get("data", [])
 
 
-async def tail(query: str, start: str, limit: int = 500):
-    async with websockets.connect(tail_url(query, start=start, limit=limit)) as websocket:
-        async for message in websocket:
-            streams = parse_tail_message(message)
-            if streams:
-                yield streams
-
-
-def tail_url(query: str, start: str, limit: int = 500) -> str:
-    base = urlsplit(_base_url())
-    scheme = "wss" if base.scheme == "https" else "ws"
-    params = urlencode({"query": query, "start": start, "limit": limit})
-    return urlunsplit((scheme, base.netloc, "/loki/api/v1/tail", params, ""))
-
-
-def parse_tail_message(message: str) -> list[dict[str, Any]]:
-    data = json.loads(message)
-    streams = data.get("streams", [])
-    return streams if isinstance(streams, list) else []
-
-
 def log_query(node_id: str | None = None, container: str | None = None) -> str:
     labels = []
     if node_id:
@@ -92,10 +69,10 @@ def parse_logs(streams: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "line": line,
                 "parsed": _parse_json(line),
             })
-    return sorted(rows, key=lambda row: int(row["ts"]))
+    return sorted(rows, key=lambda row: int(row["ts"]), reverse=True)
 
 
-def parse_traces(streams: list[dict[str, Any]], app_id: str | None = None, limit: int = 200) -> list[dict[str, Any]]:
+def parse_traces(streams: list[dict[str, Any]], app_id: str | None = None, limit: int = 500) -> list[dict[str, Any]]:
     rows = []
     for stream in streams:
         for ts, line in stream.get("values") or []:
@@ -115,6 +92,28 @@ def parse_traces(streams: list[dict[str, Any]], app_id: str | None = None, limit
 
 def ns_from_ms(value: int) -> str:
     return str(value * 1_000_000)
+
+
+def previous_ns(value: str) -> str:
+    return str(max(int(value) - 1, 0))
+
+
+def timestamp_to_ns(value: str | None, default_ms: int) -> str:
+    if value is None or str(value).strip() == "":
+        return ns_from_ms(default_ms)
+
+    text = str(value).strip()
+    if text.isdigit():
+        if len(text) >= 16:
+            return text
+        if len(text) >= 13:
+            return ns_from_ms(int(text))
+        return ns_from_ms(int(text) * 1000)
+
+    parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return str(int(parsed.timestamp() * 1_000_000_000))
 
 
 def _base_url() -> str:

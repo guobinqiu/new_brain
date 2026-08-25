@@ -43,20 +43,23 @@ def test_add_file_chunks_writes_file_metadata(monkeypatch):
     assert points[0].payload["metadata"]["filename"] == "liang.pdf"
 
 
-def test_ensure_payload_indexes_only_creates_file_id_index(monkeypatch):
+def test_ensure_payload_indexes_creates_file_id_and_chunk_index_indexes(monkeypatch):
     import store
 
     calls = []
 
     class FakeClient:
         def create_payload_index(self, **kwargs):
-            calls.append((kwargs["collection_name"], kwargs["field_name"]))
+            calls.append((kwargs["collection_name"], kwargs["field_name"], kwargs["field_schema"]))
 
     monkeypatch.setattr(store, "get_qdrant_client", lambda: FakeClient())
 
     store.ensure_payload_indexes("imsdom_chunks")
 
-    assert calls == [("imsdom_chunks", "metadata.file_id")]
+    assert calls == [
+        ("imsdom_chunks", "metadata.file_id", store.models.PayloadSchemaType.KEYWORD),
+        ("imsdom_chunks", "metadata.chunk_index", store.models.PayloadSchemaType.INTEGER),
+    ]
 
 
 def test_add_file_chunks_writes_sparse_vector_when_sparse_vectors_are_stored(monkeypatch):
@@ -107,14 +110,15 @@ def test_add_file_chunks_requires_file_id():
         store.add_file_chunks([{"id": "chunk-1", "content": "x", "metadata": {"filename": "x.txt", "chunk_index": 0}}], file_id="")
 
 
-def test_point_id_maps_arbitrary_chunk_id_to_uuid():
+def test_point_id_keeps_standard_uuid_chunk_id():
     import uuid
     import store
 
-    point_id = store._point_id("test_ai.txt_0_a836bd2b")
+    chunk_id = str(uuid.uuid4())
+    point_id = store._point_id(chunk_id)
 
+    assert point_id == chunk_id
     assert str(uuid.UUID(point_id)) == point_id
-    assert store._point_id("test_ai.txt_0_a836bd2b") == point_id
 
 
 def test_get_dense_requires_explicit_store_initialization():
@@ -158,28 +162,37 @@ def test_qdrant_list_chunks_uses_scroll_cursor(monkeypatch):
     calls = []
 
     class FakeRecord:
-        id = "point-1"
-        payload = {
-            "content": "chunk text",
-            "metadata": {"file_id": "file-a", "filename": "a.txt", "chunk_index": 0},
-        }
+        def __init__(self, point_id, chunk_index):
+            self.id = point_id
+            self.payload = {
+                "content": f"chunk text {chunk_index}",
+                "metadata": {"file_id": "file-a", "filename": "a.txt", "chunk_index": chunk_index},
+            }
 
     class FakeClient:
         def scroll(self, **kwargs):
             calls.append(kwargs)
-            return [FakeRecord()], "next-point"
+            if len(calls) == 1:
+                return [FakeRecord("point-1", 0), FakeRecord("point-2", 1)], None
+            return [FakeRecord("point-2", 1)], None
 
     monkeypatch.setattr(store, "get_qdrant_client", lambda: FakeClient())
 
     with app_collection("imsdom"):
-        page = store.list_chunks(file_ids=["file-a"], limit=2, cursor="point-0")
+        first_page = store.list_chunks(file_ids=["file-a"], limit=1)
+        page = store.list_chunks(file_ids=["file-a"], limit=2, cursor=first_page["next_cursor"])
 
-    assert page["documents"][0]["id"] == "point-1"
-    assert page["next_cursor"] == "next-point"
-    assert page["has_more"] is True
+    assert page["documents"][0]["id"] == "point-2"
+    assert page["next_cursor"] is None
+    assert page["has_more"] is False
     assert calls[0]["collection_name"] == "imsdom_chunks"
     assert calls[0]["limit"] == 2
-    assert calls[0]["offset"] == "point-0"
+    assert calls[0]["order_by"] == "metadata.chunk_index"
+    assert calls[0]["offset"] is None
+    assert calls[1]["limit"] == 3
+    assert calls[1]["order_by"] == "metadata.chunk_index"
+    assert calls[1]["offset"] is None
+    assert calls[1]["scroll_filter"].must[1].range.gt == 0
     assert calls[0]["with_vectors"] is False
 
 

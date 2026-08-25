@@ -52,6 +52,7 @@ services:
     volumes:
       - ../../frontend:/app/frontend
       - ../../frontend/.node_modules-docker:/app/frontend/node_modules
+    logging: *json-logging
     restart: unless-stopped
 
   nginx:
@@ -68,6 +69,7 @@ services:
     depends_on:
       - backend
       - frontend
+    logging: *json-logging
     restart: unless-stopped
 
   promtail:
@@ -79,4 +81,5 @@ services:
     volumes:
       - ../../deploy/monitor/promtail-config.yml:/etc/promtail/config.yml:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
+    logging: *json-logging
     restart: unless-stopped

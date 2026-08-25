@@ -1,6 +1,8 @@
 """Milvus-backed document storage through native pymilvus client."""
 from __future__ import annotations
 
+import base64
+import json
 import uuid
 from pathlib import Path
 from typing import Literal
@@ -536,18 +538,19 @@ def list_chunks(file_ids: list[str] | None = None, limit: int = 50, cursor: str 
     if limit <= 0:
         raise ValueError("limit must be greater than 0")
     limit = min(limit, 200)
-    start = int(cursor) if cursor else 0
+    metadata_filter = _combine_filters(build_file_filter(file_ids), _chunk_cursor_filter(cursor))
     rows = get_milvus_client().query(
         collection_name=_chunks_collection(),
-        filter=build_file_filter(file_ids),
+        filter=metadata_filter,
         output_fields=["*"],
         timeout=_timeout,
         limit=limit + 1,
-        offset=start,
+        order_by=_chunk_order_by(),
     )
+    page_rows = rows[:limit]
     return {
-        "documents": [_row_to_document(row) for row in rows[:limit]],
-        "next_cursor": str(start + limit) if len(rows) > limit else None,
+        "documents": [_row_to_document(row) for row in page_rows],
+        "next_cursor": _encode_chunk_cursor(page_rows[-1]) if len(rows) > limit and page_rows else None,
         "has_more": len(rows) > limit,
     }
 
@@ -558,6 +561,60 @@ def build_file_filter(file_ids: list[str] | None = None) -> str:
     if not file_ids:
         raise ValueError("file_ids cannot be empty")
     return _file_payload_filter(file_ids)
+
+
+def _chunk_order_by() -> list[dict[str, str]]:
+    return [
+        {"field": "file_id", "order": "asc"},
+        {"field": "chunk_index", "order": "asc"},
+        {"field": "pk", "order": "asc"},
+    ]
+
+
+def _chunk_cursor_filter(cursor: str | None) -> str:
+    if not cursor:
+        return ""
+    data = _decode_chunk_cursor(cursor)
+    file_id = _milvus_string_literal(data["file_id"])
+    chunk_index = int(data["chunk_index"])
+    chunk_id = _milvus_string_literal(data["chunk_id"])
+    return (
+        f"(file_id > {file_id} or "
+        f"(file_id == {file_id} and chunk_index > {chunk_index}) or "
+        f"(file_id == {file_id} and chunk_index == {chunk_index} and pk > {chunk_id}))"
+    )
+
+
+def _combine_filters(*filters: str) -> str:
+    active = [metadata_filter for metadata_filter in filters if metadata_filter]
+    if len(active) == 1:
+        return active[0]
+    return " and ".join(f"({metadata_filter})" for metadata_filter in active)
+
+
+def _encode_chunk_cursor(row: dict) -> str:
+    payload = {
+        "file_id": str(row["file_id"]),
+        "chunk_index": int(row["chunk_index"]),
+        "chunk_id": str(row["pk"]),
+    }
+    raw = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _decode_chunk_cursor(cursor: str) -> dict:
+    padded = cursor + "=" * (-len(cursor) % 4)
+    try:
+        data = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8"))
+    except Exception as exc:
+        raise ValueError("invalid cursor") from exc
+    if not isinstance(data, dict) or not {"file_id", "chunk_index", "chunk_id"} <= data.keys():
+        raise ValueError("invalid cursor")
+    return data
+
+
+def _milvus_string_literal(value: str) -> str:
+    return json.dumps(str(value), ensure_ascii=False)
 
 
 def _row_to_document(row: dict) -> dict:
@@ -637,4 +694,4 @@ def _metadata_from_row(row: dict) -> dict:
 
 
 def _point_id(chunk_id: str) -> str:
-    return str(uuid.uuid5(uuid.NAMESPACE_URL, chunk_id))
+    return chunk_id

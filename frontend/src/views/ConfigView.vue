@@ -15,9 +15,6 @@
               <div class="block-title">{{ node.node_id }}</div>
               <p>{{ node.base_url }}</p>
             </div>
-            <el-tag :type="node.status === 'ok' ? driftTagType(node) : 'danger'" size="small">
-              {{ nodeStatusText(node) }}
-            </el-tag>
           </div>
           <div v-if="node.status === 'ok'" class="config-grid">
             <div class="kv-list">
@@ -37,6 +34,13 @@
               <div><span>ocr</span><strong>{{ configComponentModel(node.data?.ocr) }}</strong></div>
             </div>
             <div class="kv-list">
+              <div><span>{{ t('config.parser') }}</span><strong>{{ node.data?.parser?.type || '-' }}</strong></div>
+              <div><span>standard</span><strong>{{ parserAvailableText(node.data?.parser, 'standard') }}</strong></div>
+              <div><span>text.chunk_size</span><strong>{{ node.data?.parser?.text?.chunk_size ?? '-' }}</strong></div>
+              <div><span>text.chunk_overlap</span><strong>{{ node.data?.parser?.text?.chunk_overlap ?? '-' }}</strong></div>
+              <div><span>table.chunk_max_chars</span><strong>{{ node.data?.parser?.table?.chunk_max_chars ?? '-' }}</strong></div>
+            </div>
+            <div class="kv-list">
               <div><span>{{ t('config.storage') }}</span><strong>{{ node.data?.store?.type || '-' }}</strong></div>
               <div><span>{{ t('database.location') }}</span><strong>{{ configStoreLocation(node.data) }}</strong></div>
             </div>
@@ -49,18 +53,13 @@
 </template>
 
 <script setup>
-import { computed, ref, onMounted } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import axios from '../utils/api'
 
 const { t } = useI18n()
 
 const nodes = ref([])
-
-const baselineConfig = computed(() => {
-  const node = nodes.value.find(item => item.status === 'ok')
-  return node ? comparableConfig(node.data) : null
-})
 
 function configStoreLocation(config) {
   const store = config?.store
@@ -72,22 +71,9 @@ function configComponentModel(item) {
   return item.model_name || item.name || item.type || '-'
 }
 
-function nodeStatusText(node) {
-  if (node.status !== 'ok') return t('cluster.unreachable')
-  return hasConfigDrift(node) ? t('cluster.configDrift') : 'ok'
-}
-
-function driftTagType(node) {
-  return hasConfigDrift(node) ? 'warning' : 'success'
-}
-
-function hasConfigDrift(node) {
-  return Boolean(baselineConfig.value && JSON.stringify(comparableConfig(node.data)) !== JSON.stringify(baselineConfig.value))
-}
-
-function comparableConfig(data) {
-  const { node_id, ...rest } = data || {}
-  return rest
+function parserAvailableText(parser, name) {
+  const item = (parser?.available || []).find((entry) => entry.name === name)
+  return item?.available ? 'ready' : 'disabled'
 }
 
 async function fetchConfig() {

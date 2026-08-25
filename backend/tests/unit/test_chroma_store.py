@@ -26,7 +26,7 @@ def test_chroma_store_keeps_absolute_persist_dir(tmp_path):
     assert chroma._persist_path(str(persist_dir)) == str(persist_dir)
 
 
-def test_chroma_list_chunks_uses_collection_limit_offset(monkeypatch):
+def test_chroma_list_chunks_uses_stable_cursor_order(monkeypatch):
     from store import chroma
 
     calls = []
@@ -35,25 +35,22 @@ def test_chroma_list_chunks_uses_collection_limit_offset(monkeypatch):
         def get(self, **kwargs):
             calls.append(kwargs)
             return {
-                "ids": ["chunk-1", "chunk-2", "chunk-3"],
-                "documents": ["a", "b", "c"],
+                "ids": ["chunk-3", "chunk-1", "chunk-2", "chunk-4"],
+                "documents": ["c", "a", "b", "d"],
                 "metadatas": [
-                    {"file_id": "file-a", "filename": "a.txt", "chunk_index": 0},
+                    {"file_id": "file-b", "filename": "b.txt", "chunk_index": 0},
                     {"file_id": "file-a", "filename": "a.txt", "chunk_index": 1},
                     {"file_id": "file-a", "filename": "a.txt", "chunk_index": 2},
+                    {"file_id": "file-a", "filename": "a.txt", "chunk_index": 3},
                 ],
             }
 
     monkeypatch.setattr(chroma, "_collection", lambda: FakeCollection())
 
-    page = chroma.list_chunks(file_ids=["file-a"], limit=2, cursor="5")
+    first_page = chroma.list_chunks(file_ids=None, limit=1)
+    page = chroma.list_chunks(file_ids=None, limit=2, cursor=first_page["next_cursor"])
 
-    assert [document["id"] for document in page["documents"]] == ["chunk-1", "chunk-2"]
-    assert page["next_cursor"] == "7"
+    assert [document["id"] for document in first_page["documents"]] == ["chunk-1"]
+    assert [document["id"] for document in page["documents"]] == ["chunk-2", "chunk-4"]
     assert page["has_more"] is True
-    assert calls == [{
-        "where": {"file_id": {"$in": ["file-a"]}},
-        "limit": 3,
-        "offset": 5,
-        "include": ["documents", "metadatas"],
-    }]
+    assert calls == [{"include": ["documents", "metadatas"]}, {"include": ["documents", "metadatas"]}]

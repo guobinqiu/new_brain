@@ -91,7 +91,6 @@ import { useAuthStore } from './stores/auth'
 import { useThemeStore } from './stores/theme'
 import { useActiveAppStore } from './stores/activeApp'
 import { useAppsStore } from './stores/apps'
-import { stopLogsTail } from './utils/loki'
 
 const { t, locale } = useI18n()
 const route = useRoute()
@@ -157,7 +156,6 @@ function setTheme(value) {
 }
 
 function logout() {
-  stopLogsTail()
   activeAppStore.appId = ''
   activeAppStore.databaseStatus = null
   authStore.clearAuth()
@@ -254,9 +252,11 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helv
 .database-delete-btn { margin-left: auto; }
 .docs-empty { font-size: 13px; color: var(--el-text-color-secondary); text-align: center; padding: 28px 0; }
 .chunk-filter { display: grid; grid-template-columns: 64px minmax(0, 1fr) 64px; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 12px; color: var(--el-text-color-secondary); }
-.copy-cell { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) 42px; align-items: center; gap: 6px; }
+.copy-cell { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) 26px; align-items: center; gap: 6px; }
 .chunk-id { min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chunk-content { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--el-text-color-primary); }
+.chunk-content-tooltip { max-width: min(720px, 80vw); }
+.chunk-content-tooltip-body { white-space: pre-wrap; word-break: break-word; max-height: 420px; overflow: auto; line-height: 1.55; }
 
 /* Monitor */
 .monitor-section { background: var(--el-bg-color); border: 1px solid var(--el-border-color); border-radius: 6px; padding: 18px 22px; margin-bottom: 20px; box-shadow: none; }
@@ -269,6 +269,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helv
 .node-summary { margin-bottom: 12px; font-size: 12px; color: var(--el-text-color-secondary); }
 .log-filters { display: flex; align-items: center; gap: 8px; }
 .log-filter { width: 180px; }
+.log-time-range, .trace-time-range { width: 360px; }
 .monitor-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .monitor-grid + .monitor-block { margin-top: 18px; }
 .monitor-section > .monitor-block + .monitor-block { margin-top: 18px; }
@@ -352,6 +353,7 @@ html.dark .logs-box { background: #050b13; color: #d6e4f2; }
   .app-create { grid-template-columns: 1fr; }
   .log-filters { width: 100%; flex-direction: column; align-items: stretch; }
   .log-filter { width: 100%; }
+  .log-time-range, .trace-time-range { width: 100%; }
   .search-input-wrap { flex-direction: column; }
   .results-bar { flex-wrap: wrap; gap: 8px 12px; }
 }

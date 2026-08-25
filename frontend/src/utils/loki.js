@@ -1,43 +1,24 @@
-import { nextTick, ref } from 'vue'
 import axios from './api'
-import { useAuthStore } from '../stores/auth'
 
 const LOG_LIMIT = 500
-
-export const logs = ref([])
-export const logsBox = ref(null)
-
-let source = null
-let currentFilter = { nodeId: '', container: '' }
 
 export async function fetchLabelValues(label) {
   const res = await axios.get(`/api/logs/labels/${label}`)
   return res.data?.values || []
 }
 
-export async function startLogsTail(filter = {}) {
-  stopLogsTail()
-  currentFilter = {
-    nodeId: filter.nodeId || '',
-    container: filter.container || '',
-  }
-  logs.value = []
-  const token = useAuthStore().authToken
+export async function fetchLogs(filter = {}) {
   const params = new URLSearchParams()
-  params.set('token', token)
-  if (currentFilter.nodeId) params.set('node_id', currentFilter.nodeId)
-  if (currentFilter.container) params.set('container', currentFilter.container)
-  source = new EventSource(`/api/logs/stream?${params.toString()}`)
-  source.onmessage = event => {
-    appendRows(JSON.parse(event.data))
+  params.set('limit', String(LOG_LIMIT))
+  if (filter.nodeId) params.set('node_id', filter.nodeId)
+  if (filter.container) params.set('container', filter.container)
+  if (filter.range?.length === 2) {
+    params.set('start', String(filter.range[0]))
+    params.set('end', String(filter.range[1]))
   }
-}
-
-export function stopLogsTail() {
-  if (source) {
-    source.close()
-    source = null
-  }
+  if (filter.end != null) params.set('end', String(filter.end))
+  const res = await axios.get(`/api/logs?${params.toString()}`)
+  return res.data || { logs: [], has_more: false, next_end: null }
 }
 
 export function formatLogLine(row) {
@@ -54,10 +35,4 @@ export function formatLogLine(row) {
   return pieces.join(' ')
 }
 
-function appendRows(rows) {
-  if (!rows.length) return
-  logs.value = [...logs.value, ...rows].slice(-LOG_LIMIT)
-  nextTick(() => {
-    if (logsBox.value) logsBox.value.scrollTop = logsBox.value.scrollHeight
-  })
-}
+export { LOG_LIMIT }

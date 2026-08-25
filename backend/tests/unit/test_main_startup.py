@@ -8,6 +8,7 @@ pytestmark = pytest.mark.unit
 def test_lifespan_keeps_process_healthy_when_application_start_fails(monkeypatch):
     from auth import Principal, issue_token
     import main
+    from api.runtime import runtime
 
     class FailingApplication:
         def __init__(self, config):
@@ -21,9 +22,9 @@ def test_lifespan_keeps_process_healthy_when_application_start_fails(monkeypatch
         def stop(self):
             self.stop_called = True
 
-    failing_application = FailingApplication(main.application.config)
-    monkeypatch.setattr(main, "application", failing_application)
-    monkeypatch.setattr(main, "STARTUP_IN_BACKGROUND", True)
+    failing_application = FailingApplication(runtime.application.config)
+    monkeypatch.setattr(runtime, "application", failing_application)
+    monkeypatch.setattr(runtime, "startup_in_background", True)
     token = issue_token(failing_application.config.auth, Principal(type="admin", app_id=""))
 
     with TestClient(main.app) as client:
@@ -37,23 +38,25 @@ def test_lifespan_keeps_process_healthy_when_application_start_fails(monkeypatch
 
 
 def test_component_status_stays_loading_until_application_ready(monkeypatch):
-    import main
+    from api.runtime import runtime
+    from api.services import common as service
 
     class ReadyComponent:
         ready = True
 
-    monkeypatch.setattr(main.application, "ready", False)
+    monkeypatch.setattr(runtime.application, "ready", False)
 
-    assert main._component_status(ReadyComponent(), enabled=True) == "loading"
+    assert service.component_status(ReadyComponent(), enabled=True) == "loading"
 
-    monkeypatch.setattr(main.application, "ready", True)
+    monkeypatch.setattr(runtime.application, "ready", True)
 
-    assert main._component_status(ReadyComponent(), enabled=True) == "ready"
+    assert service.component_status(ReadyComponent(), enabled=True) == "ready"
 
 
 def test_startup_leaves_collection_initialization_to_app_context(monkeypatch):
     import threading
     import main
+    from api.runtime import runtime
 
     class Store:
         def __init__(self):
@@ -74,8 +77,8 @@ def test_startup_leaves_collection_initialization_to_app_context(monkeypatch):
         def stop(self):
             pass
 
-    application = Application(main.application.config)
-    monkeypatch.setattr(main, "application", application)
+    application = Application(runtime.application.config)
+    monkeypatch.setattr(runtime, "application", application)
 
     main._start_application_until_ready(threading.Event())
 

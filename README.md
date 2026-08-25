@@ -4,6 +4,15 @@
 
 Native 方式只把后端和前端跑在宿主机上，默认仍使用 Docker 启动 Qdrant、MinIO 和 PostgreSQL。
 
+准备模型：
+
+```bash
+cd backend
+uv sync --extra cpu
+cd ..
+just models dense rapidocr mineru
+```
+
 1. 启动 Qdrant、MinIO 和 PostgreSQL：
 
 ```bash
@@ -116,11 +125,11 @@ http://<服务器地址>/api
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| `POST` | `/api/open/index` | 同步索引对象存储文件，完成后返回 `file_id` |
+| `POST` | `/api/open/files` | 同步索引对象存储文件，完成后返回 `file_id` |
 | `POST` | `/api/open/search` | 按 `query` 和可选 `file_ids` 搜索知识库 |
 | `DELETE` | `/api/open/files/{file_id}` | 删除当前应用向量库中的索引文件 |
 
-索引接口接收 `presigned_url`、`s3_url`、可选 `filename` 和可选 `file_id`。上游传 `file_id` 时服务端原样保存，推荐使用 UUID；不传时由 RAG 生成 UUID。搜索时不传 `file_ids` 表示全库搜索。
+索引接口接收 `presigned_url`、`s3_url`、可选 `filename`、可选 `file_id` 和可选 `parser`。上游传 `file_id` 时服务端原样保存，推荐使用 UUID；不传时由 RAG 生成 UUID。`parser` 不传时使用配置文件默认解析器；`standard` 是标准解析，`fast` 是快速解析。搜索时不传 `file_ids` 表示全库搜索。
 
 上游系统使用的 `app_id`、`access_key` 和 `secret_key` 由管理台创建。每个 `app_id` 对应独立 collection，业务接口根据 AK/SK 签名里的 `app_id` 自动选择当前应用的数据范围。索引前需要先在管理台为该 `app_id` 初始化数据库。
 
@@ -137,7 +146,7 @@ http://<服务器地址>/api
 
 签名算法见 [API 文档](docs/api.md)。
 
-### POST /api/open/index
+### POST /api/open/files
 
 同步索引对象存储文件。接口返回时，文件已经完成下载、解析、OCR、embedding 并写入向量库。
 
@@ -149,6 +158,7 @@ http://<服务器地址>/api
 | `s3_url` | string | 是 | 稳定对象存储地址，写入 chunk metadata 用于追溯 |
 | `filename` | string | 否 | 展示文件名；不传时从 `s3_url` 推导 |
 | `file_id` | string | 否 | 上游指定的文件 ID，推荐使用 UUID；不传时由 RAG 生成 UUID |
+| `parser` | string | 否 | `standard` / `fast`；不传使用配置文件默认值，默认 `standard` |
 
 请求：
 
@@ -157,7 +167,8 @@ http://<服务器地址>/api
   "file_id": "550e8400-e29b-41d4-a716-446655440000",
   "presigned_url": "https://example.com/presigned",
   "s3_url": "s3://bucket/path/to/example.pdf",
-  "filename": "example.pdf"
+  "filename": "example.pdf",
+  "parser": "standard"
 }
 ```
 
@@ -193,7 +204,7 @@ http://<服务器地址>/api
 {
   "query": "要查询的问题",
   "mode": "hybrid",
-  "top_k": 20,
+  "top_k": 5,
   "file_ids": ["550e8400-e29b-41d4-a716-446655440000"]
 }
 ```
@@ -213,7 +224,7 @@ http://<服务器地址>/api
   ],
   "mode": "hybrid",
   "rerank": true,
-  "fetch_k": 50,
+  "fetch_k": 20,
   "dense_weight": 0.5,
   "sparse_weight": 0.5,
   "rrf_k": 60,
@@ -320,7 +331,7 @@ logging:
   search_trace: true
 ```
 
-Docker 运行时由 Docker `json-file` driver 按大小滚动容器 stdout 日志。
+Docker 运行时由 Docker `json-file` driver 按大小滚动容器 stdout 日志。集中日志写入 Loki，默认保留 30 天；Docker 本地日志只做短期兜底。
 
 ## 数据目录
 

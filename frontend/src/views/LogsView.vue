@@ -7,18 +7,28 @@
           <p>{{ t('logs.desc') }}</p>
         </div>
         <div class="log-filters">
-          <el-select v-model="nodeId" size="small" class="log-filter" @change="restartLogs">
+          <el-date-picker
+            v-model="timeRange"
+            type="datetimerange"
+            value-format="x"
+            size="small"
+            class="log-time-range"
+            :start-placeholder="t('common.startTime')"
+            :end-placeholder="t('common.endTime')"
+          />
+          <el-select v-model="nodeId" size="small" class="log-filter">
             <el-option :label="t('cluster.allNodes')" value="" />
             <el-option v-for="node in nodes" :key="node" :label="node" :value="node" />
           </el-select>
-          <el-select v-model="container" size="small" class="log-filter" filterable @change="restartLogs">
+          <el-select v-model="container" size="small" class="log-filter" filterable>
             <el-option :label="t('logs.allContainers')" value="" />
             <el-option v-for="item in containers" :key="item" :label="item" :value="item" />
           </el-select>
+          <el-button size="small" type="primary" :loading="loading" @click="loadLogs">{{ t('common.search') }}</el-button>
         </div>
       </div>
       <div class="monitor-block trace-block">
-        <pre v-if="logs.length" ref="logsBox" class="logs-box">{{ logs.map(formatLogLine).join('\n') }}</pre>
+        <pre v-if="logs.length" ref="logsBoxRef" class="logs-box" @scroll="onLogsScroll">{{ logs.map(formatLogLine).join('\n') }}</pre>
         <div v-else class="trace-empty">{{ t('logs.empty') }}</div>
       </div>
     </div>
@@ -26,16 +36,27 @@
 </template>
 
 <script setup>
-import { onMounted, onUnmounted, ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import axios from '../utils/api'
-import { fetchLabelValues, logs, logsBox, formatLogLine, startLogsTail, stopLogsTail } from '../utils/loki'
+import { fetchLabelValues, fetchLogs, formatLogLine } from '../utils/loki'
 
 const { t } = useI18n()
 const nodeId = ref('')
 const container = ref('')
 const nodes = ref([])
 const containers = ref([])
+const logs = ref([])
+const loading = ref(false)
+const logsBoxRef = ref(null)
+const logsHasMore = ref(false)
+const logsNextEnd = ref(null)
+const timeRange = ref(defaultRange())
+
+function defaultRange() {
+  const end = Date.now()
+  return [end - 15 * 60 * 1000, end]
+}
 
 async function loadFilters() {
   const [monitorRes, containerValues] = await Promise.all([
@@ -47,13 +68,41 @@ async function loadFilters() {
   if (container.value && !containers.value.includes(container.value)) container.value = ''
 }
 
-function restartLogs() {
-  startLogsTail({ nodeId: nodeId.value, container: container.value })
+async function loadLogs() {
+  logs.value = []
+  logsHasMore.value = false
+  logsNextEnd.value = null
+  await fetchNextLogs()
+}
+
+async function fetchNextLogs() {
+  if (loading.value) return
+  loading.value = true
+  try {
+    const res = await fetchLogs({
+      nodeId: nodeId.value,
+      container: container.value,
+      range: timeRange.value,
+      end: logsNextEnd.value,
+    })
+    logs.value = logs.value.concat(res.logs || [])
+    logsHasMore.value = Boolean(res.has_more)
+    logsNextEnd.value = res.next_end || null
+  } finally {
+    loading.value = false
+  }
+}
+
+function onLogsScroll(event) {
+  const target = event.target
+  if (!target || loading.value || !logsHasMore.value) return
+  if (target.scrollTop + target.clientHeight >= target.scrollHeight - 24) {
+    fetchNextLogs()
+  }
 }
 
 onMounted(async () => {
   await loadFilters()
-  restartLogs()
+  await loadLogs()
 })
-onUnmounted(stopLogsTail)
 </script>

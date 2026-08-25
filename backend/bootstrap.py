@@ -4,6 +4,7 @@ from container import create_container
 from database.base import Database
 from dense.base import Dense
 from loader import load_app_config
+from parser.base import Parser
 from schema import AppConfig
 from ocr.base import OCR
 from rerank.base import Rerank
@@ -23,6 +24,7 @@ class Application:
         search: Search | None = None,
         rerank: Rerank | None = None,
         ocr: OCR | None = None,
+        parser: Parser | None = None,
         database: Database | None = None,
     ):
         self.config = config or load_app_config()
@@ -34,6 +36,7 @@ class Application:
         self.search = search or self.container.search(store=self.store, sparse=self.sparse)
         self.rerank = rerank or (self.container.rerank() if self.config.rerank is not None else None)
         self.ocr = ocr or self.container.ocr()
+        self.parser = parser or self.container.parser(ocr=self.ocr)
         self.database = database or self.container.database()
         self.search_trace = None
         self.component_errors: dict[str, str] = {}
@@ -50,6 +53,7 @@ class Application:
         if self.rerank is not None:
             self._start_component("rerank", self.rerank)
         self._start_component("ocr", self.ocr)
+        self._start_component("parser", self.parser)
         self.models_loaded = True
 
     def init_connections(self):
@@ -67,6 +71,7 @@ class Application:
             raise
 
     def stop(self):
+        self.parser.stop()
         self.ocr.stop()
         if self.rerank is not None:
             self.rerank.stop()

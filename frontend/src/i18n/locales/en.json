@@ -33,7 +33,10 @@
     "copy": "Copy",
     "delete": "Delete",
     "deleting": "Deleting",
-    "actions": "Actions"
+    "search": "Query",
+    "actions": "Actions",
+    "startTime": "Start time",
+    "endTime": "End time"
   },
   "search": {
     "topK": "Top K",
@@ -61,6 +64,8 @@
     "empty": "No uploaded files",
     "indexSubmitted": "{count} file(s) indexed.",
     "selectApp": "Select an app first",
+    "parserStandard": "Standard",
+    "parserFast": "Fast",
     "deletedFile": "{name} deleted"
   },
   "monitor": {
@@ -100,7 +105,6 @@
   "trace": {
     "title": "Trace",
     "desc": "Stage timings for recent search requests",
-    "limitNote": "Latest {count} only",
     "empty": "No searches yet",
     "columns": {
       "time": "Time",
@@ -139,6 +143,7 @@
     "title": "Config",
     "searchDefaults": "Search defaults",
     "components": "Components",
+    "parser": "Parser",
     "storage": "Storage path"
   },
   "apps": {

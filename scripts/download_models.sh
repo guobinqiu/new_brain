@@ -4,6 +4,9 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MODELS_DIR="${MODELS_DIR:-$ROOT_DIR/models}"
 MODELSCOPE_BIN="${MODELSCOPE_BIN:-$ROOT_DIR/backend/.venv/bin/modelscope}"
+MINERU_DIR="$MODELS_DIR/mineru"
+MINERU_PIPELINE_DIR="$MINERU_DIR/pipeline"
+MINERU_TOOLS_CONFIG_JSON="${MINERU_TOOLS_CONFIG_JSON:-$MINERU_DIR/mineru.json}"
 
 BGE_BASE_DIR="$MODELS_DIR/bge-base-zh-v1.5"
 RERANKER_BASE_DIR="$MODELS_DIR/bge-reranker-base"
@@ -11,6 +14,9 @@ BGE_M3_DIR="$MODELS_DIR/bge-m3"
 RERANKER_M3_DIR="$MODELS_DIR/bge-reranker-v2-m3"
 RERANKER_LARGE_DIR="$MODELS_DIR/bge-reranker-large"
 RAPIDOCR_DIR="$MODELS_DIR/rapidocr"
+MINERU_MODEL_SOURCE="${MINERU_MODEL_SOURCE:-modelscope}"
+MINERU_MODEL_TYPE="${MINERU_MODEL_TYPE:-pipeline}"
+MINERU_MODELS_BIN="${MINERU_MODELS_BIN:-$ROOT_DIR/backend/.venv/bin/mineru-models-download}"
 
 BGE_M3_FILES=(
   config.json
@@ -56,11 +62,16 @@ Models:
   reranker-m3
   reranker-large
   rapidocr
+  mineru
   all
 
 Environment:
-  MODELS_DIR       Target models directory. Default: ./models
-  MODELSCOPE_BIN  ModelScope CLI path. Default: ./backend/.venv/bin/modelscope
+  MODELS_DIR            Target models directory. Default: ./models
+  MODELSCOPE_BIN        ModelScope CLI path. Default: ./backend/.venv/bin/modelscope
+  MINERU_TOOLS_CONFIG_JSON  MinerU runtime config. Default: ./models/mineru/mineru.json
+  MINERU_MODELS_BIN    MinerU model downloader. Default: ./backend/.venv/bin/mineru-models-download
+  MINERU_MODEL_SOURCE  MinerU model source. Default: modelscope
+  MINERU_MODEL_TYPE    MinerU model group. Default: pipeline
 EOF
 }
 
@@ -150,6 +161,46 @@ download_rapidocr() {
   download_filtered "RapidOCR 模型" "RapidAI/RapidOCR" "$RAPIDOCR_DIR" all "${RAPIDOCR_FILES[@]}"
 }
 
+download_mineru() {
+  echo "下载 MinerU 模型: source=$MINERU_MODEL_SOURCE model=$MINERU_MODEL_TYPE"
+  if [[ ! -x "$MINERU_MODELS_BIN" ]]; then
+    echo "MinerU model downloader not found: $MINERU_MODELS_BIN" >&2
+    echo "Install backend dependencies first, or set MINERU_MODELS_BIN=/path/to/mineru-models-download." >&2
+    exit 1
+  fi
+  mkdir -p "$MINERU_DIR"
+  "$MINERU_MODELS_BIN" -s "$MINERU_MODEL_SOURCE" -m "$MINERU_MODEL_TYPE"
+  configure_mineru_paths
+}
+
+configure_mineru_paths() {
+  "$ROOT_DIR/backend/.venv/bin/python" - "$MINERU_TOOLS_CONFIG_JSON" "$MINERU_PIPELINE_DIR" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+config_path = Path(sys.argv[1])
+pipeline_path = Path(sys.argv[2])
+data = json.loads(config_path.read_text(encoding="utf-8"))
+source = Path(data["models-dir"]["pipeline"])
+if not source.exists():
+    raise SystemExit(f"MinerU pipeline model directory not found: {source}")
+pipeline_path.parent.mkdir(parents=True, exist_ok=True)
+if pipeline_path.exists():
+    if pipeline_path.is_symlink():
+        pipeline_path.unlink()
+    elif not (pipeline_path / "models").exists():
+        raise SystemExit(f"MinerU pipeline directory exists but is not a model directory: {pipeline_path}")
+if not pipeline_path.exists():
+    if source.resolve() == pipeline_path.resolve():
+        pass
+    else:
+        source.rename(pipeline_path)
+data["models-dir"]["pipeline"] = str(pipeline_path.absolute())
+config_path.write_text(json.dumps(data, ensure_ascii=False, indent=4) + "\n", encoding="utf-8")
+PY
+}
+
 download_one() {
   case "$1" in
     dense)
@@ -170,6 +221,9 @@ download_one() {
     rapidocr)
       download_rapidocr
       ;;
+    mineru)
+      download_mineru
+      ;;
     all)
       download_dense
       download_reranker
@@ -177,6 +231,7 @@ download_one() {
       download_reranker_m3
       download_reranker_large
       download_rapidocr
+      download_mineru
       ;;
     *)
       echo "Unknown model: $1" >&2
@@ -199,6 +254,7 @@ main() {
   fi
 
   mkdir -p "$MODELS_DIR"
+  export MINERU_TOOLS_CONFIG_JSON
   echo "模型目录: $MODELS_DIR"
 
   if [[ "$#" -eq 0 ]]; then

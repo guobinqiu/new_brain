@@ -82,11 +82,14 @@ def chroma_test_env(store_test_env):
 def api_client(store_test_env):
     """FastAPI TestClient with isolated store module state."""
     import main
+    from api.runtime import runtime
 
+    from bootstrap import Application
     from database.base import FakeDatabase
-    main.application = main.Application(database=FakeDatabase())
-    orig_startup_in_background = main.STARTUP_IN_BACKGROUND
-    main.STARTUP_IN_BACKGROUND = False
+    orig_application = runtime.application
+    runtime.set_application(Application(database=FakeDatabase()))
+    orig_startup_in_background = runtime.startup_in_background
+    runtime.startup_in_background = False
 
     try:
         with TestClient(main.app) as client:
@@ -101,24 +104,29 @@ def api_client(store_test_env):
             client.headers.update({"Authorization": f"Bearer {resp.json()['access_token']}"})
             yield client
     finally:
-        main.STARTUP_IN_BACKGROUND = orig_startup_in_background
+        runtime.set_application(orig_application)
+        runtime.startup_in_background = orig_startup_in_background
 
 
 @pytest.fixture
 def anonymous_api_client(store_test_env):
     """FastAPI TestClient without Authorization header."""
     import main
+    from api.runtime import runtime
 
+    from bootstrap import Application
     from database.base import FakeDatabase
-    main.application = main.Application(database=FakeDatabase())
-    orig_startup_in_background = main.STARTUP_IN_BACKGROUND
-    main.STARTUP_IN_BACKGROUND = False
+    orig_application = runtime.application
+    runtime.set_application(Application(database=FakeDatabase()))
+    orig_startup_in_background = runtime.startup_in_background
+    runtime.startup_in_background = False
 
     try:
         with TestClient(main.app) as client:
             yield client
     finally:
-        main.STARTUP_IN_BACKGROUND = orig_startup_in_background
+        runtime.set_application(orig_application)
+        runtime.startup_in_background = orig_startup_in_background
 
 
 class AppApiClient:
@@ -181,9 +189,15 @@ def test_txt_path(tmp_path):
 @pytest.fixture
 def uploaded_chunks(initialized_store, test_txt_path):
     """Parse *test_ai.txt* and add it to Qdrant common knowledge, returning chunks."""
-    from document_parser import parse_file
+    from parser.service import ParserService
+    from schema import ParserConfig
 
-    chunks = parse_file(test_txt_path)
+    parser = ParserService(ParserConfig())
+    parser.start()
+    try:
+        chunks = parser.parse_file(test_txt_path)
+    finally:
+        parser.stop()
     initialized_store.add_file_chunks(chunks, file_id="testfile")
     return chunks
 

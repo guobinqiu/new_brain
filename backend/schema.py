@@ -45,11 +45,31 @@ class DatabaseConfig:
 @dataclass(frozen=True)
 class SearchConfig:
     default_mode: str = "hybrid"
-    top_k: int = 20
-    fetch_k: int = 100
+    top_k: int = 5
+    fetch_k: int = 20
     dense_weight: float = 0.5
     sparse_weight: float = 0.5
     rrf_k: int = 60
+
+
+@dataclass(frozen=True)
+class ParserTextConfig:
+    chunk_size: int = 500
+    chunk_overlap: int = 80
+
+
+@dataclass(frozen=True)
+class ParserTableConfig:
+    chunk_size: int = 1000
+    before_text_size: int = 160
+    after_text_size: int = 160
+
+
+@dataclass(frozen=True)
+class ParserConfig:
+    type: str = "standard"
+    text: ParserTextConfig = field(default_factory=ParserTextConfig)
+    table: ParserTableConfig = field(default_factory=ParserTableConfig)
 
 
 @dataclass(frozen=True)
@@ -99,6 +119,7 @@ class AppConfig:
     rerank: RerankConfig | None
     ocr: OCRConfig
     auth: AuthConfig
+    parser: ParserConfig = field(default_factory=ParserConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     available_components: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     name: str = ""
@@ -110,6 +131,7 @@ def parse_app_config(raw: dict[str, Any]) -> AppConfig:
     store = raw.get("store") or {}
     database = raw.get("database") or {}
     search = raw.get("search") or {}
+    parser = raw.get("parser") or {}
     logging = raw.get("logging") or {}
     auth = raw.get("auth") or {}
     rerank = raw.get("rerank")
@@ -134,6 +156,7 @@ def parse_app_config(raw: dict[str, Any]) -> AppConfig:
     _validate_supported("database.type", database_name, {"postgres", "database/postgres"})
     _required(database, "url", "database")
     _validate_supported("search.default_mode", search.get("default_mode", "hybrid"), {"dense", "sparse", "hybrid"})
+    _validate_supported("parser.type", parser.get("type", "standard"), {"standard", "fast", "text", "table"})
     if store_type in ("qdrant", "store/qdrant"):
         _required(store, "url", "store")
     if store_type in ("chroma", "store/chroma"):
@@ -182,11 +205,23 @@ def parse_app_config(raw: dict[str, Any]) -> AppConfig:
         ),
         search=SearchConfig(
             default_mode=search.get("default_mode", "hybrid"),
-            top_k=int(search.get("top_k", 20)),
-            fetch_k=int(search.get("fetch_k", 100)),
+            top_k=int(search.get("top_k", 5)),
+            fetch_k=int(search.get("fetch_k", 20)),
             dense_weight=float(search.get("dense_weight", 0.5)),
             sparse_weight=float(search.get("sparse_weight", 0.5)),
             rrf_k=int(search.get("rrf_k", 60)),
+        ),
+        parser=ParserConfig(
+            type=str(parser.get("type", "standard")),
+            text=ParserTextConfig(
+                chunk_size=int((parser.get("text") or {}).get("chunk_size", 500)),
+                chunk_overlap=int((parser.get("text") or {}).get("chunk_overlap", 80)),
+            ),
+            table=ParserTableConfig(
+                chunk_size=int((parser.get("table") or {}).get("chunk_size", 1000)),
+                before_text_size=int((parser.get("table") or {}).get("before_text_size", 160)),
+                after_text_size=int((parser.get("table") or {}).get("after_text_size", 160)),
+            ),
         ),
         logging=LoggingConfig(
             level=str(logging.get("level", "INFO")),

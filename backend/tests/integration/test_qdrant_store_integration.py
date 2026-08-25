@@ -1,12 +1,13 @@
 import pytest
+import uuid
 
 
 pytestmark = pytest.mark.integration
 
 
-def _chunk(chunk_id: str, filename: str, content: str, chunk_index: int = 0) -> dict:
+def _chunk(filename: str, content: str, chunk_index: int = 0) -> dict:
     return {
-        "id": chunk_id,
+        "id": str(uuid.uuid4()),
         "content": content,
         "metadata": {"filename": filename, "chunk_index": chunk_index},
     }
@@ -19,14 +20,14 @@ class TestQdrantStoreIntegration:
 
         store.add_file_chunks(
             [
-                _chunk("replace-file-v1-0", "replace.txt", "旧版知识 0"),
-                _chunk("replace-file-v1-1", "replace.txt", "旧版知识 1"),
+                _chunk("replace.txt", "旧版知识 0"),
+                _chunk("replace.txt", "旧版知识 1"),
             ],
             file_id=file_id,
         )
         store.add_file_chunks(
             [
-                _chunk("replace-file-v2-0", "replace.txt", "第二版知识 0"),
+                _chunk("replace.txt", "第二版知识 0"),
             ],
             file_id=file_id,
         )
@@ -38,9 +39,9 @@ class TestQdrantStoreIntegration:
     def test_file_filter_limits_results_to_selected_files(self, initialized_store):
         store = initialized_store
 
-        store.add_file_chunks([_chunk("file-a-0", "a.txt", "A 文件知识")], file_id="integrationfilea")
-        store.add_file_chunks([_chunk("file-b-0", "b.txt", "B 文件知识")], file_id="integrationfileb")
-        store.add_file_chunks([_chunk("file-c-0", "c.txt", "C 文件知识")], file_id="integrationfilec")
+        store.add_file_chunks([_chunk("a.txt", "A 文件知识")], file_id="integrationfilea")
+        store.add_file_chunks([_chunk("b.txt", "B 文件知识")], file_id="integrationfileb")
+        store.add_file_chunks([_chunk("c.txt", "C 文件知识")], file_id="integrationfilec")
 
         docs = store.get_search_documents(store.build_file_filter(["integrationfilea", "integrationfilec"]))
         filenames = {doc["metadata"]["filename"] for doc in docs}
@@ -53,8 +54,8 @@ class TestQdrantStoreIntegration:
 
         store.add_file_chunks(
             [
-                _chunk("delete-file-0", "delete.txt", "待删除知识 0"),
-                _chunk("delete-file-1", "delete.txt", "待删除知识 1"),
+                _chunk("delete.txt", "待删除知识 0"),
+                _chunk("delete.txt", "待删除知识 1"),
             ],
             file_id=file_id,
         )

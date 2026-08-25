@@ -1,12 +1,13 @@
 import pytest
+import uuid
 
 
 pytestmark = pytest.mark.integration
 
 
-def _chunk(chunk_id: str, filename: str, content: str) -> dict:
+def _chunk(filename: str, content: str, chunk_id: str | None = None) -> dict:
     return {
-        "id": chunk_id,
+        "id": chunk_id or str(uuid.uuid4()),
         "content": content,
         "metadata": {"filename": filename, "chunk_index": 0},
     }
@@ -25,8 +26,8 @@ class TestQdrantSearchIntegration:
         store = initialized_store
         from search import SearchPlan, _SearchExecutor
 
-        store.add_file_chunks([_chunk("all-file-a", "all_a.txt", "人工智能 自然语言处理")], file_id="integrationalla")
-        store.add_file_chunks([_chunk("all-file-b", "all_b.txt", "人工智能 机器学习")], file_id="integrationallb")
+        store.add_file_chunks([_chunk("all_a.txt", "人工智能 自然语言处理")], file_id="integrationalla")
+        store.add_file_chunks([_chunk("all_b.txt", "人工智能 机器学习")], file_id="integrationallb")
 
         results = _SearchExecutor(
             SearchPlan("人工智能", mode="hybrid", top_k=2),
@@ -41,8 +42,8 @@ class TestQdrantSearchIntegration:
         store = initialized_store
         from search import SearchPlan, _SearchExecutor
 
-        store.add_file_chunks([_chunk("visible-file-a", "visible_a.txt", "范围过滤测试 A")], file_id="integrationvisiblea")
-        store.add_file_chunks([_chunk("visible-file-b", "visible_b.txt", "范围过滤测试 B")], file_id="integrationvisibleb")
+        store.add_file_chunks([_chunk("visible_a.txt", "范围过滤测试 A")], file_id="integrationvisiblea")
+        store.add_file_chunks([_chunk("visible_b.txt", "范围过滤测试 B")], file_id="integrationvisibleb")
 
         results = _SearchExecutor(
             SearchPlan("范围过滤测试", mode="dense", top_k=5, file_ids=["integrationvisiblea"]),
@@ -59,7 +60,7 @@ class TestQdrantSearchIntegration:
 
         for index in range(5):
             store.add_file_chunks(
-                [_chunk(f"rerank-file-{index}", f"rerank_{index}.txt", f"重排候选 文档 {index} 人工智能")],
+                [_chunk(f"rerank_{index}.txt", f"重排候选 文档 {index} 人工智能")],
                 file_id=f"integrationrerank{index}",
             )
 
@@ -79,8 +80,9 @@ class TestQdrantSearchIntegration:
         store = initialized_store
         from search import SearchPlan, _SearchExecutor
 
-        store.add_file_chunks([_chunk("sparse-chinese-a", "sparse_a.txt", "通用知识 巡检 物料 设备")], file_id="integrationsparsea")
-        store.add_file_chunks([_chunk("sparse-chinese-b", "sparse_b.txt", "设备年检单办理流程")], file_id="integrationsparseb")
+        sparse_chunk_id = str(uuid.uuid4())
+        store.add_file_chunks([_chunk("sparse_a.txt", "通用知识 巡检 物料 设备")], file_id="integrationsparsea")
+        store.add_file_chunks([_chunk("sparse_b.txt", "设备年检单办理流程", sparse_chunk_id)], file_id="integrationsparseb")
 
         results = _SearchExecutor(
             SearchPlan("年检", mode="sparse", top_k=5, file_ids=["integrationsparseb"]),
@@ -88,4 +90,4 @@ class TestQdrantSearchIntegration:
             store=store,
         ).execute()
 
-        assert [result["id"] for result in results] == [store._point_id("sparse-chinese-b")]
+        assert [result["id"] for result in results] == [store._point_id(sparse_chunk_id)]
