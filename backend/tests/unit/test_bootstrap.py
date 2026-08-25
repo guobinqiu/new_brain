@@ -103,7 +103,7 @@ def test_application_selects_configured_dense_and_bm25_sparse():
     application = bootstrap.Application(config=config)
 
     assert isinstance(application.dense, HuggingFaceDense)
-    assert application.dense.model_name.endswith("/models/bge-base-zh-v1.5")
+    assert application.dense.model_name.endswith("/models/AI-ModelScope/bge-base-zh-v1.5")
     assert isinstance(application.sparse, BM25Sparse)
     assert application.sparse.tokenizer.__class__.__name__ == "JiebaTokenizer"
     assert isinstance(application.rerank, CrossEncoderRerank)
@@ -206,7 +206,15 @@ def test_application_does_not_become_ready_when_start_fails(monkeypatch):
         def stop(self):
             pass
 
-    application = bootstrap.Application(store=FailingComponent())
+    application = bootstrap.Application(
+        dense=ReadyComponent(),
+        sparse=ReadyComponent(),
+        store=FailingComponent(),
+        search=ReadyComponent(),
+        ocr=ReadyComponent(),
+        parser=ReadyComponent(),
+        database=ReadyComponent(),
+    )
 
     with pytest.raises(RuntimeError, match="boom"):
         application.start()

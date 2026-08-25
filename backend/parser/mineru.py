@@ -10,7 +10,7 @@ from schema import ParserConfig
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-MINERU_CONFIG_JSON = PROJECT_ROOT / "models" / "mineru" / "mineru.json"
+MINERU_DIR = PROJECT_ROOT / "models" / "mineru"
 
 
 def table_parser_available() -> bool:
@@ -20,7 +20,7 @@ def table_parser_available() -> bool:
 def load_table_parser() -> None:
     if not table_parser_available():
         raise ValueError("table parser is not installed")
-    _set_mineru_runtime_env()
+    _prepare_mineru_runtime_config()
     from mineru.backend.pipeline.pipeline_analyze import ModelSingleton
 
     ModelSingleton().get_model(lang="ch", formula_enable=True, table_enable=True)
@@ -31,7 +31,6 @@ def parse_pdf_table(filepath: str, filename: str, parser_config: ParserConfig) -
         raise ValueError("table parser is not installed")
 
     with tempfile.TemporaryDirectory(prefix="mineru_") as output_dir:
-        _set_mineru_runtime_env()
         _mineru_do_parse(
             output_dir=output_dir,
             filepath=filepath,
@@ -57,12 +56,23 @@ def parse_pdf_table(filepath: str, filename: str, parser_config: ParserConfig) -
     return chunks
 
 
-def _set_mineru_config_env() -> None:
-    os.environ["MINERU_TOOLS_CONFIG_JSON"] = str(MINERU_CONFIG_JSON)
-
-
-def _set_mineru_runtime_env() -> None:
-    _set_mineru_config_env()
+def _prepare_mineru_runtime_config() -> None:
+    config_path = MINERU_DIR / "mineru.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "models-dir": {
+                    "pipeline": str(MINERU_DIR / "pipeline"),
+                    "vlm": "",
+                },
+                "model-source": "local",
+            },
+            ensure_ascii=False,
+            indent=4,
+        ) + "\n",
+        encoding="utf-8",
+    )
+    os.environ["MINERU_TOOLS_CONFIG_JSON"] = str(config_path)
 
 
 def _mineru_do_parse(output_dir: str, filepath: str, filename: str) -> None:
@@ -92,14 +102,5 @@ def _mineru_do_parse(output_dir: str, filepath: str, filename: str) -> None:
 
 
 def _mineru_model_root() -> Path | None:
-    if not MINERU_CONFIG_JSON.exists():
-        return None
-    try:
-        config = json.loads(MINERU_CONFIG_JSON.read_text(encoding="utf-8"))
-        pipeline = config["models-dir"]["pipeline"]
-    except Exception:
-        return None
-    path = Path(pipeline).expanduser()
-    if not path.is_absolute():
-        path = MINERU_CONFIG_JSON.parent / path
-    return path if path.exists() else None
+    model_root = MINERU_DIR / "pipeline"
+    return model_root if (model_root / "models").exists() else None

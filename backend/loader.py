@@ -58,27 +58,33 @@ def _apply_runtime_overrides(raw: dict) -> None:
 def _resolve_model_paths(raw: dict) -> None:
     _resolve_component(raw, "dense", {
         "test_dense": "dense",
-        "bge_base": "bge-base-zh-v1.5",
-        "bge_base_zh_v15": "bge-base-zh-v1.5",
-        "bge_m3": "bge-m3",
+        "bge-base-zh-v1.5": "AI-ModelScope/bge-base-zh-v1.5",
+        "bge_base": "AI-ModelScope/bge-base-zh-v1.5",
+        "bge_base_zh_v15": "AI-ModelScope/bge-base-zh-v1.5",
+        "bge-m3": "BAAI/bge-m3",
+        "bge_m3": "BAAI/bge-m3",
     })
     _resolve_sparse_components(raw, {
-        "bge_m3": "bge-m3",
+        "bge-m3": "BAAI/bge-m3",
+        "bge_m3": "BAAI/bge-m3",
     })
     _resolve_component(raw, "rerank", {
         "test_rerank": "rerank",
-        "bge_base": "bge-reranker-base",
-        "bge_large": "bge-reranker-large",
-        "bge_m3": "bge-reranker-v2-m3",
-        "bge_reranker_base": "bge-reranker-base",
-        "bge_reranker_large": "bge-reranker-large",
-        "bge_reranker_v2_m3": "bge-reranker-v2-m3",
+        "bge-reranker-base": "BAAI/bge-reranker-base",
+        "bge-reranker-large": "BAAI/bge-reranker-large",
+        "bge-reranker-v2-m3": "BAAI/bge-reranker-v2-m3",
+        "bge_base": "BAAI/bge-reranker-base",
+        "bge_large": "BAAI/bge-reranker-large",
+        "bge_m3": "BAAI/bge-reranker-v2-m3",
+        "bge_reranker_base": "BAAI/bge-reranker-base",
+        "bge_reranker_large": "BAAI/bge-reranker-large",
+        "bge_reranker_v2_m3": "BAAI/bge-reranker-v2-m3",
     })
     _resolve_component(raw, "ocr", {
         "test_ocr": "ocr",
-        "rapid": "rapidocr",
+        "rapid": "RapidAI/RapidOCR",
         "paddle": "paddleocr",
-        "rapidocr": "rapidocr",
+        "rapidocr": "RapidAI/RapidOCR",
         "paddleocr": "paddleocr",
         "tesseract": "tesseract",
     })
@@ -160,18 +166,22 @@ def _resolve_component(raw: dict, section_name: str, model_by_name: dict[str, st
     name = raw.get(section_name)
     if section_name == "sparse" and isinstance(name, dict):
         sparse_type = name.get("type") or name.get("name")
-        model_name = name.get("model_name") or model_by_name.get(sparse_type)
+        model_name = name.get("model_name") or sparse_type
         if model_name:
-            name["model_path"] = str(MODELS_DIR / model_name)
+            name["model_path"] = _model_path(model_name, model_by_name)
         return
     if isinstance(name, dict):
-        model_name = name.get("model_name") or model_by_name.get(name.get("name"))
+        model_name = name.get("model_name") or name.get("name")
         if model_name:
-            name["model_path"] = str(MODELS_DIR / model_name)
+            name["model_path"] = _model_path(model_name, model_by_name)
         return
     if not isinstance(name, str):
         return
     section = {"name": name}
     if name in model_by_name:
-        section["model_path"] = str(MODELS_DIR / model_by_name[name])
+        section["model_path"] = _model_path(name, model_by_name)
     raw[section_name] = section
+
+
+def _model_path(model_name: str, model_by_name: dict[str, str]) -> str:
+    return str(MODELS_DIR / model_by_name.get(model_name, model_name))

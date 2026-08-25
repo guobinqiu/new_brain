@@ -31,9 +31,9 @@ class TestModelPaths:
         assert cf.DENSE_MODEL_DIR.startswith(cf.MODELS_DIR)
         assert cf.RERANKER_MODEL_DIR.startswith(cf.MODELS_DIR)
         assert cf.RAPIDOCR_MODEL_DIR.startswith(cf.MODELS_DIR)
-        assert os.path.basename(cf.DENSE_MODEL_DIR) == "bge-base-zh-v1.5"
-        assert os.path.basename(cf.RERANKER_MODEL_DIR) == "bge-reranker-base"
-        assert os.path.basename(cf.RAPIDOCR_MODEL_DIR) == "rapidocr"
+        assert cf.DENSE_MODEL_DIR.endswith(os.path.join("AI-ModelScope", "bge-base-zh-v1.5"))
+        assert cf.RERANKER_MODEL_DIR.endswith(os.path.join("BAAI", "bge-reranker-base"))
+        assert cf.RAPIDOCR_MODEL_DIR.endswith(os.path.join("RapidAI", "RapidOCR"))
 
     def test_ocr_uses_model_root_dir(self, monkeypatch):
         """RapidOCR constructs RapidOCR with Global.model_root_dir from config."""

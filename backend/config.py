@@ -22,6 +22,6 @@ QDRANT_URL = CONFIG.store.url or "http://localhost:6333"
 MODELS_DIR = str(Path(__file__).resolve().parent.parent / "models")
 
 DENSE_MODEL_DIR = CONFIG.dense.model_path
-RERANKER_MODEL_DIR = CONFIG.rerank.model_path if CONFIG.rerank is not None else str(Path(__file__).resolve().parent.parent / "models" / "bge-reranker-base")
+RERANKER_MODEL_DIR = CONFIG.rerank.model_path if CONFIG.rerank is not None else str(Path(__file__).resolve().parent.parent / "models" / "BAAI" / "bge-reranker-base")
 RAPIDOCR_MODEL_DIR = CONFIG.ocr.model_path
 PADDLEOCR_MODEL_DIR = str(Path(__file__).resolve().parent.parent / "models" / "paddleocr")

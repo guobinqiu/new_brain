@@ -130,7 +130,7 @@ ocr: test_ocr
     config = load_app_config()
 
     assert config.sparse.name == "bge_m3"
-    assert config.sparse.model_path == str(PROJECT_ROOT / "models" / "bge-m3")
+    assert config.sparse.model_path == str(PROJECT_ROOT / "models" / "BAAI" / "bge-m3")
 
 
 def test_load_app_config_rejects_nested_sparse_backends(monkeypatch, tmp_path):
@@ -203,13 +203,13 @@ ocr:
     config = load_app_config()
 
     assert config.dense.name == "bge_m3"
-    assert config.dense.model_path == str(PROJECT_ROOT / "models" / "bge-m3")
+    assert config.dense.model_path == str(PROJECT_ROOT / "models" / "BAAI" / "bge-m3")
     assert config.sparse.name == "bm25"
     assert config.sparse.tokenizer == "jieba"
     assert config.store.type == "qdrant"
     assert config.store.url == "http://localhost:6333"
     assert config.rerank.name == "bge_base"
-    assert config.rerank.model_path == str(PROJECT_ROOT / "models" / "bge-reranker-base")
+    assert config.rerank.model_path == str(PROJECT_ROOT / "models" / "BAAI" / "bge-reranker-base")
 
 
 def test_load_app_config_allows_profile_without_rerank(monkeypatch, tmp_path):
@@ -252,7 +252,7 @@ def test_load_app_config_can_use_config_filename(monkeypatch):
     config = load_app_config()
 
     assert config.name == "local"
-    assert config.dense.model_path == str(PROJECT_ROOT / "models" / "bge-base-zh-v1.5")
+    assert config.dense.model_path == str(PROJECT_ROOT / "models" / "AI-ModelScope" / "bge-base-zh-v1.5")
     assert config.store.type == "qdrant"
     assert config.store.url == "http://localhost:6333"
 
@@ -351,7 +351,7 @@ def test_load_app_config_keeps_app_bm25_sparse_without_model_path(monkeypatch):
 
     config = load_app_config()
 
-    assert config.dense.model_path == str(PROJECT_ROOT / "models" / "bge-base-zh-v1.5")
+    assert config.dense.model_path == str(PROJECT_ROOT / "models" / "AI-ModelScope" / "bge-base-zh-v1.5")
     assert config.sparse.name == "bm25"
 
 
