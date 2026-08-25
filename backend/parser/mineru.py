@@ -1,5 +1,4 @@
 import importlib.util
-import json
 import os
 import tempfile
 import uuid
@@ -58,20 +57,8 @@ def parse_pdf_table(filepath: str, filename: str, parser_config: ParserConfig) -
 
 def _prepare_mineru_runtime_config() -> None:
     config_path = MINERU_DIR / "mineru.json"
-    config_path.write_text(
-        json.dumps(
-            {
-                "models-dir": {
-                    "pipeline": str(MINERU_DIR / "pipeline"),
-                    "vlm": "",
-                },
-                "model-source": "local",
-            },
-            ensure_ascii=False,
-            indent=4,
-        ) + "\n",
-        encoding="utf-8",
-    )
+    if not config_path.exists():
+        raise ValueError("table parser config is not installed")
     os.environ["MINERU_TOOLS_CONFIG_JSON"] = str(config_path)
 
 
