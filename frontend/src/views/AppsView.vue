@@ -18,7 +18,7 @@
             <template #default="{ row }">
               <div class="copy-cell">
                 <span class="chunk-id">{{ row.access_key }}</span>
-                <el-button size="small" @click="copyText(row.access_key)">{{ t('common.copy') }}</el-button>
+                <el-button :icon="CopyDocument" circle size="small" @click.stop="copyText(row.access_key)" />
               </div>
             </template>
           </el-table-column>
@@ -26,7 +26,7 @@
             <template #default="{ row }">
               <div class="copy-cell">
                 <span class="chunk-id">{{ row.secret_key }}</span>
-                <el-button size="small" @click="copyText(row.secret_key)">{{ t('common.copy') }}</el-button>
+                <el-button :icon="CopyDocument" circle size="small" @click.stop="copyText(row.secret_key)" />
               </div>
             </template>
           </el-table-column>
@@ -55,6 +55,7 @@ import { useActiveAppStore } from '../stores/activeApp'
 import { useAppsStore } from '../stores/apps'
 import { errorMessage, showToast } from '../utils/toast'
 import { ElMessageBox } from 'element-plus'
+import { CopyDocument } from '@element-plus/icons-vue'
 import { copyText } from '../utils/format'
 
 const API = '/api'

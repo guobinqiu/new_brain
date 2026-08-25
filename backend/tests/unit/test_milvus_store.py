@@ -440,6 +440,8 @@ def test_milvus_ensure_app_collection_creates_collection_without_placeholder_doc
         client = FakeMilvusClient.instances[0]
         assert client.collections == {"imsdom_chunks"}
         assert client.created[0]["collection_name"] == "imsdom_chunks"
+        indexed_fields = {index["field_name"] for index in client.created[0]["index_params"].indexes}
+        assert {"file_id", "chunk_index"} <= indexed_fields
         assert client.inserted == []
     finally:
         milvus.close_store()

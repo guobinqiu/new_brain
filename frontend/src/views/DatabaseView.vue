@@ -1,7 +1,16 @@
 <template>
   <main class="database-view">
     <div v-if="appId && databaseStatus && !databaseStatus.exists" class="database-empty-state">
-      <el-button type="primary" size="large" class="database-create-btn" @click="initializeDatabase">{{ t('database.initialize') }}</el-button>
+      <el-button
+        type="primary"
+        size="large"
+        class="database-create-btn"
+        :loading="databaseInitializing"
+        :disabled="databaseInitializing"
+        @click="initializeDatabase"
+      >
+        {{ t('database.initialize') }}
+      </el-button>
     </div>
 
     <div v-else-if="appId && databaseStatus?.exists" class="chunks-card">
@@ -92,6 +101,7 @@ const chunks = ref([])
 const chunksCursor = ref(null)
 const chunksHasMore = ref(false)
 const chunksLoading = ref(false)
+const databaseInitializing = ref(false)
 const chunksTableRef = ref(null)
 
 async function fetchDatabaseStatus() {
@@ -110,6 +120,8 @@ async function fetchDatabaseStatus() {
 
 async function initializeDatabase() {
   if (!currentAppId.value) return
+  if (databaseInitializing.value) return
+  databaseInitializing.value = true
   try {
     await axios.post(`${API}/apps/${currentAppId.value}/database`)
     showToast('success', t('database.initialized', { appId: currentAppId.value }))
@@ -117,6 +129,8 @@ async function initializeDatabase() {
     await fetchChunks()
   } catch (err) {
     showToast('error', errorMessage(err))
+  } finally {
+    databaseInitializing.value = false
   }
 }
 

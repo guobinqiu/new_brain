@@ -293,6 +293,7 @@ def _index_specs() -> list[tuple[str, dict]]:
     if _sparse_uses_store():
         specs.append(("sparse", _sparse_index_params()))
     specs.append(("file_id", {"index_type": "INVERTED"}))
+    specs.append(("chunk_index", {"index_type": "INVERTED"}))
     return specs
 
 
