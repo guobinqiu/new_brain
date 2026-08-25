@@ -76,7 +76,8 @@ class TestMonitorAPI:
         assert components["Rerank"]["status"] in {"disabled", "ready"}
         assert components["OCR"]["status"] == "ready"
         assert components["OCR"]["model"] == "rapidocr"
-        assert components["Parser"]["status"] in {"ready", "disabled"}
+        expected_parser_status = "ready" if any(item["name"] == "standard" and item["available"] for item in api_client.get("/api/config").json()["parser"]["available"]) else "error"
+        assert components["Parser"]["status"] == expected_parser_status
         assert "database" in components
         assert all(component["status"] in {"ready", "loading", "disabled", "error"} for component in components.values())
         assert monitor["capabilities"]["search_modes"] == ["dense", "sparse", "hybrid"]

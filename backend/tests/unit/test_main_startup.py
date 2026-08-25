@@ -53,6 +53,20 @@ def test_component_status_stays_loading_until_application_ready(monkeypatch):
     assert service.component_status(ReadyComponent(), enabled=True) == "ready"
 
 
+def test_required_component_status_has_no_disabled_state(monkeypatch):
+    from api.runtime import runtime
+    from api.services import common as service
+
+    class StoppedComponent:
+        ready = False
+
+    monkeypatch.setattr(runtime.application, "ready", True)
+
+    assert service.required_component_status(StoppedComponent()) == "loading"
+    assert service.required_component_status(StoppedComponent(), error="failed") == "error"
+    assert service.component_status(StoppedComponent(), enabled=False) == "disabled"
+
+
 def test_startup_leaves_collection_initialization_to_app_context(monkeypatch):
     import threading
     import main

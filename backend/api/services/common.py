@@ -43,6 +43,14 @@ def component_status(component: Any, *, enabled: bool, error: str | None = None)
     return "ready" if is_ready(component) else "loading"
 
 
+def required_component_status(component: Any, *, error: str | None = None) -> str:
+    if error:
+        return "error"
+    if not runtime.application.ready:
+        return "loading"
+    return "ready" if is_ready(component) else "loading"
+
+
 def component_model(component_config: Any) -> str | None:
     if component_config is None:
         return None

@@ -3,7 +3,7 @@ from dataclasses import asdict
 from typing import Any
 
 from api.runtime import runtime
-from api.services.common import component_config, component_model, component_status, now_iso
+from api.services.common import component_config, component_model, component_status, now_iso, required_component_status
 from api.services.config import profile
 from nodes import fetch_peers, local_result, node_id, parse_peers
 
@@ -55,17 +55,17 @@ def components() -> list[dict[str, Any]]:
     return [
         {
             "name": "Store",
-            "status": component_status(runtime.application.store, enabled=runtime.application.config.store is not None, error=runtime.application.component_errors.get("store")),
+            "status": required_component_status(runtime.application.store, error=runtime.application.component_errors.get("store")),
             "model": runtime.application.config.store.type,
         },
         {
             "name": "Dense",
-            "status": component_status(runtime.application.dense, enabled=runtime.application.config.dense is not None, error=runtime.application.component_errors.get("dense")),
+            "status": required_component_status(runtime.application.dense, error=runtime.application.component_errors.get("dense")),
             "model": component_model(runtime.application.config.dense),
         },
         {
             "name": "Sparse",
-            "status": component_status(runtime.application.sparse, enabled=runtime.application.config.sparse is not None, error=sparse_error),
+            "status": required_component_status(runtime.application.sparse, error=sparse_error),
             "model": component_model(runtime.application.config.sparse),
         },
         {
@@ -75,16 +75,25 @@ def components() -> list[dict[str, Any]]:
         },
         {
             "name": "OCR",
-            "status": component_status(runtime.application.ocr, enabled=runtime.application.config.ocr is not None, error=runtime.application.component_errors.get("ocr")),
+            "status": required_component_status(runtime.application.ocr, error=runtime.application.component_errors.get("ocr")),
             "model": component_model(runtime.application.config.ocr),
         },
         {
             "name": "Parser",
-            "status": component_status(runtime.application.parser, enabled=True, error=runtime.application.component_errors.get("parser")),
+            "status": parser_status(),
             "model": runtime.application.config.parser.type,
         },
         {
             "name": "database",
-            "status": component_status(runtime.application.database, enabled=True, error=runtime.application.component_errors.get("database")),
+            "status": required_component_status(runtime.application.database, error=runtime.application.component_errors.get("database")),
         },
     ]
+
+
+def parser_status() -> str:
+    error = runtime.application.component_errors.get("parser")
+    if error:
+        return "error"
+    if not runtime.application.ready:
+        return "loading"
+    return "ready" if runtime.application.parser.is_available(runtime.application.config.parser.type) else "error"
