@@ -14,5 +14,5 @@ class Parser(Protocol):
     def stop(self) -> None:
         ...
 
-    def parse_file(self, filepath: str, *, original_filename: str | None = None, ocr: OCR | None = None, parser_type: str | None = None) -> list[dict]:
+    def parse_file(self, filepath: str, *, original_filename: str | None = None, ocr: OCR | None = None) -> list[dict]:
         ...

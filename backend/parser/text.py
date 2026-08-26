@@ -2,20 +2,25 @@ import os
 import tempfile
 import uuid
 
-from langchain_community.document_loaders import TextLoader, Docx2txtLoader, UnstructuredMarkdownLoader
+from langchain_community.document_loaders import TextLoader
 from ocr.base import OCR
 from schema import ParserConfig
 
+from parser.docx import parse_docx_blocks
+from parser.excel import parse_excel_blocks
+from parser.image import parse_image_blocks, parse_image_documents
+from parser.markdown import parse_markdown_blocks
+from parser.chunker import blocks_to_documents
+from parser.schema import Block, TextBlock
 from parser.text_splitter import clean_cjk_spaces, split_text
+from parser.validation import validate_pdf_file
 
 
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
+STRUCTURED_EXTS = {".md", ".markdown", ".docx", ".xlsx"}
 
 LOADERS = {
     ".txt": TextLoader,
-    ".md": UnstructuredMarkdownLoader,
-    ".markdown": UnstructuredMarkdownLoader,
-    ".docx": Docx2txtLoader,
 }
 
 
@@ -32,19 +37,35 @@ class TextParser:
     def stop(self) -> None:
         self.ready = False
 
-    def parse_file(self, filepath: str, *, original_filename: str | None = None, ocr: OCR | None = None, parser_type: str | None = None) -> list[dict]:
+    def parse_file(self, filepath: str, *, original_filename: str | None = None, ocr: OCR | None = None) -> list[dict]:
         ext = os.path.splitext(filepath)[1].lower()
-        if ext not in LOADERS and ext not in IMAGE_EXTS and ext != ".pdf":
+        if ext not in LOADERS and ext not in STRUCTURED_EXTS and ext not in IMAGE_EXTS and ext != ".pdf":
             raise ValueError(f"Unsupported file type: {ext}")
         filename = original_filename or os.path.basename(filepath)
 
+        if ext in (".md", ".markdown"):
+            chunks = blocks_to_documents(parse_markdown_blocks(filepath, self.config, ocr or self.ocr), filename, self.config)
+            if not chunks:
+                raise ValueError(f"Empty file: {filename}")
+            return chunks
+        if ext == ".docx":
+            chunks = blocks_to_documents(parse_docx_blocks(filepath, self.config, ocr or self.ocr), filename, self.config)
+            if not chunks:
+                raise ValueError(f"Empty file: {filename}")
+            return chunks
+        if ext == ".xlsx":
+            chunks = blocks_to_documents(parse_excel_blocks(filepath, self.config, ocr or self.ocr), filename, self.config)
+            if not chunks:
+                raise ValueError(f"Empty file: {filename}")
+            return chunks
+
         if ext == ".pdf":
-            text = _parse_pdf_text(filepath, filename, ocr or self.ocr)
+            chunks = blocks_to_documents(_parse_pdf_blocks(filepath, filename, ocr or self.ocr, self.config), filename, self.config)
+            if not chunks:
+                raise ValueError(f"Empty file: {filename}")
+            return chunks
         elif ext in IMAGE_EXTS:
-            parser_ocr = ocr or self.ocr
-            if parser_ocr is None:
-                raise RuntimeError("ocr is required for image parsing")
-            text = parser_ocr.image_to_text(filepath)
+            return parse_image_documents(filepath, filename, ocr or self.ocr, self.config)
         else:
             text = _load_text(filepath, ext, filename)
 
@@ -73,6 +94,7 @@ def chunks_to_documents(chunks: list[str], filename: str) -> list[dict]:
             "content": chunk_text,
             "metadata": {
                 "filename": filename,
+                "content_type": "text",
                 "chunk_index": chunk_index,
             },
             "id": str(uuid.uuid4()),
@@ -80,41 +102,57 @@ def chunks_to_documents(chunks: list[str], filename: str) -> list[dict]:
     return results
 
 
-def _parse_pdf_text(filepath: str, filename: str, ocr: OCR | None) -> str:
+def _parse_pdf_blocks(filepath: str, filename: str, ocr: OCR | None, parser_config: ParserConfig) -> list[Block]:
     import fitz
 
+    validate_pdf_file(filepath)
     doc = fitz.open(filepath)
-    parts = []
+    blocks: list[Block] = []
     for page in doc:
         page_text = page.get_text()
-        img_texts = []
-        for img_info in page.get_images(full=True):
-            xref = img_info[0]
-            try:
-                pix = fitz.Pixmap(doc, xref)
-                if pix.n - pix.alpha > 3:
-                    pix = fitz.Pixmap(fitz.csRGB, pix)
-                tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
-                try:
-                    pix.save(tmp.name)
-                    if ocr is None:
-                        continue
-                    text = ocr.image_to_text(tmp.name)
-                    if text.strip():
-                        img_texts.append(text)
-                finally:
-                    os.unlink(tmp.name)
-            except Exception:
-                continue
-        page_content = page_text
-        if img_texts:
-            page_content += "\n[图片文字]\n" + "\n".join(img_texts)
-        if page_content.strip():
-            parts.append(page_content)
+        if page_text.strip():
+            blocks.append(TextBlock(page_text))
+        blocks.extend(_parse_page_image_blocks(doc, page, ocr, parser_config))
     doc.close()
-    if not parts:
-        raise ValueError(f"Empty file: {filename}")
-    return "\n".join(parts)
+    return blocks
+
+
+def parse_pdf_image_documents(filepath: str, filename: str, ocr: OCR | None, parser_config: ParserConfig) -> list[dict]:
+    chunks = blocks_to_documents(parse_pdf_image_blocks(filepath, ocr, parser_config), filename, parser_config)
+    return chunks
+
+
+def parse_pdf_image_blocks(filepath: str, ocr: OCR | None, parser_config: ParserConfig) -> list[Block]:
+    import fitz
+
+    validate_pdf_file(filepath)
+    doc = fitz.open(filepath)
+    blocks: list[Block] = []
+    for page in doc:
+        blocks.extend(_parse_page_image_blocks(doc, page, ocr, parser_config))
+    doc.close()
+    return blocks
+
+
+def _parse_page_image_blocks(doc, page, ocr: OCR | None, parser_config: ParserConfig) -> list[Block]:
+    blocks: list[Block] = []
+    import fitz
+
+    for img_info in page.get_images(full=True):
+        xref = img_info[0]
+        try:
+            pix = fitz.Pixmap(doc, xref)
+            if pix.n - pix.alpha > 3:
+                pix = fitz.Pixmap(fitz.csRGB, pix)
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+            try:
+                pix.save(tmp.name)
+                blocks.extend(parse_image_blocks(tmp.name, ocr, parser_config))
+            finally:
+                os.unlink(tmp.name)
+        except Exception:
+            continue
+    return blocks
 
 
 def _load_text(filepath: str, ext: str, filename: str) -> str:

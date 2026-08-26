@@ -1,34 +1,34 @@
 import json
 import re
-from dataclasses import dataclass
 from html import unescape
 from html.parser import HTMLParser
 from pathlib import Path
 
+from parser.chunker import blocks_to_chunks, blocks_to_documents
+from parser.normalizer import is_section_title_text
+from parser.schema import Block, TableBlock, TextBlock
 from parser.table_splitter import compact_cell_text, split_table
-from parser.text_splitter import split_text
 from schema import ParserConfig
-
-
-@dataclass
-class TextBlock:
-    text: str
-
-
-@dataclass
-class TableBlock:
-    text: str
-    before: str = ""
-    after: str = ""
-
-
-Block = TextBlock | TableBlock
 
 
 def read_table_chunks(output_dir: Path, parser_config: ParserConfig) -> list[str]:
     chunks = _read_content_list(output_dir, parser_config)
     if chunks is not None:
         return chunks
+    raise ValueError("table parser output json not found")
+
+
+def read_table_documents(output_dir: Path, filename: str, parser_config: ParserConfig) -> list[dict]:
+    documents = _read_content_list_documents(output_dir, filename, parser_config)
+    if documents is not None:
+        return documents
+    raise ValueError("table parser output json not found")
+
+
+def read_table_blocks(output_dir: Path, parser_config: ParserConfig) -> list[Block]:
+    blocks = _read_content_list_blocks(output_dir, parser_config)
+    if blocks is not None:
+        return blocks
     raise ValueError("table parser output json not found")
 
 
@@ -66,19 +66,41 @@ def clean_table_text(text: str) -> str:
 
 
 def _read_content_list(output_dir: Path, parser_config: ParserConfig) -> list[str] | None:
+    documents = _read_content_list_documents(output_dir, "", parser_config)
+    if documents is None:
+        return None
+    return [document["content"] for document in documents]
+
+
+def _read_content_list_documents(output_dir: Path, filename: str, parser_config: ParserConfig) -> list[dict] | None:
+    blocks = _read_content_list_blocks(output_dir, parser_config)
+    if blocks is None:
+        return None
+    return blocks_to_documents(blocks, filename, parser_config)
+
+
+def _read_content_list_blocks(output_dir: Path, parser_config: ParserConfig) -> list[Block] | None:
     json_files = sorted(output_dir.rglob("*_content_list.json"))
     for path in json_files:
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
-        chunks = _content_list_to_chunks(data, parser_config)
-        if chunks:
-            return chunks
+        blocks = _content_list_to_blocks(data, parser_config)
+        if blocks:
+            return blocks
     return None
 
 
 def _content_list_to_chunks(data, parser_config: ParserConfig) -> list[str]:
+    return [document["content"] for document in _content_list_to_documents(data, "", parser_config)]
+
+
+def _content_list_to_documents(data, filename: str, parser_config: ParserConfig) -> list[dict]:
+    return blocks_to_documents(_content_list_to_blocks(data, parser_config), filename, parser_config)
+
+
+def _content_list_to_blocks(data, parser_config: ParserConfig) -> list[Block]:
     if not isinstance(data, list):
         return []
     blocks = []
@@ -86,7 +108,7 @@ def _content_list_to_chunks(data, parser_config: ParserConfig) -> list[str]:
         if not isinstance(item, dict):
             continue
         blocks.extend(_content_item_to_blocks(item, parser_config))
-    return blocks_to_chunks(blocks, parser_config)
+    return blocks
 
 
 def _content_item_to_blocks(item: dict, parser_config: ParserConfig) -> list[Block]:
@@ -101,39 +123,6 @@ def _content_item_to_blocks(item: dict, parser_config: ParserConfig) -> list[Blo
     if not text:
         return []
     return [TextBlock(text)]
-
-
-def blocks_to_chunks(blocks: list[Block], parser_config: ParserConfig) -> list[str]:
-    chunks = []
-    text_blocks = []
-    for index, block in enumerate(blocks):
-        if isinstance(block, TextBlock):
-            text_blocks.append(block.text)
-            continue
-        chunks.extend(_text_blocks_to_chunks(text_blocks, parser_config))
-        text_blocks = []
-        block.before = _limit_text(blocks[index - 1].text, parser_config.table.before_text_size, head=False) if index > 0 and isinstance(blocks[index - 1], TextBlock) else ""
-        block.after = _limit_text(blocks[index + 1].text, parser_config.table.after_text_size, head=True) if index + 1 < len(blocks) and isinstance(blocks[index + 1], TextBlock) else ""
-        chunks.append(_table_chunk_with_context(block.text, block.before, block.after))
-    chunks.extend(_text_blocks_to_chunks(text_blocks, parser_config))
-    return chunks
-
-
-def _text_blocks_to_chunks(blocks: list[str], parser_config: ParserConfig) -> list[str]:
-    text = "\n".join(block.strip() for block in blocks if block.strip())
-    if not text:
-        return []
-    return [chunk.strip() for chunk in split_text(text, parser_config.text.chunk_size, parser_config.text.chunk_overlap) if chunk.strip()]
-
-
-def _table_chunk_with_context(content: str, before: str, after: str) -> str:
-    parts = []
-    if before and before not in content:
-        parts.append(before)
-    parts.append(content)
-    if after and after not in content:
-        parts.append(after)
-    return "\n\n".join(parts)
 
 
 def _table_item_to_blocks(item: dict, caption: str, parser_config: ParserConfig) -> list[Block]:
@@ -164,14 +153,21 @@ def _table_rows_to_blocks(title: str, rows: list[list[str]], parser_config: Pars
             if text:
                 blocks.append(TextBlock(text))
             continue
-        for chunk in split_table(logical_title, header, body, parser_config.table.chunk_size):
+        table_key = object()
+        table_chunks = split_table(logical_title, header, body, parser_config.table.chunk_size)
+        table_part_count = len(table_chunks)
+        for table_part_index, chunk in enumerate(table_chunks):
             content = clean_table_text(chunk["content"]).strip()
             if content:
-                blocks.append(TableBlock(content))
+                blocks.append(TableBlock(content, table_key=table_key, table_part_index=table_part_index, table_part_count=table_part_count))
     return blocks
 
 
 def _split_logical_tables(title: str, rows: list[list[str]]) -> list[tuple[str, str, list[str], list[list[str]]]]:
+    if len(rows) >= 2 and _is_section_title_row(rows[0]):
+        title = "\n".join(part for part in (title, _row_text(rows[0])) if part)
+        rows = rows[1:]
+
     header = rows[0]
     body = rows[1:]
     if not body:
@@ -209,10 +205,7 @@ def _is_section_title_row(row: list[str]) -> bool:
 
 
 def _is_section_title_text(text: str) -> bool:
-    text = text.strip()
-    if "\n" in text or len(text) > 80:
-        return False
-    return bool(re.match(r"^(\d+[\.\、]|[一二三四五六七八九十]+[、.．]|[A-Z][\).])\s*\S+", text))
+    return is_section_title_text(text)
 
 
 def _is_header_row(row: list[str]) -> bool:
@@ -221,15 +214,6 @@ def _is_header_row(row: list[str]) -> bool:
 
 def _row_text(row: list[str]) -> str:
     return " ".join(cell.strip() for cell in row if cell.strip())
-
-
-def _limit_text(text: str, limit: int, *, head: bool) -> str:
-    text = text.strip()
-    if not text or limit <= 0:
-        return ""
-    if len(text) <= limit:
-        return text
-    return text[:limit] if head else text[-limit:]
 
 
 def _text_value(value) -> str:

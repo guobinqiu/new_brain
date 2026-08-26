@@ -233,7 +233,7 @@ flowchart TB
 - 组件：Store、Dense、Sparse、Rerank、OCR、Parser 的状态和绑定模型。
 - 链路：最近若干次搜索的总耗时和各阶段耗时。
 
-组件状态统一为四态：`ready` 表示组件已加载完成，`loading` 表示启用但尚未 ready，`disabled` 表示配置未启用，`error` 表示启动或加载失败。Sparse 作为一个组件表达，显示运行 profile 绑定的 sparse 类型和模型。Parser 显示当前默认解析模式；Parser 配置里声明 `standard` 和 `fast` 等解析模式是否可用。
+组件状态统一为四态：`ready` 表示组件已加载完成，`loading` 表示启用但尚未 ready，`disabled` 表示配置未启用，`error` 表示启动或加载失败。Sparse 作为一个组件表达，显示运行 profile 绑定的 sparse 类型和模型。Parser 显示当前标准解析能力状态。
 
 模型切换属于配置管理能力，不属于运行监控能力。
 
@@ -427,19 +427,19 @@ backend/
 | `schema.py`          | 校验配置结构和默认值                                                             |
 | `index/`             | 文件索引领域，负责索引请求校验、入队、消费、对象存储下载、解析和写入向量库       |
 | `parser/`           | 文件解析、OCR 调用、文本清理、表格归一化和 chunk 生成                           |
-| `parser/service.py` | Parser 调度器，根据 `parser.type` 或请求覆盖值选择具体 parser                   |
+| `parser/service.py` | Parser 标准解析入口，统一调度具体格式 parser                                   |
 | `parser/text.py`    | 普通文本解析器                                                                  |
 | `parser/text_splitter.py` | 文本清理和普通文本 chunk 切片工具                                             |
 | `parser/table.py`   | 表格优先解析器组件入口                                                          |
-| `parser/mineru.py`  | MinerU PDF 解析适配，负责模型配置、加载和调用 MinerU SDK                       |
-| `parser/table_transform.py` | 表格结构归一化，把 MinerU JSON/HTML 表格转换为紧凑 key-value 文本              |
+| `parser/mineru.py`  | MinerU 文档解析适配，负责模型配置、加载和调用 MinerU SDK                      |
+| `parser/table_transform.py` | 表格结构归一化，把 MinerU JSON/HTML 表格转换为 Markdown 表格文本              |
 | `parser/table_splitter.py` | 表格 chunk 切片，按行边界控制 chunk 大小                                      |
 | `dense/`             | 生成 dense 向量                                                                  |
 | `sparse/`            | 执行应用内 sparse 检索，或生成 sparse vector                                     |
 | `store/`             | 连接向量库，负责写入、删除、列表、dense 查询、可选 sparse 查询                   |
 | `search/`            | SearchPipeline 和 SearchRunner，负责检索流程、并发查询、去重、融合和 rerank 调用 |
 | `rerank/`            | 对候选结果做二次排序                                                             |
-| `ocr/`               | 图片或 PDF 内图片的 OCR                                                          |
+| `ocr/`               | 可选 OCR 适配组件，当前标准文档解析链路不依赖它                                   |
 | `tokenizer/`         | 分词能力接口和 jieba 实现                                                        |
 
 命名规则：
@@ -682,8 +682,12 @@ chunk metadata：
 | ------------- | -------------- | ------------------------------------ |
 | `file_id`     | keyword/string | 必填，搜索过滤用，要建索引           |
 | `filename`    | keyword/string | 必填，搜索结果展示用                 |
+| `content_type` | string         | 必填，区分 `text` / `table`          |
 | `chunk_index` | integer        | 必填，文件内 chunk 序号，不建索引    |
 | `s3_url`      | string         | 对象存储来源地址，用于追溯，不建索引 |
+| `table_id` | string         | 表格 chunk 使用，同一张表的分片标识，不建索引 |
+| `table_part_index` | integer | 表格 chunk 使用，当前表格分片序号，不建索引 |
+| `table_part_count` | integer | 表格 chunk 使用，当前表格分片总数，不建索引 |
 
 放进 metadata 不等于自动有高效过滤索引。只给 `file_id` 建过滤索引：
 
@@ -693,7 +697,7 @@ chunk metadata：
 | Milvus       | 创建 scalar index：`file_id` 字段                                            |
 | Chroma local | metadata 写入后由 Chroma 本地 SQLite metadata 表维护索引；代码不额外声明索引 |
 
-`filename`、`chunk_index` 会随每条 chunk 一起保存，搜索结果可以返回这些字段；它们不作为搜索过滤条件，不建索引。
+`filename`、`content_type`、`chunk_index`、表格分片字段会随每条 chunk 一起保存，搜索结果可以返回这些字段；它们不作为搜索过滤条件，不建索引。
 
 chunk 文本会随分块一起写入向量库。不同向量库的原生字段不同，但 Store 对搜索流程统一返回 `content`：
 
@@ -709,23 +713,92 @@ chunk 文本会随分块一起写入向量库。不同向量库的原生字段�
 
 ## 12. 文档解析与切片
 
-上传文件先解析成文本或结构化表格，再切成 chunk 写入 store。解析模式由 `parser.type` 决定，请求体里的 `parser` 可以在单次索引时覆盖默认解析模式；`standard` 是标准解析，内部使用表格优先解析，PDF 表格由 MinerU pipeline 处理，模型由 `scripts/download_models.sh mineru` 准备；`fast` 是快速解析，内部使用普通文本解析。
+上传文件先解析成统一 block，再切成 chunk 写入 store。文件入口先按扩展名白名单拒绝不支持格式；进入具体 parser 后再做真实文件格式校验，避免伪装后缀的文件进入解析或向量库写入。系统只保留标准解析：PDF、DOCX、XLSX、图片文件和文档内嵌图片由 MinerU pipeline 做结构化解析，Markdown 由原生 parser 解析。
 
 Parser 是 `Application` 生命周期内的正式组件，由 `container.py` 构造并注入 OCR。`Application.load_models()` 启动 Parser；索引阶段通过 `application.parser.parse_file()` 解析文件，不直接调用全局解析函数。
 
-Parser 代码按领域边界拆分：`parser/service.py` 是调度器，对外解析模式 `standard` / `fast` 在这里映射到内部解析器 `table` / `text`；`parser/text.py` 是普通文本解析器；`parser/text_splitter.py` 是文本清理和普通文本 chunk 切片工具；`parser/table.py` 是表格优先解析器组件入口；`parser/mineru.py` 是 MinerU PDF 适配；`parser/table_transform.py` 负责把 MinerU JSON/HTML 表格转换成 key-value 紧凑文本；`parser/table_splitter.py` 负责按表格行边界切 chunk。MinerU 是 `table` 解析器的 PDF 实现细节，不作为独立业务 parser 暴露。
+Parser 代码按领域边界拆分：
+
+```text
+parser/
+├── service.py
+│   └── 标准解析入口
+├── schema.py
+│   └── 统一内部结构：TextBlock / TableBlock / ImageBlock，其中标准图片解析输出 TextBlock / TableBlock
+├── text.py
+│   ├── txt：直接读取文本
+│   ├── image.py：图片调用 MinerU 输出 TextBlock / TableBlock
+│   ├── markdown.py：原生解析 Markdown 正文和 pipe table，输出 TextBlock / TableBlock
+│   ├── docx.py：MinerU 输出 TextBlock / TableBlock
+│   └── excel.py：MinerU 输出 TextBlock / TableBlock
+├── table.py
+│   └── 统一解析入口
+├── mineru.py
+│   └── PDF / DOCX / XLSX / 图片解析：MinerU 输出 TextBlock / TableBlock，文档内图片走 image parser
+├── table_transform.py
+│   └── HTML/rows 表格结构 -> Markdown 表格文本
+├── normalizer.py
+│   └── blocks 结构纠偏：空块过滤、连续文本合并、章节标题识别
+├── table_splitter.py
+│   └── 表格按行边界切片
+├── text_splitter.py
+│   └── 普通文本清理和切片
+├── validation.py
+│   └── DOCX / XLSX / PDF / 图片真实格式校验
+└── chunker.py
+    └── TextBlock / ImageBlock / TableBlock -> 最终 chunk document
+```
+
+真实格式校验在具体格式入口执行：DOCX 检查 zip 包和 Word 目录结构；XLSX 检查 zip 包和 Excel 目录结构；PDF 在解析前用 PyMuPDF 打开验证；图片在交给 MinerU 前用 Pillow `Image.verify()` 验证。TXT / Markdown 按文本格式处理，校验重点是可读取且非空。
+
+统一解析链路：
+
+```text
+文件
+└── 格式 parser
+    └── blocks[]
+        ├── TextBlock(text)
+        └── TableBlock(text, table_part_index, table_part_count)
+                ↓
+            normalizer
+                ├── 合并连续 TextBlock
+                ├── 章节标题标记为 TextBlock(kind=section_title)
+                └── 保留 TableBlock 边界
+                ↓
+            chunker
+                ├── TextBlock -> text chunk
+                ├── TableBlock -> table chunk
+                ├── 表格 before：从前一个 TextBlock 截取
+                └── 表格 after：从后一个非章节标题 TextBlock 截取
+                ↓
+            chunk document
+            ├── content：检索正文
+            ├── id：chunk UUID
+            └── metadata
+                ├── filename
+                ├── content_type
+                ├── chunk_index
+                ├── table_id
+                ├── table_part_index
+                └── table_part_count
+```
+
+图片文件和文档内嵌图片使用 MinerU 解析，解析结果同样进入统一 `TextBlock` / `TableBlock` 管线。图片里的普通文字会作为 text chunk 写入；图片里的表格如果 MinerU 输出表格结构，则转换为 table chunk，并带 `table_id`、`table_part_index` 和 `table_part_count`。
+
+Markdown 由原生 parser 读取正文和标准 pipe table；Word 和 Excel 由 MinerU 输出结构化 content list。系统把表格 HTML 或 rows 解析成统一行列结构，再转换成 Markdown 表格文本。这样可以复用同一套表格切片逻辑，避免 Markdown、Word、Excel、PDF 各写一套表格处理代码。
+
+MinerU 是 PDF、Word 和 Excel 的结构化解析实现细节，不作为独立业务 parser 暴露。
 
 MinerU 使用 pipeline 后端。运行时模型根目录是实体目录 `models/mineru/pipeline`，`models/mineru/mineru.json` 的 `models-dir.pipeline` 指向该目录。后端判断 MinerU 可用时检查 Python 包、配置文件和 pipeline 模型目录。
 
 模型加载和模型使用分离：应用启动阶段加载 dense、sparse、rerank、OCR 和可用的 MinerU 模型；索引阶段只使用已经加载的模型，不在请求处理中懒加载 MinerU，也不通过子进程执行 MinerU CLI。MinerU 调用走 Python SDK，复用当前进程里的 pipeline 模型单例。
 
-MinerU 的主输入是 PDF，系统优先读取 MinerU 输出的 `*_content_list.json`。普通文本块直接归一化为 text block；表格块里的 `table_body` 是 MinerU JSON 内嵌的 HTML 表格字符串，系统会先把 HTML 解析成一张或多张逻辑表，再转换成 table block。block 只保存 `type` 和 `text`，上下文截取在生成 chunk 时临时计算。生成最终 chunk 时，普通正文走文本切片，表格走表格行切片，不把正文和表格合并后再统一切。表格 chunk 只从相邻 text block 获取上下文：前一个 text block 截取尾部 `before_text_size`，后一个 text block 截取头部 `after_text_size`，相邻上下文和表格主体用空行分隔。相邻 block 是 table 时不互相拼接。表格块内部如果出现“标题行 + 新表头”，会拆成多张逻辑表再分别切片。向量库 `content` 保存检索友好的 chunk 文本，不直接保存 HTML。
+最终 chunk 中，普通正文走文本切片，表格走表格行切片，不把正文和表格合并后再统一切。表格块内部如果出现“标题行 + 新表头”，会拆成多张逻辑表再分别切片。章节标题可以作为后一张表的 before 上下文，不作为前一张表的 after 上下文。向量库 `content` 保存 Markdown 表格文本，不额外保存 `raw_content`，也不直接保存 HTML。
 
 切片参数由配置决定：
 
 ```yaml
 parser:
-  type: standard
   text:
     chunk_size: 500
     chunk_overlap: 80
@@ -737,7 +810,6 @@ parser:
 
 | 参数                    | 含义                                      |
 | ----------------------- | ----------------------------------------- |
-| `parser.type`           | 默认解析模式，支持 `standard` / `fast`     |
 | `text.chunk_size`       | 普通文本 chunk 字符上限                   |
 | `text.chunk_overlap`    | 普通文本相邻 chunk 重叠字符数             |
 | `table.chunk_size`       | 表格 chunk 字符上限                       |
@@ -746,7 +818,7 @@ parser:
 
 切片按中文文档常见边界拆分，优先使用段落、换行、中文句号、感叹号、问号、分号、逗号和空格。
 
-表格切片按行边界贪心累加：小表格完整写入一个 chunk；大表格逐行加入当前 chunk，加入后不超过 `table.chunk_size` 就继续累加，超过就先写出当前 chunk，再用当前行开启新 chunk。普通行不会从中间切断，单行超过 `table.chunk_size` 时才截断到上限长度。表格切片不做行 overlap，每个 chunk 重新带上表格标题和表头；表格行号和截断状态不写入向量库 metadata。
+表格切片按行边界贪心累加：小表格完整写入一个 chunk；大表格逐行加入当前 chunk，加入后不超过 `table.chunk_size` 就继续累加，超过就先写出当前 chunk，再用当前行开启新 chunk。普通行不会从中间切断，单行超过 `table.chunk_size` 时单独成为一个 chunk。表格切片不做行 overlap，每个 chunk 重新带上表格标题和 Markdown 表头；表格行号和截断状态不写入向量库 metadata。
 
 解析后的文本会做 Unicode 归一化，并去掉中文字符之间由 PDF 提取产生的多余空格。
 

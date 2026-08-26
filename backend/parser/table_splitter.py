@@ -15,6 +15,7 @@ def split_table(title: str, header: list[str], rows: list[list[str]], chunk_size
 
     def render(table_rows: list[list[str]]) -> str:
         lines = [title] if title else []
+        lines.extend(_render_markdown_header(header))
         lines.extend(_render_table_row(header, row) for row in table_rows)
         return "\n".join(line for line in lines if line).strip()
 
@@ -30,7 +31,7 @@ def split_table(title: str, header: list[str], rows: list[list[str]], chunk_size
             if current_rows:
                 chunks.append(table_chunk(render(current_rows)))
                 current_rows = []
-            chunks.append(table_chunk(single_row[:chunk_size]))
+            chunks.append(table_chunk(single_row))
             continue
 
         candidate = current_rows + [row]
@@ -54,10 +55,23 @@ def table_chunk(content: str) -> dict:
 
 
 def _render_table_row(header: list[str], row: list[str]) -> str:
-    pairs = []
-    for index, cell in enumerate(row):
-        if not cell:
-            continue
-        key = header[index] if index < len(header) and header[index] else f"列{index + 1}"
-        pairs.append(f"{key}: {cell}")
-    return "；".join(pairs)
+    cells = []
+    width = max(len(header), len(row))
+    for index in range(width):
+        cell = row[index] if index < len(row) else ""
+        cells.append(_escape_markdown_cell(cell))
+    return "| " + " | ".join(cells) + " |"
+
+
+def _render_markdown_header(header: list[str]) -> list[str]:
+    width = max(1, len(header))
+    header_cells = [_escape_markdown_cell(header[index] if index < len(header) and header[index] else f"列{index + 1}") for index in range(width)]
+    separator_cells = ["---"] * width
+    return [
+        "| " + " | ".join(header_cells) + " |",
+        "| " + " | ".join(separator_cells) + " |",
+    ]
+
+
+def _escape_markdown_cell(text: str) -> str:
+    return text.replace("|", "\\|").replace("\n", " ")

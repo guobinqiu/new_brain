@@ -1,10 +1,11 @@
 import importlib.util
 import os
 import tempfile
-import uuid
 from pathlib import Path
 
-from parser.table_transform import read_table_chunks
+from parser.schema import Block
+from parser.table_transform import read_table_blocks, read_table_documents
+from parser.validation import validate_pdf_file
 from schema import ParserConfig
 
 
@@ -28,6 +29,7 @@ def load_table_parser() -> None:
 def parse_pdf_table(filepath: str, filename: str, parser_config: ParserConfig) -> list[dict]:
     if not table_parser_available():
         raise ValueError("table parser is not installed")
+    validate_pdf_file(filepath)
 
     with tempfile.TemporaryDirectory(prefix="mineru_") as output_dir:
         _mineru_do_parse(
@@ -35,24 +37,29 @@ def parse_pdf_table(filepath: str, filename: str, parser_config: ParserConfig) -
             filepath=filepath,
             filename=filename,
         )
-        contents = read_table_chunks(Path(output_dir), parser_config)
+        chunks = read_table_documents(Path(output_dir), filename, parser_config)
 
-    chunks = []
-    for chunk_index, content in enumerate(contents):
-        content = content.strip()
-        if not content:
-            continue
-        chunks.append({
-            "content": content,
-            "metadata": {
-                "filename": filename,
-                "chunk_index": chunk_index,
-            },
-            "id": str(uuid.uuid4()),
-        })
     if not chunks:
         raise ValueError(f"Empty file: {filename}")
     return chunks
+
+
+def parse_document_blocks(filepath: str, filename: str, file_type: str, parser_config: ParserConfig) -> list[Block]:
+    if not table_parser_available():
+        raise ValueError("table parser is not installed")
+
+    with tempfile.TemporaryDirectory(prefix="mineru_") as output_dir:
+        _mineru_do_parse(
+            output_dir=output_dir,
+            filepath=filepath,
+            filename=filename,
+            file_type=file_type,
+        )
+        blocks = read_table_blocks(Path(output_dir), parser_config)
+
+    if not blocks:
+        raise ValueError(f"Empty file: {filename}")
+    return blocks
 
 
 def _prepare_mineru_runtime_config() -> None:
@@ -62,16 +69,16 @@ def _prepare_mineru_runtime_config() -> None:
     os.environ["MINERU_TOOLS_CONFIG_JSON"] = str(config_path)
 
 
-def _mineru_do_parse(output_dir: str, filepath: str, filename: str) -> None:
+def _mineru_do_parse(output_dir: str, filepath: str, filename: str, file_type: str = "pdf") -> None:
     from mineru.cli.common import do_parse, read_fn
     from mineru.utils.enum_class import MakeMode
 
     stem = Path(filename).stem
-    pdf_bytes = read_fn(Path(filepath), "pdf")
+    file_bytes = read_fn(Path(filepath), file_type)
     do_parse(
         output_dir=output_dir,
         pdf_file_names=[stem],
-        pdf_bytes_list=[pdf_bytes],
+        pdf_bytes_list=[file_bytes],
         p_lang_list=["ch"],
         backend="pipeline",
         parse_method="auto",
