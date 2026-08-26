@@ -399,10 +399,6 @@ Content-Type: application/json
 | `id` | chunk ID |
 | `content` | 命中的 chunk 文本 |
 | `score` | 相关性分数 |
-| `metadata.file_id` | 文件 ID |
-| `metadata.filename` | 文件名 |
-| `metadata.s3_url` | 对象存储来源地址 |
-| `metadata.chunk_index` | 文件内 chunk 序号 |
 
 响应示例：
 
@@ -412,35 +408,17 @@ Content-Type: application/json
     {
       "id": "chunk-text-1",
       "content": "合同约定项目验收周期为 30 天，逾期需要提交延期说明。",
-      "score": 0.91,
-      "metadata": {
-        "file_id": "550e8400-e29b-41d4-a716-446655440000",
-        "filename": "example.pdf",
-        "s3_url": "s3://bucket/path/to/example.pdf",
-        "chunk_index": 2
-      }
+      "score": 0.91
     },
     {
       "id": "chunk-table-1",
       "content": "| 项目 | 金额 | 备注 |\n|---|---:|---|\n| 设备费 | 120000 | 首期 |\n| 服务费 | 30000 | 年费 |",
-      "score": 0.86,
-      "metadata": {
-        "file_id": "550e8400-e29b-41d4-a716-446655440000",
-        "filename": "example.pdf",
-        "s3_url": "s3://bucket/path/to/example.pdf",
-        "chunk_index": 3
-      }
+      "score": 0.86
     },
     {
       "id": "chunk-text-2",
       "content": "付款条件为验收通过后 10 个工作日内支付尾款。",
-      "score": 0.79,
-      "metadata": {
-        "file_id": "550e8400-e29b-41d4-a716-446655440000",
-        "filename": "example.pdf",
-        "s3_url": "s3://bucket/path/to/example.pdf",
-        "chunk_index": 8
-      }
+      "score": 0.79
     }
   ],
   "mode": "hybrid",

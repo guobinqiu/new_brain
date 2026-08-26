@@ -16,7 +16,8 @@ class TableBlock:
 
 @dataclass
 class ImageBlock:
-    text: str
+    path: str
+    file_type: str
 
 
 Block = TextBlock | TableBlock | ImageBlock

@@ -58,8 +58,7 @@ class TestSearchAPI:
         data = resp.json()
         assert data["mode"] == "dense"
         assert len(data["results"]) > 0
-        for result in data["results"]:
-            assert result["metadata"]["file_id"] == file_id
+        assert any("人工智能" in result["content"] for result in data["results"])
 
     def test_search_hybrid_api(self, app_api_client, test_txt_path, monkeypatch):
         """``POST /api/open/search`` with ``mode=hybrid`` returns hybrid results."""
@@ -70,10 +69,9 @@ class TestSearchAPI:
         data = resp.json()
         assert data["mode"] == "hybrid"
         assert len(data["results"]) > 0
-        for result in data["results"]:
-            assert result["metadata"]["file_id"] == file_id
+        assert any("人工智能" in result["content"] for result in data["results"])
 
-    def test_search_table_result_includes_simple_table_metadata(self, app_api_client):
+    def test_search_table_result_returns_table_content(self, app_api_client):
         file_id = str(uuid.uuid4())
         with runtime.application.store.app_context(app_api_client.app_id):
             runtime.application.store.add_file_chunks(
@@ -104,7 +102,7 @@ class TestSearchAPI:
 
         assert resp.status_code == 200, resp.text
         result = resp.json()["results"][0]
-        assert result["metadata"]["file_id"] == file_id
+        assert "unique_table_marker" in result["content"]
 
     def test_search_without_file_ids_searches_all_files(self, app_api_client, test_txt_path, monkeypatch):
         """``POST /api/open/search`` without file_ids searches the full index."""
@@ -118,7 +116,9 @@ class TestSearchAPI:
         resp = app_api_client.post("/api/open/search", json={"query": "人工智能", "mode": "sparse", "top_k": 10})
 
         assert resp.status_code == 200, resp.text
-        assert {result["metadata"]["file_id"] for result in resp.json()["results"]} == {file_id, "other-file"}
+        combined = "\n".join(result["content"] for result in resp.json()["results"])
+        assert "人工智能" in combined
+        assert "other file" in combined
 
     def test_search_accepts_per_request_hybrid_weights(self, app_api_client, api_client, test_txt_path, monkeypatch):
         """``POST /api/open/search`` accepts hybrid weights without changing global config."""
@@ -161,9 +161,8 @@ class TestSearchAPI:
         data = resp.json()
         assert len(data["results"]) <= 5
         for result in data["results"]:
-            for key in ("id", "content", "metadata"):
+            for key in ("id", "content", "score"):
                 assert key in result
-            assert result["metadata"]["file_id"] == file_id
 
     def test_search_returns_elapsed_ms(self, app_api_client, test_txt_path, monkeypatch):
         """``POST /api/open/search`` response includes an ``elapsed_ms`` field."""

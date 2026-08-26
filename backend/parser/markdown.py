@@ -2,7 +2,7 @@ import html
 import re
 
 from ocr.base import OCR
-from parser.image import parse_markdown_image_blocks
+from parser.image import expand_image_blocks, parse_markdown_image_blocks
 from parser.schema import Block, TextBlock
 from parser.table_transform import table_html_to_blocks
 from parser.text_splitter import clean_cjk_spaces
@@ -33,7 +33,7 @@ def parse_markdown_blocks(filepath: str, parser_config: ParserConfig, ocr: OCR |
         index += 1
     _flush_text_buffer(blocks, text_buffer)
     blocks.extend(parse_markdown_image_blocks(filepath, ocr, parser_config))
-    return blocks
+    return expand_image_blocks(blocks, parser_config)
 
 
 def _read_markdown_lines(filepath: str) -> list[str]:

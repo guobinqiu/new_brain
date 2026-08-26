@@ -384,6 +384,15 @@ class TestParserService:
         with pytest.raises(ValueError, match="Invalid image file"):
             _parse_file(str(image_file), ocr=object())
 
+    def test_parser_service_uses_document_parser(self):
+        from parser.document import DocumentParser
+        from parser.service import ParserService
+        from schema import ParserConfig
+
+        parser_service = ParserService(ParserConfig())
+
+        assert isinstance(parser_service.document, DocumentParser)
+
     def test_parse_image_file_uses_mineru(self, tmp_path, monkeypatch):
         import json
         import parser.mineru
@@ -601,7 +610,7 @@ class TestParserService:
         pdf_file = tmp_path / "json-table.pdf"
         _create_minimal_pdf(str(pdf_file), "table")
 
-        def fake_do_parse(output_dir, filepath, filename):
+        def fake_do_parse(output_dir, filepath, filename, file_type="pdf"):
             output_dir = tmp_path / "mineru-output"
             output_dir.mkdir(exist_ok=True)
             (output_dir / "json-table_content_list.json").write_text(
@@ -648,7 +657,7 @@ class TestParserService:
         pdf_file = tmp_path / "json-blocks.pdf"
         _create_minimal_pdf(str(pdf_file), "table")
 
-        def fake_do_parse(output_dir, filepath, filename):
+        def fake_do_parse(output_dir, filepath, filename, file_type="pdf"):
             output_dir = tmp_path / "mineru-output"
             output_dir.mkdir(exist_ok=True)
             (output_dir / "json-blocks_content_list.json").write_text(
@@ -721,7 +730,7 @@ class TestParserService:
         pdf_file = tmp_path / "json-heading-table.pdf"
         _create_minimal_pdf(str(pdf_file), "table")
 
-        def fake_do_parse(output_dir, filepath, filename):
+        def fake_do_parse(output_dir, filepath, filename, file_type="pdf"):
             output_dir = tmp_path / "mineru-output"
             output_dir.mkdir(exist_ok=True)
             (output_dir / "json-heading-table_content_list.json").write_text(
@@ -764,7 +773,7 @@ class TestParserService:
         pdf_file = tmp_path / "json-text-text-table.pdf"
         _create_minimal_pdf(str(pdf_file), "table")
 
-        def fake_do_parse(output_dir, filepath, filename):
+        def fake_do_parse(output_dir, filepath, filename, file_type="pdf"):
             output_dir = tmp_path / "mineru-output"
             output_dir.mkdir(exist_ok=True)
             (output_dir / "json-text-text-table_content_list.json").write_text(
@@ -805,7 +814,7 @@ class TestParserService:
         pdf_file = tmp_path / "json-table-table.pdf"
         _create_minimal_pdf(str(pdf_file), "table")
 
-        def fake_do_parse(output_dir, filepath, filename):
+        def fake_do_parse(output_dir, filepath, filename, file_type="pdf"):
             output_dir = tmp_path / "mineru-output"
             output_dir.mkdir(exist_ok=True)
             (output_dir / "json-table-table_content_list.json").write_text(
@@ -853,7 +862,7 @@ class TestParserService:
         pdf_file = tmp_path / "json-table-heading-table.pdf"
         _create_minimal_pdf(str(pdf_file), "table")
 
-        def fake_do_parse(output_dir, filepath, filename):
+        def fake_do_parse(output_dir, filepath, filename, file_type="pdf"):
             output_dir = tmp_path / "mineru-output"
             output_dir.mkdir(exist_ok=True)
             (output_dir / "json-table-heading-table_content_list.json").write_text(

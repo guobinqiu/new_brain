@@ -49,17 +49,17 @@ def test_mineru_parser_runs_real_pipeline(tmp_path):
     if os.environ.get("RUN_MINERU_E2E") != "1":
         pytest.skip("set RUN_MINERU_E2E=1 to run MinerU inference")
 
+    from parser import mineru
     from parser.service import ParserService
-    from parser.table import load_table_parser, table_parser_available
     from schema import ParserConfig
 
-    if not table_parser_available():
+    if not mineru.table_parser_available():
         pytest.skip("MinerU model directory is not available")
 
     pdf_path = tmp_path / "mineru-e2e.pdf"
     _create_minimal_pdf(str(pdf_path), "MinerU E2E table parser")
 
-    load_table_parser()
+    mineru.load_table_parser()
     parser_service = ParserService(ParserConfig())
     parser_service.start()
     try:

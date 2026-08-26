@@ -1,6 +1,5 @@
 import os
 import re
-import tempfile
 import zipfile
 from pathlib import Path
 from urllib.parse import unquote, urlparse
@@ -8,7 +7,7 @@ from urllib.parse import unquote, urlparse
 from ocr.base import OCR
 from parser import mineru
 from parser.chunker import blocks_to_documents
-from parser.schema import Block
+from parser.schema import Block, ImageBlock
 from parser.validation import validate_image_file
 from schema import ParserConfig
 
@@ -23,7 +22,7 @@ def parse_image_documents(filepath: str, filename: str, ocr: OCR | None, parser_
 def parse_image_blocks(filepath: str, ocr: OCR | None, parser_config: ParserConfig) -> list[Block]:
     validate_image_file(filepath)
     file_type = Path(filepath).suffix.lower().lstrip(".")
-    return mineru.parse_document_blocks(filepath, filepath, file_type, parser_config)
+    return mineru.parse_document_blocks(filepath, Path(filepath).name, file_type, parser_config)
 
 
 def parse_markdown_image_blocks(filepath: str, ocr: OCR | None, parser_config: ParserConfig) -> list[Block]:
@@ -38,30 +37,46 @@ def parse_markdown_image_blocks(filepath: str, ocr: OCR | None, parser_config: P
         image_path = (base_dir / image_ref).resolve()
         if not image_path.exists():
             continue
-        blocks.extend(_safe_parse_image_blocks(str(image_path), ocr, parser_config))
+        image_block = _safe_image_block_from_file(image_path)
+        if image_block is not None:
+            blocks.append(image_block)
     return blocks
 
 
-def parse_zip_image_blocks(filepath: str, media_prefix: str, ocr: OCR | None, parser_config: ParserConfig) -> list[Block]:
+def parse_zip_image_blocks(filepath: str, media_prefix: str, image_dir: Path, ocr: OCR | None, parser_config: ParserConfig) -> list[Block]:
     blocks: list[Block] = []
     with zipfile.ZipFile(filepath) as archive:
-        for name in archive.namelist():
+        for index, name in enumerate(archive.namelist()):
             if not name.startswith(media_prefix):
                 continue
             suffix = os.path.splitext(name)[1].lower()
             if not suffix:
                 continue
-            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-                tmp.write(archive.read(name))
-            try:
-                blocks.extend(_safe_parse_image_blocks(tmp.name, ocr, parser_config))
-            finally:
-                os.unlink(tmp.name)
+            image_path = image_dir / f"embedded_{index}{suffix}"
+            image_path.write_bytes(archive.read(name))
+            image_block = _safe_image_block_from_file(image_path)
+            if image_block is not None:
+                blocks.append(image_block)
     return blocks
 
 
-def _safe_parse_image_blocks(filepath: str, ocr: OCR | None, parser_config: ParserConfig) -> list[Block]:
+def expand_image_blocks(blocks: list[Block], parser_config: ParserConfig) -> list[Block]:
+    expanded: list[Block] = []
+    for block in blocks:
+        if isinstance(block, ImageBlock):
+            try:
+                image_path = Path(block.path)
+                expanded.extend(mineru.parse_document_blocks(str(image_path), image_path.name, block.file_type, parser_config))
+            except ValueError:
+                continue
+            continue
+        expanded.append(block)
+    return expanded
+
+
+def _safe_image_block_from_file(filepath: Path) -> ImageBlock | None:
     try:
-        return parse_image_blocks(filepath, ocr, parser_config)
+        validate_image_file(str(filepath))
+        return ImageBlock(str(filepath), filepath.suffix.lower().lstrip("."))
     except ValueError:
-        return []
+        return None

@@ -107,8 +107,7 @@ class TestUploadAPI:
         search = app_api_client.post("/api/open/search", json={"query": "人工智能", "mode": "dense", "file_ids": [file_id]})
         assert search.status_code == 200, search.text
         result = search.json()["results"][0]
-        assert result["metadata"]["file_id"] == file_id
-        assert result["metadata"]["s3_url"] == s3_url
+        assert "人工智能" in result["content"]
 
     def test_index_presigned_url_generates_file_id_when_omitted(self, app_api_client, test_txt_path, monkeypatch):
         """``POST /api/open/files`` generates a file_id when caller omits it."""

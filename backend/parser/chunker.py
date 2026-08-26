@@ -1,7 +1,7 @@
 import uuid
 
 from parser.normalizer import normalize_blocks
-from parser.schema import Block, ImageBlock, TableBlock, TextBlock
+from parser.schema import Block, TableBlock, TextBlock
 from parser.text_splitter import split_text
 from schema import ParserConfig
 
@@ -16,9 +16,6 @@ def blocks_to_documents(blocks: list[Block], filename: str, parser_config: Parse
     text_blocks = []
     for index, block in enumerate(blocks):
         if isinstance(block, TextBlock):
-            text_blocks.append(block.text)
-            continue
-        if isinstance(block, ImageBlock):
             text_blocks.append(block.text)
             continue
         chunks.extend(_text_blocks_to_documents(text_blocks, filename, parser_config))

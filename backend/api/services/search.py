@@ -5,7 +5,9 @@ from search import SearchPlan, _SearchExecutor
 
 
 def client_search(req: SearchRequest, principal):
-    return _search(req, principal)
+    response = _search(req, principal)
+    response["results"] = [_client_result(result) for result in response["results"]]
+    return response
 
 
 def search(req: SearchRequest, principal):
@@ -46,4 +48,12 @@ def _search(req: SearchRequest, principal):
         "sparse_weight": req.sparse_weight,
         "rrf_k": req.rrf_k,
         "elapsed_ms": elapsed_ms,
+    }
+
+
+def _client_result(result: dict) -> dict:
+    return {
+        "id": result.get("id"),
+        "content": result.get("content", ""),
+        "score": result.get("score"),
     }
