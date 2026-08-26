@@ -13,7 +13,6 @@ def blocks_to_chunks(blocks: list[Block], parser_config: ParserConfig) -> list[s
 def blocks_to_documents(blocks: list[Block], filename: str, parser_config: ParserConfig) -> list[dict]:
     blocks = normalize_blocks(blocks)
     chunks = []
-    table_ids = _table_ids(blocks)
     text_blocks = []
     for index, block in enumerate(blocks):
         if isinstance(block, TextBlock):
@@ -24,17 +23,12 @@ def blocks_to_documents(blocks: list[Block], filename: str, parser_config: Parse
             continue
         chunks.extend(_text_blocks_to_documents(text_blocks, filename, parser_config))
         text_blocks = []
-        block.before = _before_table(blocks, index, parser_config)
-        block.after = _after_table(blocks, index, parser_config)
+        block.header = _table_header(blocks, index, parser_config)
+        block.footer = _table_footer(blocks, index, parser_config)
         chunks.append(_document(
-            _table_chunk_with_context(block.text, block.before, block.after),
+            _table_chunk_with_context(block.text, block.header, block.footer),
             filename,
-            {
-                "content_type": "table",
-                "table_id": table_ids[block.table_key],
-                "table_part_index": block.table_part_index,
-                "table_part_count": block.table_part_count,
-            },
+            {},
         ))
     chunks.extend(_text_blocks_to_documents(text_blocks, filename, parser_config))
     for chunk_index, chunk in enumerate(chunks):
@@ -47,8 +41,8 @@ def _text_blocks_to_documents(blocks: list[str], filename: str, parser_config: P
     if not text:
         return []
     return [
-        _document(chunk.strip(), filename, {"content_type": "text"})
-        for chunk in split_text(text, parser_config.text.chunk_size, parser_config.text.chunk_overlap)
+        _document(chunk.strip(), filename, {})
+        for chunk in split_text(text, parser_config.chunk_size, parser_config.chunk_overlap)
         if chunk.strip()
     ]
 
@@ -64,43 +58,24 @@ def _document(content: str, filename: str, metadata: dict) -> dict:
     }
 
 
-def _table_ids(blocks: list[Block]) -> dict[object, str]:
-    ids = {}
-    for block in blocks:
-        if isinstance(block, TableBlock) and block.table_key not in ids:
-            ids[block.table_key] = f"table_{len(ids) + 1}"
-    return ids
-
-
-def _table_chunk_with_context(content: str, before: str, after: str) -> str:
+def _table_chunk_with_context(content: str, header: str, footer: str) -> str:
     parts = []
-    if before and before not in content:
-        parts.append(before)
+    if header and header not in content:
+        parts.append(header)
     parts.append(content)
-    if after and after not in content:
-        parts.append(after)
+    if footer and footer not in content:
+        parts.append(footer)
     return "\n\n".join(parts)
 
 
-def _limit_text(text: str, limit: int, *, head: bool) -> str:
-    text = text.strip()
-    if not text or limit <= 0:
-        return ""
-    if len(text) <= limit:
-        return text
-    return text[:limit] if head else text[-limit:]
-
-
-def _before_table(blocks: list[Block], index: int, parser_config: ParserConfig) -> str:
+def _table_header(blocks: list[Block], index: int, parser_config: ParserConfig) -> str:
     if index == 0 or not isinstance(blocks[index - 1], TextBlock):
         return ""
-    return _limit_text(blocks[index - 1].text, parser_config.table.before_text_size, head=False)
+    return blocks[index - 1].text.strip()
 
 
-def _after_table(blocks: list[Block], index: int, parser_config: ParserConfig) -> str:
+def _table_footer(blocks: list[Block], index: int, parser_config: ParserConfig) -> str:
     if index + 1 >= len(blocks) or not isinstance(blocks[index + 1], TextBlock):
         return ""
     next_block = blocks[index + 1]
-    if next_block.kind == "section_title":
-        return ""
-    return _limit_text(next_block.text, parser_config.table.after_text_size, head=True)
+    return next_block.text.strip()

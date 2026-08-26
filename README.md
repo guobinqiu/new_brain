@@ -124,7 +124,6 @@ http://<服务器地址>/api
 |---|---|---|
 | `POST` | `/api/open/files` | 同步索引对象存储文件，完成后返回 `file_id` |
 | `POST` | `/api/open/search` | 按 `query` 和可选 `file_ids` 搜索知识库 |
-| `POST` | `/api/open/tables/parts` | 按 `file_id` 和 `table_id` 读取同一张表的全部分片 |
 | `DELETE` | `/api/open/files/{file_id}` | 删除当前应用向量库中的索引文件 |
 
 索引接口接收 `presigned_url`、`s3_url`、可选 `filename` 和可选 `file_id`。上游传 `file_id` 时服务端原样保存，推荐使用 UUID；不传时由 RAG 生成 UUID。搜索时不传 `file_ids` 表示全库搜索。
@@ -211,18 +210,36 @@ http://<服务器地址>/api
 {
   "results": [
     {
-      "id": "chunk-uuid",
-      "content": "命中的 chunk 文本",
-      "score": 0.82,
+      "id": "chunk-text-1",
+      "content": "合同约定项目验收周期为 30 天，逾期需要提交延期说明。",
+      "score": 0.91,
       "metadata": {
         "file_id": "550e8400-e29b-41d4-a716-446655440000",
         "filename": "example.pdf",
         "s3_url": "s3://bucket/path/to/example.pdf",
-        "content_type": "table",
-        "chunk_index": 3,
-        "table_id": "table_1",
-        "table_part_index": 0,
-        "table_part_count": 2
+        "chunk_index": 2
+      }
+    },
+    {
+      "id": "chunk-table-1",
+      "content": "| 项目 | 金额 | 备注 |\n|---|---:|---|\n| 设备费 | 120000 | 首期 |\n| 服务费 | 30000 | 年费 |",
+      "score": 0.86,
+      "metadata": {
+        "file_id": "550e8400-e29b-41d4-a716-446655440000",
+        "filename": "example.pdf",
+        "s3_url": "s3://bucket/path/to/example.pdf",
+        "chunk_index": 3
+      }
+    },
+    {
+      "id": "chunk-text-2",
+      "content": "付款条件为验收通过后 10 个工作日内支付尾款。",
+      "score": 0.79,
+      "metadata": {
+        "file_id": "550e8400-e29b-41d4-a716-446655440000",
+        "filename": "example.pdf",
+        "s3_url": "s3://bucket/path/to/example.pdf",
+        "chunk_index": 8
       }
     }
   ],
@@ -233,49 +250,6 @@ http://<服务器地址>/api
   "sparse_weight": 0.5,
   "rrf_k": 60,
   "elapsed_ms": 271.7
-}
-```
-
-### POST /api/open/tables/parts
-
-读取同一张表的全部分片。搜索结果命中表格且 `metadata.table_part_count > 1` 时，可以用 `metadata.file_id` 和 `metadata.table_id` 调用这个接口。
-
-请求字段：
-
-| 字段 | 类型 | 必填 | 说明 |
-|---|---|---|---|
-| `file_id` | string | 是 | 文件 ID |
-| `table_id` | string | 是 | 表格 ID |
-
-请求：
-
-```json
-{
-  "file_id": "550e8400-e29b-41d4-a716-446655440000",
-  "table_id": "table_1"
-}
-```
-
-响应：
-
-```json
-{
-  "file_id": "550e8400-e29b-41d4-a716-446655440000",
-  "table_id": "table_1",
-  "parts": [
-    {
-      "table_part_index": 0,
-      "table_part_count": 2,
-      "chunk_index": 3,
-      "content": "表格第一片"
-    },
-    {
-      "table_part_index": 1,
-      "table_part_count": 2,
-      "chunk_index": 4,
-      "content": "表格第二片"
-    }
-  ]
 }
 ```
 

@@ -34,9 +34,8 @@
               <div><span>ocr</span><strong>{{ configComponentModel(node.data?.ocr) }}</strong></div>
             </div>
             <div class="kv-list">
-              <div><span>text.chunk_size</span><strong>{{ node.data?.parser?.text?.chunk_size ?? '-' }}</strong></div>
-              <div><span>text.chunk_overlap</span><strong>{{ node.data?.parser?.text?.chunk_overlap ?? '-' }}</strong></div>
-              <div><span>table.chunk_size</span><strong>{{ node.data?.parser?.table?.chunk_size ?? '-' }}</strong></div>
+              <div><span>parser.chunk_size</span><strong>{{ node.data?.parser?.chunk_size ?? '-' }}</strong></div>
+              <div><span>parser.chunk_overlap</span><strong>{{ node.data?.parser?.chunk_overlap ?? '-' }}</strong></div>
             </div>
             <div class="kv-list">
               <div><span>{{ t('config.storage') }}</span><strong>{{ node.data?.store?.type || '-' }}</strong></div>

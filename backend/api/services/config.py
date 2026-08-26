@@ -50,15 +50,8 @@ def parser_config() -> dict[str, Any]:
     parser = runtime.application.config.parser
     return {
         "available": runtime.application.parser.is_available(),
-        "text": {
-            "chunk_size": parser.text.chunk_size,
-            "chunk_overlap": parser.text.chunk_overlap,
-        },
-        "table": {
-            "chunk_size": parser.table.chunk_size,
-            "before_text_size": parser.table.before_text_size,
-            "after_text_size": parser.table.after_text_size,
-        },
+        "chunk_size": parser.chunk_size,
+        "chunk_overlap": parser.chunk_overlap,
     }
 
 

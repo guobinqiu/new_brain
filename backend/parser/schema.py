@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass
@@ -10,11 +10,8 @@ class TextBlock:
 @dataclass
 class TableBlock:
     text: str
-    table_key: object = field(default_factory=object)
-    table_part_index: int = 0
-    table_part_count: int = 1
-    before: str = ""
-    after: str = ""
+    header: str = ""
+    footer: str = ""
 
 
 @dataclass

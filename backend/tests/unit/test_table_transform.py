@@ -1,14 +1,11 @@
 from parser.chunker import blocks_to_documents, blocks_to_chunks
 from parser.schema import TableBlock, TextBlock
 from parser.table_transform import table_html_to_blocks
-from schema import ParserConfig, ParserTableConfig, ParserTextConfig
+from schema import ParserConfig
 
 
 def test_table_blocks_carry_context_without_changing_text_blocks():
-    config = ParserConfig(
-        text=ParserTextConfig(chunk_size=200, chunk_overlap=20),
-        table=ParserTableConfig(chunk_size=1000, before_text_size=4, after_text_size=4),
-    )
+    config = ParserConfig(chunk_size=200, chunk_overlap=20)
     blocks = [
         TextBlock("前置说明文字很长"),
         *table_html_to_blocks(
@@ -25,16 +22,13 @@ def test_table_blocks_carry_context_without_changing_text_blocks():
     assert isinstance(blocks[2], TextBlock)
     assert chunks == [
         "前置说明文字很长",
-        "文字很长\n\n| 库 | 能力 |\n| --- | --- |\n| Qdrant | 过滤 |\n\n后置说明",
+        "前置说明文字很长\n\n| 库 | 能力 |\n| --- | --- |\n| Qdrant | 过滤 |\n\n后置说明文字很长",
         "后置说明文字很长",
     ]
 
 
 def test_table_documents_include_table_metadata():
-    config = ParserConfig(
-        text=ParserTextConfig(chunk_size=200, chunk_overlap=20),
-        table=ParserTableConfig(chunk_size=1000, before_text_size=4, after_text_size=4),
-    )
+    config = ParserConfig(chunk_size=200, chunk_overlap=20)
     blocks = [
         TextBlock("表格标题"),
         *table_html_to_blocks(
@@ -45,19 +39,13 @@ def test_table_documents_include_table_metadata():
 
     documents = blocks_to_documents(blocks, "report.pdf", config)
 
-    table_documents = [document for document in documents if document["metadata"]["content_type"] == "table"]
+    table_documents = [document for document in documents if "| Qdrant | 过滤 |" in document["content"]]
     assert len(table_documents) == 1
     assert table_documents[0]["metadata"]["filename"] == "report.pdf"
-    assert table_documents[0]["metadata"]["table_id"] == "table_1"
-    assert table_documents[0]["metadata"]["table_part_index"] == 0
-    assert table_documents[0]["metadata"]["table_part_count"] == 1
 
 
-def test_table_does_not_use_next_section_title_as_after_context():
-    config = ParserConfig(
-        text=ParserTextConfig(chunk_size=200, chunk_overlap=20),
-        table=ParserTableConfig(chunk_size=1000, before_text_size=20, after_text_size=20),
-    )
+def test_table_uses_next_section_title_as_footer_context():
+    config = ParserConfig(chunk_size=200, chunk_overlap=20)
     blocks = [
         TextBlock("1. 数据规模对比"),
         *table_html_to_blocks(
@@ -78,10 +66,10 @@ def test_table_does_not_use_next_section_title_as_after_context():
     ]
 
     documents = blocks_to_documents(blocks, "report.pdf", config)
-    table_documents = [document for document in documents if document["metadata"]["content_type"] == "table"]
+    table_documents = [document for document in documents if "| Qdrant | 过滤 |" in document["content"] or "| Milvus | 混合检索 |" in document["content"]]
 
     assert len(table_documents) == 2
-    assert "2. 查询类型对比" not in table_documents[0]["content"]
+    assert "2. 查询类型对比" in table_documents[0]["content"]
     assert "2. 查询类型对比" in table_documents[1]["content"]
 
 

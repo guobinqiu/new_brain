@@ -52,11 +52,6 @@
     "files": "文件",
     "balance": "平衡",
     "elapsed": "耗时",
-    "tableResult": "表格",
-    "viewTable": "查看表格",
-    "tablePartIndex": "分片序号",
-    "chunkIndex": "chunk 序号",
-    "emptyTableParts": "暂无表格分片",
     "noResults": "未找到匹配结果",
     "noResultsHint": "试试其他搜索模式或调整 Sparse / Dense 平衡"
   },
@@ -109,14 +104,8 @@
     "s3Url": "S3 地址",
     "filename": "文件名",
     "createdAt": "创建时间",
-    "contentType": "类型",
-    "tableId": "表格 ID",
-    "tablePartIndex": "分片序号",
-    "tablePartCount": "分片总数",
     "chunkIndex": "分块序号",
     "content": "内容",
-    "viewTable": "查看表格",
-    "emptyTableParts": "暂无表格分片",
     "empty": "暂无向量数据"
   },
   "trace": {

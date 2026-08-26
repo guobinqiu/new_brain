@@ -120,11 +120,8 @@ class TestParserService:
 
         chunks = _parse_file(str(md_file))
 
-        table_chunks = [chunk for chunk in chunks if chunk["metadata"].get("content_type") == "table"]
+        table_chunks = [chunk for chunk in chunks if "| Qdrant | 过滤 |" in chunk["content"]]
         assert len(table_chunks) == 1
-        assert table_chunks[0]["metadata"]["table_id"] == "table_1"
-        assert table_chunks[0]["metadata"]["table_part_index"] == 0
-        assert table_chunks[0]["metadata"]["table_part_count"] == 1
         assert "| Qdrant | 过滤 |" in table_chunks[0]["content"]
 
     def test_parse_md_embedded_image_uses_mineru(self, tmp_path, monkeypatch):
@@ -223,11 +220,8 @@ class TestParserService:
         chunks = _parse_file(str(docx_file))
 
         assert calls == ["docx"]
-        table_chunks = [chunk for chunk in chunks if chunk["metadata"].get("content_type") == "table"]
+        table_chunks = [chunk for chunk in chunks if "| Qdrant | 过滤 |" in chunk["content"]]
         assert len(table_chunks) == 1
-        assert table_chunks[0]["metadata"]["table_id"] == "table_1"
-        assert table_chunks[0]["metadata"]["table_part_index"] == 0
-        assert table_chunks[0]["metadata"]["table_part_count"] == 1
         assert "数据库能力对比" in table_chunks[0]["content"]
         assert "| Qdrant | 过滤 |" in table_chunks[0]["content"]
 
@@ -316,11 +310,8 @@ class TestParserService:
         chunks = _parse_file(str(xlsx_file))
 
         assert calls == ["xlsx"]
-        table_chunks = [chunk for chunk in chunks if chunk["metadata"].get("content_type") == "table"]
+        table_chunks = [chunk for chunk in chunks if "| Qdrant | 过滤 |" in chunk["content"]]
         assert len(table_chunks) == 1
-        assert table_chunks[0]["metadata"]["table_id"] == "table_1"
-        assert table_chunks[0]["metadata"]["table_part_index"] == 0
-        assert table_chunks[0]["metadata"]["table_part_count"] == 1
         assert "工作表：数据库能力" in table_chunks[0]["content"]
         assert "| Qdrant | 过滤 |" in table_chunks[0]["content"]
 
@@ -421,7 +412,6 @@ class TestParserService:
         chunks = _parse_file(str(image_file))
 
         assert len(chunks) == 1
-        assert chunks[0]["metadata"]["content_type"] == "text"
         assert chunks[0]["content"] == "图片里的普通文字"
         assert calls == ["png"]
 
@@ -462,7 +452,6 @@ class TestParserService:
         chunks = _parse_file(str(pdf_file))
 
         combined = "\n".join(chunk["content"] for chunk in chunks)
-        assert all(chunk["metadata"]["content_type"] == "text" for chunk in chunks)
         assert calls == ["pdf", "png"]
         assert "PDF body" in combined
         assert "图片里的普通文字" in combined
@@ -519,30 +508,26 @@ class TestParserService:
         assert len(tail_of_0) > 0 and len(head_of_1) > 0
 
     def test_parse_file_uses_parser_text_config(self, tmp_path):
-        from schema import ParserConfig, ParserTableConfig, ParserTextConfig
+        from schema import ParserConfig
 
         src = tmp_path / "long.txt"
         src.write_text("人工智能。" * 200, encoding="utf-8")
 
         chunks = _parse_file(
             str(src),
-            parser=ParserConfig(
-                text=ParserTextConfig(chunk_size=120, chunk_overlap=20),
-                table=ParserTableConfig(chunk_size=1000),
-            ),
+            parser=ParserConfig(chunk_size=120, chunk_overlap=20),
         )
 
         assert len(chunks) > 1
         assert max(len(chunk["content"]) for chunk in chunks) <= 120
 
     def test_split_table_keeps_small_table_whole(self):
-        from parser.table import split_table
+        from parser.table_splitter import split_table
 
         chunks = split_table(
             title="表格：指标",
             header=["年份", "营收"],
             rows=[["2024", "100"], ["2025", "120"]],
-            chunk_size=1200,
         )
 
         assert len(chunks) == 1
@@ -551,30 +536,28 @@ class TestParserService:
         assert "| 2025 | 120 |" in chunks[0]["content"]
         assert chunks[0]["metadata"] == {}
 
-    def test_split_table_cuts_at_row_boundary_and_repeats_header(self):
-        from parser.table import split_table
+    def test_split_table_keeps_large_table_whole(self):
+        from parser.table_splitter import split_table
 
         chunks = split_table(
             title="表格：指标",
             header=["年份", "营收"],
             rows=[["2024", "1" * 20], ["2025", "2" * 20], ["2026", "3" * 20]],
-            chunk_size=45,
         )
 
-        assert len(chunks) == 3
-        assert all(chunk["content"].startswith("表格：指标\n") for chunk in chunks)
+        assert len(chunks) == 1
+        assert chunks[0]["content"].startswith("表格：指标\n")
         assert "2024" in chunks[0]["content"]
-        assert "2025" in chunks[1]["content"]
-        assert "2026" in chunks[2]["content"]
+        assert "2025" in chunks[0]["content"]
+        assert "2026" in chunks[0]["content"]
 
     def test_split_table_keeps_single_long_row(self):
-        from parser.table import split_table
+        from parser.table_splitter import split_table
 
         chunks = split_table(
             title="表格：指标",
             header=["年份", "备注"],
             rows=[["2024", "很长" * 100]],
-            chunk_size=80,
         )
 
         assert len(chunks) == 1
@@ -582,44 +565,38 @@ class TestParserService:
         assert "很长" * 100 in chunks[0]["content"]
         assert chunks[0]["metadata"] == {}
 
-    def test_split_table_does_not_overlap_rows(self):
-        from parser.table import split_table
+    def test_split_table_keeps_all_rows_in_one_chunk(self):
+        from parser.table_splitter import split_table
 
         chunks = split_table(
             title="表格：指标",
             header=["年份", "备注"],
             rows=[["2024", "1" * 10], ["2025", "2" * 10], ["2026", "3" * 10]],
-            chunk_size=60,
         )
 
-        assert len(chunks) == 3
-        assert all(len(chunk["content"]) <= 60 for chunk in chunks)
+        assert len(chunks) == 1
         assert "2024" in chunks[0]["content"]
-        assert "2024" not in chunks[1]["content"]
-        assert "2025" in chunks[1]["content"]
-        assert "2025" not in chunks[2]["content"]
-        assert "2026" in chunks[2]["content"]
+        assert "2025" in chunks[0]["content"]
+        assert "2026" in chunks[0]["content"]
 
-    def test_split_table_keeps_adding_rows_after_new_chunk(self):
-        from parser.table import split_table
+    def test_split_table_keeps_rows_after_size_limit_in_same_chunk(self):
+        from parser.table_splitter import split_table
 
         chunks = split_table(
             title="表格",
             header=["列"],
             rows=[["1" * 15], ["2" * 5], ["3" * 5]],
-            chunk_size=40,
         )
 
-        assert len(chunks) == 2
+        assert len(chunks) == 1
         assert "111111111111111" in chunks[0]["content"]
-        assert "22222" not in chunks[0]["content"]
-        assert "22222" in chunks[1]["content"]
-        assert "33333" in chunks[1]["content"]
+        assert "22222" in chunks[0]["content"]
+        assert "33333" in chunks[0]["content"]
 
     def test_table_parser_reads_content_list_json(self, tmp_path, monkeypatch):
         import json
         import parser.mineru
-        from schema import ParserConfig, ParserTableConfig, ParserTextConfig
+        from schema import ParserConfig
 
         pdf_file = tmp_path / "json-table.pdf"
         _create_minimal_pdf(str(pdf_file), "table")
@@ -650,10 +627,7 @@ class TestParserService:
 
         chunks = _parse_file(
             str(pdf_file),
-            parser=ParserConfig(
-                text=ParserTextConfig(chunk_size=500, chunk_overlap=80),
-                table=ParserTableConfig(chunk_size=1000),
-            ),
+            parser=ParserConfig(chunk_size=500, chunk_overlap=80),
         )
 
         combined = "\n".join(chunk["content"] for chunk in chunks)
@@ -669,7 +643,7 @@ class TestParserService:
     def test_table_parser_keeps_json_blocks_separate(self, tmp_path, monkeypatch):
         import json
         import parser.mineru
-        from schema import ParserConfig, ParserTableConfig, ParserTextConfig
+        from schema import ParserConfig
 
         pdf_file = tmp_path / "json-blocks.pdf"
         _create_minimal_pdf(str(pdf_file), "table")
@@ -702,10 +676,7 @@ class TestParserService:
 
         chunks = _parse_file(
             str(pdf_file),
-            parser=ParserConfig(
-                text=ParserTextConfig(chunk_size=80, chunk_overlap=10),
-                table=ParserTableConfig(chunk_size=1000),
-            ),
+            parser=ParserConfig(chunk_size=80, chunk_overlap=10),
         )
 
         table_chunks = [chunk for chunk in chunks if "| FAISS | V | X |" in chunk["content"]]
@@ -717,7 +688,7 @@ class TestParserService:
 
     def test_table_parser_splits_merged_tables_inside_html_table(self):
         from parser.table_transform import table_html_to_chunks
-        from schema import ParserConfig, ParserTableConfig, ParserTextConfig
+        from schema import ParserConfig
 
         chunks = table_html_to_chunks(
             (
@@ -730,14 +701,11 @@ class TestParserService:
                 "<tr><td>Chroma</td><td>V</td><td>X</td><td>X</td><td>！基础支持</td></tr>"
                 "</table>"
             ),
-            ParserConfig(
-                text=ParserTextConfig(chunk_size=500, chunk_overlap=80),
-                table=ParserTableConfig(chunk_size=1000),
-            ),
+            ParserConfig(chunk_size=500, chunk_overlap=80),
         )
 
         assert len(chunks) == 3
-        assert not chunks[0].endswith("2. 查询类型对比")
+        assert chunks[0].endswith("2. 查询类型对比")
         assert chunks[1] == "2. 查询类型对比"
         assert chunks[2].startswith("2. 查询类型对比\n\n| 向量库 | 稠密向量搜索 | 稀疏向量/关键词搜索 | 混合检索(Hybrid） | 多模态检索 |")
         combined = "\n".join(chunks)
@@ -748,7 +716,7 @@ class TestParserService:
     def test_table_parser_adds_neighbor_text_context_to_table(self, tmp_path, monkeypatch):
         import json
         import parser.mineru
-        from schema import ParserConfig, ParserTableConfig, ParserTextConfig
+        from schema import ParserConfig
 
         pdf_file = tmp_path / "json-heading-table.pdf"
         _create_minimal_pdf(str(pdf_file), "table")
@@ -780,10 +748,7 @@ class TestParserService:
 
         chunks = _parse_file(
             str(pdf_file),
-            parser=ParserConfig(
-                text=ParserTextConfig(chunk_size=80, chunk_overlap=10),
-                table=ParserTableConfig(chunk_size=1000, before_text_size=160, after_text_size=160),
-            ),
+            parser=ParserConfig(chunk_size=80, chunk_overlap=10),
         )
 
         assert len(chunks) == 3
@@ -794,7 +759,7 @@ class TestParserService:
     def test_table_parser_merges_adjacent_text_blocks_before_chunking(self, tmp_path, monkeypatch):
         import json
         import parser.mineru
-        from schema import ParserConfig, ParserTableConfig, ParserTextConfig
+        from schema import ParserConfig
 
         pdf_file = tmp_path / "json-text-text-table.pdf"
         _create_minimal_pdf(str(pdf_file), "table")
@@ -826,10 +791,7 @@ class TestParserService:
 
         chunks = _parse_file(
             str(pdf_file),
-            parser=ParserConfig(
-                text=ParserTextConfig(chunk_size=100, chunk_overlap=10),
-                table=ParserTableConfig(chunk_size=1000, before_text_size=160, after_text_size=160),
-            ),
+            parser=ParserConfig(chunk_size=100, chunk_overlap=10),
         )
 
         assert chunks[0]["content"] == "第一段正文\n第二段正文"
@@ -838,7 +800,7 @@ class TestParserService:
     def test_table_parser_does_not_add_neighbor_table_context_to_table(self, tmp_path, monkeypatch):
         import json
         import parser.mineru
-        from schema import ParserConfig, ParserTableConfig, ParserTextConfig
+        from schema import ParserConfig
 
         pdf_file = tmp_path / "json-table-table.pdf"
         _create_minimal_pdf(str(pdf_file), "table")
@@ -877,10 +839,7 @@ class TestParserService:
 
         chunks = _parse_file(
             str(pdf_file),
-            parser=ParserConfig(
-                text=ParserTextConfig(chunk_size=80, chunk_overlap=10),
-                table=ParserTableConfig(chunk_size=1000, before_text_size=160, after_text_size=160),
-            ),
+            parser=ParserConfig(chunk_size=80, chunk_overlap=10),
         )
 
         assert chunks[0]["content"] == "| 库 | 规模 |\n| --- | --- |\n| Qdrant | 中 |"
@@ -889,7 +848,7 @@ class TestParserService:
     def test_table_parser_adds_between_text_context_to_both_tables(self, tmp_path, monkeypatch):
         import json
         import parser.mineru
-        from schema import ParserConfig, ParserTableConfig, ParserTextConfig
+        from schema import ParserConfig
 
         pdf_file = tmp_path / "json-table-heading-table.pdf"
         _create_minimal_pdf(str(pdf_file), "table")
@@ -929,13 +888,10 @@ class TestParserService:
 
         chunks = _parse_file(
             str(pdf_file),
-            parser=ParserConfig(
-                text=ParserTextConfig(chunk_size=80, chunk_overlap=10),
-                table=ParserTableConfig(chunk_size=1000, before_text_size=160, after_text_size=160),
-            ),
+            parser=ParserConfig(chunk_size=80, chunk_overlap=10),
         )
 
-        assert chunks[0]["content"] == "| 库 | 规模 |\n| --- | --- |\n| Qdrant | 中 |"
+        assert chunks[0]["content"] == "| 库 | 规模 |\n| --- | --- |\n| Qdrant | 中 |\n\n7. 架构类型对比"
         assert chunks[1]["content"] == "7. 架构类型对比"
         assert chunks[2]["content"] == "7. 架构类型对比\n\n| 库 | 架构 |\n| --- | --- |\n| Milvus | 分布式 |"
 

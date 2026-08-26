@@ -53,22 +53,9 @@ class SearchConfig:
 
 
 @dataclass(frozen=True)
-class ParserTextConfig:
+class ParserConfig:
     chunk_size: int = 500
     chunk_overlap: int = 80
-
-
-@dataclass(frozen=True)
-class ParserTableConfig:
-    chunk_size: int = 1000
-    before_text_size: int = 160
-    after_text_size: int = 160
-
-
-@dataclass(frozen=True)
-class ParserConfig:
-    text: ParserTextConfig = field(default_factory=ParserTextConfig)
-    table: ParserTableConfig = field(default_factory=ParserTableConfig)
 
 
 @dataclass(frozen=True)
@@ -210,15 +197,8 @@ def parse_app_config(raw: dict[str, Any]) -> AppConfig:
             rrf_k=int(search.get("rrf_k", 60)),
         ),
         parser=ParserConfig(
-            text=ParserTextConfig(
-                chunk_size=int((parser.get("text") or {}).get("chunk_size", 500)),
-                chunk_overlap=int((parser.get("text") or {}).get("chunk_overlap", 80)),
-            ),
-            table=ParserTableConfig(
-                chunk_size=int((parser.get("table") or {}).get("chunk_size", 1000)),
-                before_text_size=int((parser.get("table") or {}).get("before_text_size", 160)),
-                after_text_size=int((parser.get("table") or {}).get("after_text_size", 160)),
-            ),
+            chunk_size=int(parser.get("chunk_size", 500)),
+            chunk_overlap=int(parser.get("chunk_overlap", 80)),
         ),
         logging=LoggingConfig(
             level=str(logging.get("level", "INFO")),

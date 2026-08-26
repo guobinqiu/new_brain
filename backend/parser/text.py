@@ -74,7 +74,7 @@ class TextParser:
             raise ValueError(f"Empty file: {filename}")
 
         return chunks_to_documents(
-            split_text(text, self.config.text.chunk_size, self.config.text.chunk_overlap),
+            split_text(text, self.config.chunk_size, self.config.chunk_overlap),
             filename,
         )
 
@@ -94,7 +94,6 @@ def chunks_to_documents(chunks: list[str], filename: str) -> list[dict]:
             "content": chunk_text,
             "metadata": {
                 "filename": filename,
-                "content_type": "text",
                 "chunk_index": chunk_index,
             },
             "id": str(uuid.uuid4()),

@@ -402,73 +402,54 @@ Content-Type: application/json
 | `metadata.file_id` | 文件 ID |
 | `metadata.filename` | 文件名 |
 | `metadata.s3_url` | 对象存储来源地址 |
-| `metadata.content_type` | chunk 类型，`text` / `table` |
 | `metadata.chunk_index` | 文件内 chunk 序号 |
-| `metadata.table_id` | 表格 ID，和 `file_id` 组合后定位一张表 |
-| `metadata.table_part_index` | 当前表格分片序号 |
-| `metadata.table_part_count` | 当前表格分片总数 |
-
-## 表格分片
-
-### 读取同一张表的全部分片
-
-```http
-POST /api/open/tables/parts
-```
-
-请求字段：
-
-| 字段 | 类型 | 必填 | 说明 |
-|---|---|---|---|
-| `file_id` | string | 是 | 文件 ID |
-| `table_id` | string | 是 | 表格 ID |
-
-请求示例：
-
-```json
-{
-  "file_id": "550e8400-e29b-41d4-a716-446655440000",
-  "table_id": "table_1"
-}
-```
-
-响应字段：
-
-| 字段 | 说明 |
-|---|---|
-| `file_id` | 文件 ID |
-| `table_id` | 表格 ID |
-| `parts` | 表格分片列表，按 `table_part_index` 升序返回 |
-
-`parts` 元素字段：
-
-| 字段 | 说明 |
-|---|---|
-| `table_part_index` | 当前表格分片序号 |
-| `table_part_count` | 当前表格分片总数 |
-| `chunk_index` | 文件内 chunk 序号 |
-| `content` | 表格分片文本 |
 
 响应示例：
 
 ```json
 {
-  "file_id": "550e8400-e29b-41d4-a716-446655440000",
-  "table_id": "table_1",
-  "parts": [
+  "results": [
     {
-      "table_part_index": 0,
-      "table_part_count": 2,
-      "chunk_index": 3,
-      "content": "表格第一片"
+      "id": "chunk-text-1",
+      "content": "合同约定项目验收周期为 30 天，逾期需要提交延期说明。",
+      "score": 0.91,
+      "metadata": {
+        "file_id": "550e8400-e29b-41d4-a716-446655440000",
+        "filename": "example.pdf",
+        "s3_url": "s3://bucket/path/to/example.pdf",
+        "chunk_index": 2
+      }
     },
     {
-      "table_part_index": 1,
-      "table_part_count": 2,
-      "chunk_index": 4,
-      "content": "表格第二片"
+      "id": "chunk-table-1",
+      "content": "| 项目 | 金额 | 备注 |\n|---|---:|---|\n| 设备费 | 120000 | 首期 |\n| 服务费 | 30000 | 年费 |",
+      "score": 0.86,
+      "metadata": {
+        "file_id": "550e8400-e29b-41d4-a716-446655440000",
+        "filename": "example.pdf",
+        "s3_url": "s3://bucket/path/to/example.pdf",
+        "chunk_index": 3
+      }
+    },
+    {
+      "id": "chunk-text-2",
+      "content": "付款条件为验收通过后 10 个工作日内支付尾款。",
+      "score": 0.79,
+      "metadata": {
+        "file_id": "550e8400-e29b-41d4-a716-446655440000",
+        "filename": "example.pdf",
+        "s3_url": "s3://bucket/path/to/example.pdf",
+        "chunk_index": 8
+      }
     }
-  ]
+  ],
+  "mode": "hybrid",
+  "rerank": true,
+  "fetch_k": 20,
+  "dense_weight": 0.5,
+  "sparse_weight": 0.5,
+  "rrf_k": 60,
+  "elapsed_ms": 271.7
 }
 ```
 

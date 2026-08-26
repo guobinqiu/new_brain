@@ -649,9 +649,6 @@ def _to_file_rows(chunks: list[dict], file_id: str) -> list[dict]:
             row["s3_url"] = metadata["s3_url"]
         if metadata.get("created_at"):
             row["created_at"] = metadata["created_at"]
-        for key in ("content_type", "table_id", "table_part_index", "table_part_count"):
-            if key in metadata:
-                row[key] = metadata[key]
         if sparse_vector is not None:
             row["sparse"] = sparse_vector
         rows.append(row)

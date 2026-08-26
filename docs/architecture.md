@@ -682,12 +682,8 @@ chunk metadata：
 | ------------- | -------------- | ------------------------------------ |
 | `file_id`     | keyword/string | 必填，搜索过滤用，要建索引           |
 | `filename`    | keyword/string | 必填，搜索结果展示用                 |
-| `content_type` | string         | 必填，区分 `text` / `table`          |
 | `chunk_index` | integer        | 必填，文件内 chunk 序号，不建索引    |
 | `s3_url`      | string         | 对象存储来源地址，用于追溯，不建索引 |
-| `table_id` | string         | 表格 chunk 使用，同一张表的分片标识，不建索引 |
-| `table_part_index` | integer | 表格 chunk 使用，当前表格分片序号，不建索引 |
-| `table_part_count` | integer | 表格 chunk 使用，当前表格分片总数，不建索引 |
 
 放进 metadata 不等于自动有高效过滤索引。只给 `file_id` 建过滤索引：
 
@@ -697,7 +693,7 @@ chunk metadata：
 | Milvus       | 创建 scalar index：`file_id` 字段                                            |
 | Chroma local | metadata 写入后由 Chroma 本地 SQLite metadata 表维护索引；代码不额外声明索引 |
 
-`filename`、`content_type`、`chunk_index`、表格分片字段会随每条 chunk 一起保存，搜索结果可以返回这些字段；它们不作为搜索过滤条件，不建索引。
+`filename`、`chunk_index` 会随每条 chunk 一起保存，搜索结果可以返回这些字段；它们不作为搜索过滤条件，不建索引。
 
 chunk 文本会随分块一起写入向量库。不同向量库的原生字段不同，但 Store 对搜索流程统一返回 `content`：
 
@@ -744,7 +740,7 @@ parser/
 ├── normalizer.py
 │   └── blocks 结构纠偏：空块过滤、连续文本合并、章节标题识别
 ├── table_splitter.py
-│   └── 表格按行边界切片
+│   └── 表格结构渲染为完整 Markdown 表格
 ├── text_splitter.py
 │   └── 普通文本清理和切片
 ├── validation.py
@@ -762,7 +758,7 @@ parser/
 └── 格式 parser
     └── blocks[]
         ├── TextBlock(text)
-        └── TableBlock(text, table_part_index, table_part_count)
+        └── TableBlock(text)
                 ↓
             normalizer
                 ├── 合并连续 TextBlock
@@ -772,22 +768,18 @@ parser/
             chunker
                 ├── TextBlock -> text chunk
                 ├── TableBlock -> table chunk
-                ├── 表格 before：从前一个 TextBlock 截取
-                └── 表格 after：从后一个非章节标题 TextBlock 截取
+                ├── 表格 header：使用前一个完整 TextBlock
+                └── 表格 footer：使用后一个完整 TextBlock
                 ↓
             chunk document
             ├── content：检索正文
             ├── id：chunk UUID
             └── metadata
                 ├── filename
-                ├── content_type
-                ├── chunk_index
-                ├── table_id
-                ├── table_part_index
-                └── table_part_count
+                └── chunk_index
 ```
 
-图片文件和文档内嵌图片使用 MinerU 解析，解析结果同样进入统一 `TextBlock` / `TableBlock` 管线。图片里的普通文字会作为 text chunk 写入；图片里的表格如果 MinerU 输出表格结构，则转换为 table chunk，并带 `table_id`、`table_part_index` 和 `table_part_count`。
+图片文件和文档内嵌图片使用 MinerU 解析，解析结果同样进入统一 `TextBlock` / `TableBlock` 管线。图片里的普通文字会作为 text chunk 写入；图片里的表格如果 MinerU 输出表格结构，则转换为完整 table chunk。
 
 Markdown 由原生 parser 读取正文和标准 pipe table；PDF、Word、Excel 和图片由 MinerU 输出结构化 content list。系统把表格 HTML 或 rows 解析成统一行列结构，再转换成 Markdown 表格文本。这样可以复用同一套表格切片逻辑，避免 Markdown、Word、Excel、PDF 和图片各写一套表格处理代码。
 
@@ -797,32 +789,24 @@ MinerU 使用 pipeline 后端。运行时模型根目录是实体目录 `models/
 
 模型加载和模型使用分离：应用启动阶段加载 dense、sparse、rerank、OCR 和可用的 MinerU 模型；索引阶段只使用已经加载的模型，不在请求处理中懒加载 MinerU，也不通过子进程执行 MinerU CLI。MinerU 调用走 Python SDK，复用当前进程里的 pipeline 模型单例。
 
-最终 chunk 中，普通正文走文本切片，表格走表格行切片，不把正文和表格合并后再统一切。表格块内部如果出现“标题行 + 新表头”，会拆成多张逻辑表再分别切片。章节标题可以作为后一张表的 before 上下文，不作为前一张表的 after 上下文。向量库 `content` 保存 Markdown 表格文本，不额外保存 `raw_content`，也不直接保存 HTML。
+最终 chunk 中，普通正文走文本切片；每张逻辑表完整写入一个 table chunk。表格块内部如果出现“标题行 + 新表头”，会拆成多张逻辑表，每张逻辑表仍然各自完整写入一个 chunk。表格 header/footer 上下文分别来自前后相邻完整文本块。向量库 `content` 保存 Markdown 表格文本。
 
 切片参数由配置决定：
 
 ```yaml
 parser:
-  text:
-    chunk_size: 500
-    chunk_overlap: 80
-  table:
-    chunk_size: 1000
-    before_text_size: 160
-    after_text_size: 160
+  chunk_size: 500
+  chunk_overlap: 80
 ```
 
-| 参数                    | 含义                                      |
-| ----------------------- | ----------------------------------------- |
-| `text.chunk_size`       | 普通文本 chunk 字符上限                   |
-| `text.chunk_overlap`    | 普通文本相邻 chunk 重叠字符数             |
-| `table.chunk_size`       | 表格 chunk 字符上限                       |
-| `table.before_text_size` | 表格 chunk 前方文本上下文的字符上限       |
-| `table.after_text_size`  | 表格 chunk 后方文本上下文的字符上限       |
+| 参数 | 含义 |
+| --- | --- |
+| `parser.chunk_size` | 普通文本 chunk 字符上限 |
+| `parser.chunk_overlap` | 普通文本相邻 chunk 重叠字符数 |
 
 切片按中文文档常见边界拆分，优先使用段落、换行、中文句号、感叹号、问号、分号、逗号和空格。
 
-表格切片按行边界贪心累加：小表格完整写入一个 chunk；大表格逐行加入当前 chunk，加入后不超过 `table.chunk_size` 就继续累加，超过就先写出当前 chunk，再用当前行开启新 chunk。普通行不会从中间切断，单行超过 `table.chunk_size` 时单独成为一个 chunk。表格切片不做行 overlap，每个 chunk 重新带上表格标题和 Markdown 表头；表格行号和截断状态不写入向量库 metadata。
+一个逻辑表就是一个完整 table chunk。表格过大导致回答阶段上下文不足时，由上层调用方决定是否摘要、筛选或二次处理。
 
 解析后的文本会做 Unicode 归一化，并去掉中文字符之间由 PDF 提取产生的多余空格。
 

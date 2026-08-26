@@ -52,11 +52,6 @@
     "files": "Files",
     "balance": "Balance",
     "elapsed": "Elapsed",
-    "tableResult": "Table",
-    "viewTable": "View table",
-    "tablePartIndex": "Part index",
-    "chunkIndex": "Chunk index",
-    "emptyTableParts": "No table parts",
     "noResults": "No matching results",
     "noResultsHint": "Try another search mode or adjust the Sparse / Dense balance"
   },
@@ -109,14 +104,8 @@
     "s3Url": "S3 URL",
     "filename": "Filename",
     "createdAt": "Created at",
-    "contentType": "Type",
-    "tableId": "Table ID",
-    "tablePartIndex": "Part index",
-    "tablePartCount": "Part count",
     "chunkIndex": "Chunk index",
     "content": "Content",
-    "viewTable": "View table",
-    "emptyTableParts": "No table parts",
     "empty": "No vector data"
   },
   "trace": {

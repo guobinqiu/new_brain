@@ -1,5 +1,7 @@
-import pytest
 from pathlib import Path
+import uuid
+
+import pytest
 
 from api.runtime import runtime
 from api.services import files as service
@@ -70,6 +72,39 @@ class TestSearchAPI:
         assert len(data["results"]) > 0
         for result in data["results"]:
             assert result["metadata"]["file_id"] == file_id
+
+    def test_search_table_result_includes_simple_table_metadata(self, app_api_client):
+        file_id = str(uuid.uuid4())
+        with runtime.application.store.app_context(app_api_client.app_id):
+            runtime.application.store.add_file_chunks(
+                [
+                    {
+                        "id": str(uuid.uuid4()),
+                        "content": "unique_table_marker revenue table first part",
+                        "metadata": {
+                            "filename": "table.pdf",
+                            "chunk_index": 0,
+                            "s3_url": "s3://rag/table.pdf",
+                        },
+                    },
+                    {
+                        "id": str(uuid.uuid4()),
+                        "content": "unique_table_marker revenue table second part",
+                        "metadata": {
+                            "filename": "table.pdf",
+                            "chunk_index": 1,
+                            "s3_url": "s3://rag/table.pdf",
+                        },
+                    },
+                ],
+                file_id=file_id,
+            )
+
+        resp = app_api_client.post("/api/open/search", json={"query": "unique_table_marker", "mode": "sparse", "top_k": 1, "file_ids": [file_id]})
+
+        assert resp.status_code == 200, resp.text
+        result = resp.json()["results"][0]
+        assert result["metadata"]["file_id"] == file_id
 
     def test_search_without_file_ids_searches_all_files(self, app_api_client, test_txt_path, monkeypatch):
         """``POST /api/open/search`` without file_ids searches the full index."""

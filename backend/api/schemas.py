@@ -82,13 +82,3 @@ class ChunksQueryRequest(BaseModel):
             raise ValueError("file_ids exceeds max limit: 1000")
         return self
 
-
-class TablePartsRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    file_id: str = Field(..., min_length=1, max_length=64)
-    table_id: str = Field(..., min_length=1, max_length=64)
-
-
-class AdminTablePartsRequest(TablePartsRequest):
-    app_id: str | None = None

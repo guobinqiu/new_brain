@@ -3,7 +3,6 @@ from pathlib import Path
 from ocr.base import OCR
 from parser.text import TextParser, parse_pdf_image_documents
 from parser import mineru
-from parser.table_splitter import split_table
 from schema import ParserConfig
 
 

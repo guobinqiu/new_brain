@@ -153,13 +153,11 @@ def _table_rows_to_blocks(title: str, rows: list[list[str]], parser_config: Pars
             if text:
                 blocks.append(TextBlock(text))
             continue
-        table_key = object()
-        table_chunks = split_table(logical_title, header, body, parser_config.table.chunk_size)
-        table_part_count = len(table_chunks)
-        for table_part_index, chunk in enumerate(table_chunks):
+        table_chunks = split_table(logical_title, header, body)
+        for chunk in table_chunks:
             content = clean_table_text(chunk["content"]).strip()
             if content:
-                blocks.append(TableBlock(content, table_key=table_key, table_part_index=table_part_index, table_part_count=table_part_count))
+                blocks.append(TableBlock(content))
     return blocks
 
 
