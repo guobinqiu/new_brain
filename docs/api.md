@@ -208,7 +208,6 @@ Content-Type: application/json
 | `s3_url` | string | 是 | - | 稳定对象存储地址，例如 `s3://bucket/key`，写入 metadata 用于追溯 |
 | `filename` | string | 否 | 从 `s3_url` 推导 | 自定义展示文件名 |
 | `file_id` | string | 否 | RAG 生成 | 上游文件 ID；传入时原样保存，推荐使用 UUID |
-| `parser` | string | 否 | 配置文件里的 `parser.type` | `standard` / `fast`，决定本次索引用的文件解析器；`standard` 是标准解析，`fast` 是快速解析 |
 | `app_id` | string | User JWT 必填，AK/SK 调用不传 | - | 管理台选择的应用 ID |
 
 请求示例：
@@ -217,8 +216,7 @@ Content-Type: application/json
 {
   "file_id": "550e8400-e29b-41d4-a716-446655440000",
   "presigned_url": "https://example.com/presigned",
-  "s3_url": "s3://bucket/path/to/example.pdf",
-  "parser": "standard"
+  "s3_url": "s3://bucket/path/to/example.pdf"
 }
 ```
 
@@ -230,17 +228,17 @@ Content-Type: application/json
 }
 ```
 
-同步索引成功返回表示文件已经完成下载、解析、OCR、embedding 并写入向量库。
+同步索引成功返回表示文件已经完成下载、解析、embedding 并写入向量库。
 
 错误码：
 
 | 状态码 | 场景 |
 |---|---|
-| 400 | 不支持的文件类型（以 `filename` 或 object key 的扩展名判断）；未传 `filename` 且 `s3_url` 不含 object key，无法推导文件名；指定的解析器不可用 |
+| 400 | 不支持的文件类型（以 `filename` 或 object key 的扩展名判断）；未传 `filename` 且 `s3_url` 不含 object key，无法推导文件名；解析器不可用 |
 | 401 | AK/SK 签名认证失败：缺签名头、access key 无效、时间戳偏差超过 300 秒、签名不匹配 |
 | 403 | 请求体 `app_id` 与签名 `X-App-Id` 不一致（`app_id is not allowed`） |
 | 409 | 目标 app 数据库未初始化（`app database is not initialized`） |
-| 422 | 请求体校验失败：缺 `presigned_url`/`s3_url`、`s3_url` 不以 `s3://` 开头、`file_id` 不是 UUID 或长度不在 1..64、`parser` 不是 `standard` / `fast`、包含未定义字段 |
+| 422 | 请求体校验失败：缺 `presigned_url`/`s3_url`、`s3_url` 不以 `s3://` 开头、`file_id` 不是 UUID 或长度不在 1..64、包含未定义字段 |
 | 500 | 下载或索引处理失败（如 `presigned_url` 失效、文件解析异常） |
 | 503 | 应用未完成初始化（`search is not initialized`） |
 
@@ -261,7 +259,6 @@ Content-Type: application/json
 | `s3_url` | string | 是 | - | 稳定对象存储地址，例如 `s3://bucket/key`，写入 metadata 用于追溯；必须以 `s3://` 开头并包含 bucket 和 object key |
 | `filename` | string | 否 | 从 `s3_url` 推导 | 展示文件名，扩展名以此字段（缺省时取 object key）判断；对象 key 无扩展名时必须传带受支持扩展名的 `filename`，否则返回 400 |
 | `file_id` | string | 否 | 服务端生成 | 上游文件 ID；传入时原样保存，推荐使用 UUID |
-| `parser` | string | 否 | 配置文件里的 `parser.type` | `standard` / `fast`，决定本次索引用的文件解析器；`standard` 是标准解析，`fast` 是快速解析 |
 | `app_id` | string | 否 | 签名里的 `X-App-Id` | AK/SK 主体已绑定单一应用，通常不传；传入时必须与签名应用一致，否则返回 403 |
 
 请求示例：
@@ -271,7 +268,6 @@ Content-Type: application/json
   "file_id": "550e8400-e29b-41d4-a716-446655440000",
   "presigned_url": "https://upstream.example.com/presigned?X-Amz-Signature=...",
   "s3_url": "s3://bucket/path/to/example.pdf",
-  "parser": "standard",
   "app_id": "tenant_a"
 }
 ```
@@ -288,15 +284,15 @@ Content-Type: application/json
 
 | 状态码 | 场景 |
 |---|---|
-| 400 | 不支持的文件类型（以 `filename` 或 object key 的扩展名判断）；未传 `filename` 且 `s3_url` 不含 object key，无法推导文件名；指定的解析器不可用 |
+| 400 | 不支持的文件类型（以 `filename` 或 object key 的扩展名判断）；未传 `filename` 且 `s3_url` 不含 object key，无法推导文件名；解析器不可用 |
 | 401 | AK/SK 签名认证失败：缺签名头、access key 无效、时间戳偏差超过 300 秒、签名不匹配 |
 | 403 | 请求体 `app_id` 与签名 `X-App-Id` 不一致（`app_id is not allowed`） |
 | 409 | 目标 app 数据库未初始化（`app database is not initialized`） |
-| 422 | 请求体校验失败：缺 `presigned_url`/`s3_url`、`s3_url` 不以 `s3://` 开头、`file_id` 不是 UUID 或长度不在 1..64、`parser` 不是 `standard` / `fast`、包含未定义字段 |
+| 422 | 请求体校验失败：缺 `presigned_url`/`s3_url`、`s3_url` 不以 `s3://` 开头、`file_id` 不是 UUID 或长度不在 1..64、包含未定义字段 |
 | 429 | 进程内待处理任务队列已满 |
 | 503 | 应用未完成初始化（`search is not initialized`） |
 
-异步索引入队成功返回 202 和 `file_id`。下载、解析、OCR、embedding 和向量库写入由 backend 进程内的索引消费器后台执行，没有任务状态查询接口；调用方可以用 `file_id` 通过搜索接口验证索引是否就绪。`presigned_url` 的有效性在后台消费时才校验，入队成功不代表下载成功。进程内待处理任务队列已满时返回 429。任务不落盘，backend 重启会丢失队列中未完成的任务，需要重新提交索引。
+异步索引入队成功返回 202 和 `file_id`。下载、解析、embedding 和向量库写入由 backend 进程内的索引消费器后台执行。没有任务状态查询接口；调用方可以用 `file_id` 通过搜索接口验证索引是否就绪。`presigned_url` 的有效性在后台消费时才校验，入队成功不代表下载成功。进程内待处理任务队列已满时返回 429。任务不落盘，backend 重启会丢失队列中未完成的任务，需要重新提交索引。
 
 管理台内部版本 `POST /api/files/jobs` 见下文：认证改用 User JWT，`file_id` 和 `app_id` 必填。
 
@@ -319,7 +315,6 @@ Content-Type: application/json
 | `s3_url` | string | 是 | - | 稳定对象存储地址，写入 metadata 用于追溯 |
 | `filename` | string | 否 | 从 `s3_url` 推导 | 自定义展示文件名 |
 | `file_id` | string | 是 | - | `/api/upload` 返回的文件 ID；RAG 生成的值为 UUID |
-| `parser` | string | 否 | 配置文件里的 `parser.type` | `standard` / `fast`，决定本次索引用的文件解析器；`standard` 是标准解析，`fast` 是快速解析 |
 | `app_id` | string | 是 | - | 管理台当前选择的应用 ID（User JWT 不绑定业务 app） |
 
 `file_id` 必填的原因：`/api/upload` 上传成功时已经把返回的 `file_id` 写进 MinIO 对象路径 `uploads/{app_id}/{file_id}/{filename}`，后续的索引、删除和文件列表都以这一前缀互相对齐。创建任务时如果不传 `file_id`，服务器会另外生成一个新的 `file_id`，向量库记录将与上传对象、文件列表断链：删除接口删不掉 MinIO 里的原文，文件列表也会出现一条无法对齐的幽灵记录。
@@ -397,6 +392,86 @@ Content-Type: application/json
 | `rrf_k` | 本次 hybrid 查询的 RRF 参数 |
 | `elapsed_ms` | 后端搜索耗时，单位毫秒 |
 
+`results` 元素字段：
+
+| 字段 | 说明 |
+|---|---|
+| `id` | chunk ID |
+| `content` | 命中的 chunk 文本 |
+| `score` | 相关性分数 |
+| `metadata.file_id` | 文件 ID |
+| `metadata.filename` | 文件名 |
+| `metadata.s3_url` | 对象存储来源地址 |
+| `metadata.content_type` | chunk 类型，`text` / `table` |
+| `metadata.chunk_index` | 文件内 chunk 序号 |
+| `metadata.table_id` | 表格 ID，和 `file_id` 组合后定位一张表 |
+| `metadata.table_part_index` | 当前表格分片序号 |
+| `metadata.table_part_count` | 当前表格分片总数 |
+
+## 表格分片
+
+### 读取同一张表的全部分片
+
+```http
+POST /api/open/tables/parts
+```
+
+请求字段：
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `file_id` | string | 是 | 文件 ID |
+| `table_id` | string | 是 | 表格 ID |
+
+请求示例：
+
+```json
+{
+  "file_id": "550e8400-e29b-41d4-a716-446655440000",
+  "table_id": "table_1"
+}
+```
+
+响应字段：
+
+| 字段 | 说明 |
+|---|---|
+| `file_id` | 文件 ID |
+| `table_id` | 表格 ID |
+| `parts` | 表格分片列表，按 `table_part_index` 升序返回 |
+
+`parts` 元素字段：
+
+| 字段 | 说明 |
+|---|---|
+| `table_part_index` | 当前表格分片序号 |
+| `table_part_count` | 当前表格分片总数 |
+| `chunk_index` | 文件内 chunk 序号 |
+| `content` | 表格分片文本 |
+
+响应示例：
+
+```json
+{
+  "file_id": "550e8400-e29b-41d4-a716-446655440000",
+  "table_id": "table_1",
+  "parts": [
+    {
+      "table_part_index": 0,
+      "table_part_count": 2,
+      "chunk_index": 3,
+      "content": "表格第一片"
+    },
+    {
+      "table_part_index": 1,
+      "table_part_count": 2,
+      "chunk_index": 4,
+      "content": "表格第二片"
+    }
+  ]
+}
+```
+
 ## 本地对象存储辅助
 
 ### 上传文件到对象存储
@@ -408,7 +483,7 @@ Content-Type: multipart/form-data
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `file` | file | 是 | 支持 `.pdf`、`.txt`、`.md`、`.markdown`、`.docx`、`.png`、`.jpg`、`.jpeg`、`.webp`、`.bmp` |
+| `file` | file | 是 | 支持 `.pdf`、`.txt`、`.md`、`.docx`、`.xlsx`、`.png`、`.jpg`、`.jpeg`、`.webp`、`.bmp` |
 | `app_id` | string | 是 | 当前管理台选择的应用 |
 
 响应：

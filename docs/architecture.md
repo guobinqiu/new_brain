@@ -197,7 +197,7 @@ sequenceDiagram
 
 写入入口可以同步执行索引，也可以创建异步任务。两种入口都接收 `presigned_url + s3_url`，并允许外部系统传入 UUID 格式的 `file_id`；不传时由 RAG 生成。管理台本地上传链路先通过上传接口生成 `file_id` 并写入对象存储路径，再调用 `/api/files/jobs`，因此管理台异步索引必须传入上传阶段返回的 `file_id`。文件名默认可从对象存储地址推导，也允许调用方指定展示名。同步索引成功返回代表已经写入向量库。异步索引入队后立即返回 `file_id`，backend 进程内的索引消费器后台完成下载、解析、切分、embedding 并写入向量库；文件状态可通过管理台文件列表查看。同步入口和异步消费器复用同一套索引执行逻辑。对象存储索引使用 `presigned_url` 做一次性下载，不把临时下载 URL 写入 chunk metadata；稳定的 `s3_url` 会写入 chunk metadata 用于追溯。文件表的 `created_at` 在索引请求进入系统时生成，`indexed_at` 在索引成功时生成；chunk 的 `created_at` 在索引写入时生成并写入 chunk metadata。存储层统一保存 UTC 时间，对外返回前再转换成本机或容器时区。
 
-异步索引任务保存在 backend 进程内的 `queue.Queue`（标准库线程安全队列）里，容量 10（硬编码默认值，不走环境变量）。入队端点在请求线程里直接 `put_nowait`，消费器在普通工作线程里阻塞读取任务，两端跨线程安全。任务入队成功即被接受，由进程内消费器串行消费，实际索引并发固定为 1；队列已满时入队请求返回 429。RAG 不假设所有上游系统都有自己的队列、限流和重试能力；内部队列是 RAG 服务的资源保护边界，用来削峰并控制 OCR、embedding 和向量库写入并发。进程内队列不做持久化，backend 重启后未完成的任务会丢失；原始文件仍在对象存储，可以重新触发索引。每个 `app_id` 对应独立 collection，外部系统只要按 UUID 规约生成 `file_id`，就不会和其他 app 的同名文件发生跨系统冲突。
+异步索引任务保存在 backend 进程内的 `queue.Queue`（标准库线程安全队列）里，容量 10（硬编码默认值，不走环境变量）。入队端点在请求线程里直接 `put_nowait`，消费器在普通工作线程里阻塞读取任务，两端跨线程安全。任务入队成功即被接受，由进程内消费器串行消费，实际索引并发固定为 1；队列已满时入队请求返回 429。RAG 不假设所有上游系统都有自己的队列、限流和重试能力；内部队列是 RAG 服务的资源保护边界，用来削峰并控制解析、embedding 和向量库写入并发。进程内队列不做持久化，backend 重启后未完成的任务会丢失；原始文件仍在对象存储，可以重新触发索引。每个 `app_id` 对应独立 collection，外部系统只要按 UUID 规约生成 `file_id`，就不会和其他 app 的同名文件发生跨系统冲突。
 
 Docker 开发环境使用 MinIO 模拟 S3。MinIO 提供本地 bucket 和对象下载能力，服务入口可以在本地联调时根据 `s3_url` 生成后端可访问的短期下载地址。生产环境里，重签通常由业务系统或对象存储网关完成，RAG 仍只消费 `presigned_url + s3_url`。
 
@@ -247,7 +247,7 @@ flowchart TB
 | --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 入队                              | `index.queue.enqueue_index_job()` 向进程内 `queue.Queue`（`maxsize=10`，硬编码）`put_nowait`；入队前写 `app_files.status=queued`                            |
 | 消费                              | `InlineIndexConsumer`，lifespan 启动 1 个普通 daemon 线程，并发固定为 1                                                                                        |
-| 执行                              | 工作线程同步执行下载、OCR、embedding 和向量库写入，不再包 executor 假超时                                                                                     |
+| 执行                              | 工作线程同步执行下载、解析、embedding 和向量库写入，不再包 executor 假超时                                                                                    |
 | 重试                              | job 字典内 `retry_count`，小于 2 时重新入队尾（最多重试 2 次，硬编码），超过后写 `app_files.status=failed`                                                     |
 | 不可恢复错误                      | app 数据库未初始化、文件格式不支持等 `ValueError` 写 `app_files.status=failed`，不重试                                                                         |
 | 队列满                            | `put_nowait` 抛 `QueueFull`，入队接口返回 429                                                                                                                  |
@@ -426,7 +426,7 @@ backend/
 | `loader.py`          | 读取运行环境指定的 yaml profile                                                  |
 | `schema.py`          | 校验配置结构和默认值                                                             |
 | `index/`             | 文件索引领域，负责索引请求校验、入队、消费、对象存储下载、解析和写入向量库       |
-| `parser/`           | 文件解析、OCR 调用、文本清理、表格归一化和 chunk 生成                           |
+| `parser/`           | 文件解析、文本清理、表格归一化和 chunk 生成                                     |
 | `parser/service.py` | Parser 标准解析入口，统一调度具体格式 parser                                   |
 | `parser/text.py`    | 普通文本解析器                                                                  |
 | `parser/text_splitter.py` | 文本清理和普通文本 chunk 切片工具                                             |
@@ -715,7 +715,7 @@ chunk 文本会随分块一起写入向量库。不同向量库的原生字段�
 
 上传文件先解析成统一 block，再切成 chunk 写入 store。文件入口先按扩展名白名单拒绝不支持格式；进入具体 parser 后再做真实文件格式校验，避免伪装后缀的文件进入解析或向量库写入。系统只保留标准解析：PDF、DOCX、XLSX、图片文件和文档内嵌图片由 MinerU pipeline 做结构化解析，Markdown 由原生 parser 解析。
 
-Parser 是 `Application` 生命周期内的正式组件，由 `container.py` 构造并注入 OCR。`Application.load_models()` 启动 Parser；索引阶段通过 `application.parser.parse_file()` 解析文件，不直接调用全局解析函数。
+Parser 是 `Application` 生命周期内的正式组件，由 `container.py` 构造，并保留 OCR 兼容注入。`Application.load_models()` 启动 Parser；索引阶段通过 `application.parser.parse_file()` 解析文件，不直接调用全局解析函数。
 
 Parser 代码按领域边界拆分：
 
@@ -726,11 +726,15 @@ parser/
 ├── schema.py
 │   └── 统一内部结构：TextBlock / TableBlock / ImageBlock，其中标准图片解析输出 TextBlock / TableBlock
 ├── text.py
-│   ├── txt：直接读取文本
-│   ├── image.py：图片调用 MinerU 输出 TextBlock / TableBlock
-│   ├── markdown.py：原生解析 Markdown 正文和 pipe table，输出 TextBlock / TableBlock
-│   ├── docx.py：MinerU 输出 TextBlock / TableBlock
-│   └── excel.py：MinerU 输出 TextBlock / TableBlock
+│   └── txt / md / docx / xlsx / pdf / image 分发入口
+├── image.py
+│   └── 图片调用 MinerU 输出 TextBlock / TableBlock
+├── markdown.py
+│   └── 原生解析 Markdown 正文和 pipe table，输出 TextBlock / TableBlock
+├── docx.py
+│   └── MinerU 输出 TextBlock / TableBlock
+├── excel.py
+│   └── MinerU 输出 TextBlock / TableBlock
 ├── table.py
 │   └── 统一解析入口
 ├── mineru.py
@@ -785,9 +789,9 @@ parser/
 
 图片文件和文档内嵌图片使用 MinerU 解析，解析结果同样进入统一 `TextBlock` / `TableBlock` 管线。图片里的普通文字会作为 text chunk 写入；图片里的表格如果 MinerU 输出表格结构，则转换为 table chunk，并带 `table_id`、`table_part_index` 和 `table_part_count`。
 
-Markdown 由原生 parser 读取正文和标准 pipe table；Word 和 Excel 由 MinerU 输出结构化 content list。系统把表格 HTML 或 rows 解析成统一行列结构，再转换成 Markdown 表格文本。这样可以复用同一套表格切片逻辑，避免 Markdown、Word、Excel、PDF 各写一套表格处理代码。
+Markdown 由原生 parser 读取正文和标准 pipe table；PDF、Word、Excel 和图片由 MinerU 输出结构化 content list。系统把表格 HTML 或 rows 解析成统一行列结构，再转换成 Markdown 表格文本。这样可以复用同一套表格切片逻辑，避免 Markdown、Word、Excel、PDF 和图片各写一套表格处理代码。
 
-MinerU 是 PDF、Word 和 Excel 的结构化解析实现细节，不作为独立业务 parser 暴露。
+MinerU 是 PDF、Word、Excel 和图片的结构化解析实现细节，不作为独立业务 parser 暴露。
 
 MinerU 使用 pipeline 后端。运行时模型根目录是实体目录 `models/mineru/pipeline`，`models/mineru/mineru.json` 的 `models-dir.pipeline` 指向该目录。后端判断 MinerU 可用时检查 Python 包、配置文件和 pipeline 模型目录。
 

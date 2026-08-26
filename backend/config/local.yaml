@@ -34,7 +34,6 @@ search:
   sparse_weight: 0.5
   rrf_k: 60
 parser:
-  type: standard
   text:
     chunk_size: 500
     chunk_overlap: 80
@@ -57,11 +56,11 @@ rerank:
     import_path: rerank.cross_encoder.CrossEncoderRerank
 ocr:
   rapid:
-    enable: true
+    enable: false
     model_name: rapidocr
     import_path: ocr.rapid.RapidOCR
   paddle:
-    enable: false
+    enable: true
     model_name: paddleocr
     import_path: ocr.paddle.PaddleOCR
   tesseract:

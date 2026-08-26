@@ -8,6 +8,7 @@ from api.routes.files import router as files_router
 from api.routes.logs import router as logs_router
 from api.routes.monitor import router as monitor_router
 from api.routes.search import router as search_router
+from api.routes.tables import router as tables_router
 from api.routes.traces import router as traces_router
 
 
@@ -22,5 +23,6 @@ def register_routes(app: FastAPI) -> None:
         traces_router,
         files_router,
         search_router,
+        tables_router,
     ):
         app.router.routes.extend(router.routes)

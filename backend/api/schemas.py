@@ -36,7 +36,6 @@ class ObjectIndexRequest(BaseModel):
     filename: str | None = None
     app_id: str | None = None
     file_id: str | None = Field(None, min_length=1, max_length=64)
-    parser: Literal["standard", "fast"] | None = None
 
     @model_validator(mode="after")
     def validate_request(self):
@@ -82,3 +81,14 @@ class ChunksQueryRequest(BaseModel):
         if self.file_ids is not None and len(self.file_ids) > 1000:
             raise ValueError("file_ids exceeds max limit: 1000")
         return self
+
+
+class TablePartsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    file_id: str = Field(..., min_length=1, max_length=64)
+    table_id: str = Field(..., min_length=1, max_length=64)
+
+
+class AdminTablePartsRequest(TablePartsRequest):
+    app_id: str | None = None

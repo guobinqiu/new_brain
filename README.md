@@ -111,7 +111,7 @@ http://<服务器地址>/api
 - `/api` 由 Nginx 负载均衡到 backend 节点。
 - 管理台通过 `/api/nodes/monitor` 和 `/api/nodes/config` 聚合所有节点状态。
 - 日志页通过后端接口查询集中日志。
-- 共享依赖只部署一套；所有 app 节点同构运行 backend、frontend、nginx 和 Promtail。
+- 共享依赖只部署一套；主服务节点运行入口服务，计算节点只运行 backend 和日志采集。
 - 节点差异写在各节点 `deploy/.env`：`RAG_NODE_ID` 标识当前节点，`DATABASE_URL`、`QDRANT_URL`、`S3_ENDPOINT_URL` 和 `LOKI_URL` 指向共享依赖所在节点的 IP 或域名。
 
 ## API
@@ -124,9 +124,10 @@ http://<服务器地址>/api
 |---|---|---|
 | `POST` | `/api/open/files` | 同步索引对象存储文件，完成后返回 `file_id` |
 | `POST` | `/api/open/search` | 按 `query` 和可选 `file_ids` 搜索知识库 |
+| `POST` | `/api/open/tables/parts` | 按 `file_id` 和 `table_id` 读取同一张表的全部分片 |
 | `DELETE` | `/api/open/files/{file_id}` | 删除当前应用向量库中的索引文件 |
 
-索引接口接收 `presigned_url`、`s3_url`、可选 `filename`、可选 `file_id` 和可选 `parser`。上游传 `file_id` 时服务端原样保存，推荐使用 UUID；不传时由 RAG 生成 UUID。`parser` 不传时使用配置文件默认解析器；`standard` 是标准解析，`fast` 是快速解析。搜索时不传 `file_ids` 表示全库搜索。
+索引接口接收 `presigned_url`、`s3_url`、可选 `filename` 和可选 `file_id`。上游传 `file_id` 时服务端原样保存，推荐使用 UUID；不传时由 RAG 生成 UUID。搜索时不传 `file_ids` 表示全库搜索。
 
 上游系统使用的 `app_id`、`access_key` 和 `secret_key` 由管理台创建。每个 `app_id` 对应独立 collection，业务接口根据 AK/SK 签名里的 `app_id` 自动选择当前应用的数据范围。索引前需要先在管理台为该 `app_id` 初始化数据库。
 
@@ -145,7 +146,7 @@ http://<服务器地址>/api
 
 ### POST /api/open/files
 
-同步索引对象存储文件。接口返回时，文件已经完成下载、解析、OCR、embedding 并写入向量库。
+同步索引对象存储文件。接口返回时，文件已经完成下载、解析、embedding 并写入向量库。
 
 请求字段：
 
@@ -155,7 +156,6 @@ http://<服务器地址>/api
 | `s3_url` | string | 是 | 稳定对象存储地址，写入 chunk metadata 用于追溯 |
 | `filename` | string | 否 | 展示文件名；不传时从 `s3_url` 推导 |
 | `file_id` | string | 否 | 上游指定的文件 ID，推荐使用 UUID；不传时由 RAG 生成 UUID |
-| `parser` | string | 否 | `standard` / `fast`；不传使用配置文件默认值，默认 `standard` |
 
 请求：
 
@@ -164,8 +164,7 @@ http://<服务器地址>/api
   "file_id": "550e8400-e29b-41d4-a716-446655440000",
   "presigned_url": "https://example.com/presigned",
   "s3_url": "s3://bucket/path/to/example.pdf",
-  "filename": "example.pdf",
-  "parser": "standard"
+  "filename": "example.pdf"
 }
 ```
 
@@ -212,11 +211,19 @@ http://<服务器地址>/api
 {
   "results": [
     {
+      "id": "chunk-uuid",
       "content": "命中的 chunk 文本",
       "score": 0.82,
-      "file_id": "550e8400-e29b-41d4-a716-446655440000",
-      "filename": "example.pdf",
-      "chunk_index": 3
+      "metadata": {
+        "file_id": "550e8400-e29b-41d4-a716-446655440000",
+        "filename": "example.pdf",
+        "s3_url": "s3://bucket/path/to/example.pdf",
+        "content_type": "table",
+        "chunk_index": 3,
+        "table_id": "table_1",
+        "table_part_index": 0,
+        "table_part_count": 2
+      }
     }
   ],
   "mode": "hybrid",
@@ -226,6 +233,49 @@ http://<服务器地址>/api
   "sparse_weight": 0.5,
   "rrf_k": 60,
   "elapsed_ms": 271.7
+}
+```
+
+### POST /api/open/tables/parts
+
+读取同一张表的全部分片。搜索结果命中表格且 `metadata.table_part_count > 1` 时，可以用 `metadata.file_id` 和 `metadata.table_id` 调用这个接口。
+
+请求字段：
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `file_id` | string | 是 | 文件 ID |
+| `table_id` | string | 是 | 表格 ID |
+
+请求：
+
+```json
+{
+  "file_id": "550e8400-e29b-41d4-a716-446655440000",
+  "table_id": "table_1"
+}
+```
+
+响应：
+
+```json
+{
+  "file_id": "550e8400-e29b-41d4-a716-446655440000",
+  "table_id": "table_1",
+  "parts": [
+    {
+      "table_part_index": 0,
+      "table_part_count": 2,
+      "chunk_index": 3,
+      "content": "表格第一片"
+    },
+    {
+      "table_part_index": 1,
+      "table_part_count": 2,
+      "chunk_index": 4,
+      "content": "表格第二片"
+    }
+  ]
 }
 ```
 

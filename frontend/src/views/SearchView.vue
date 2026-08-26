@@ -64,6 +64,10 @@
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
             <span>{{ r.metadata?.filename || '未知' }}</span>
           </div>
+          <div v-if="r.metadata?.content_type === 'table'" class="result-table-meta">
+            {{ t('search.tableResult') }} · {{ r.metadata.table_id }} · {{ tablePart(r.metadata) }}
+            <el-button size="small" @click="openTableParts(r.metadata)">{{ t('search.viewTable') }}</el-button>
+          </div>
         </div>
         <p class="result-body" v-html="escapeHtml(r.content)"></p>
       </div>
@@ -72,6 +76,18 @@
       <p>{{ t('search.noResults') }}</p>
       <p class="no-results-hint">{{ t('search.noResultsHint') }}</p>
     </div>
+    <el-dialog v-model="tablePartsVisible" :title="tablePartsTitle" width="860px">
+      <div v-if="tableParts.length === 0" class="docs-empty">{{ t('search.emptyTableParts') }}</div>
+      <div v-else class="table-parts">
+        <section v-for="part in tableParts" :key="part.table_part_index" class="table-part">
+          <div class="table-part-head">
+            <span>{{ t('search.tablePartIndex') }}: {{ part.table_part_index }}</span>
+            <span>{{ t('search.chunkIndex') }}: {{ part.chunk_index }}</span>
+          </div>
+          <pre>{{ part.content }}</pre>
+        </section>
+      </div>
+    </el-dialog>
   </main>
 </template>
 
@@ -104,6 +120,9 @@ const searchTime = ref(null)
 const lastSearch = ref(null)
 const searching = ref(false)
 const noResults = ref(false)
+const tablePartsVisible = ref(false)
+const tableParts = ref([])
+const tablePartsTitle = ref('')
 
 function onBalanceChange() {
   searchConfig.value.dense_weight = hybridBalance.value
@@ -165,6 +184,29 @@ async function fetchConfig() {
     topK.value = res.data.top_k ?? topK.value
     fetchK.value = res.data.fetch_k ?? fetchK.value
   } catch (err) { console.error(err) }
+}
+
+function tablePart(metadata) {
+  const index = Number(metadata?.table_part_index)
+  const count = Number(metadata?.table_part_count)
+  if (!Number.isFinite(index) || !Number.isFinite(count)) return '-'
+  return `${index + 1}/${count}`
+}
+
+async function openTableParts(metadata) {
+  if (!currentAppId.value || !metadata?.file_id || !metadata?.table_id) return
+  try {
+    const res = await axios.post(`${API}/tables/parts`, {
+      app_id: currentAppId.value,
+      file_id: metadata.file_id,
+      table_id: metadata.table_id,
+    })
+    tableParts.value = res.data.parts || []
+    tablePartsTitle.value = `${metadata.file_id} · ${metadata.table_id}`
+    tablePartsVisible.value = true
+  } catch (err) {
+    showToast('error', errorMessage(err))
+  }
 }
 
 onMounted(fetchConfig)

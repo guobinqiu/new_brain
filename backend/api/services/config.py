@@ -49,11 +49,7 @@ def store_config() -> dict[str, Any]:
 def parser_config() -> dict[str, Any]:
     parser = runtime.application.config.parser
     return {
-        "type": parser.type,
-        "available": [
-            {"name": "standard", "available": runtime.application.parser.is_available("standard")},
-            {"name": "fast", "available": True},
-        ],
+        "available": runtime.application.parser.is_available(),
         "text": {
             "chunk_size": parser.text.chunk_size,
             "chunk_overlap": parser.text.chunk_overlap,

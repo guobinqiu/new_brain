@@ -81,7 +81,7 @@ def components() -> list[dict[str, Any]]:
         {
             "name": "Parser",
             "status": parser_status(),
-            "model": runtime.application.config.parser.type,
+            "model": "mineru",
         },
         {
             "name": "database",
@@ -96,4 +96,4 @@ def parser_status() -> str:
         return "error"
     if not runtime.application.ready:
         return "loading"
-    return "ready" if runtime.application.parser.is_available(runtime.application.config.parser.type) else "error"
+    return "ready" if runtime.application.parser.is_available() else "error"

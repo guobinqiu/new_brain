@@ -52,6 +52,21 @@ class TestUploadAPI:
         data = resp.json()
         assert data == {"file_id": "img123", "s3_url": f"s3://rag/uploads/{app_api_client.app_id}/img123/test_ocr.png", "filename": "test_ocr.png"}
 
+    def test_upload_xlsx_stores_object(self, app_api_client, api_client, tmp_path, monkeypatch):
+        """``POST /api/upload`` stores a .xlsx file in object storage."""
+        xlsx_file = tmp_path / "table.xlsx"
+        xlsx_file.write_bytes(b"fake xlsx content")
+        monkeypatch.setattr(service, "create_file_id", lambda: "xlsx123")
+        monkeypatch.setattr(service, "upload_file_to_storage", lambda app_id, file_id, filename, content, content_type: f"s3://rag/uploads/{app_api_client.app_id}/xlsx123/table.xlsx", raising=False)
+
+        with open(xlsx_file, "rb") as f:
+            resp = api_client.post(
+                "/api/upload", data={"app_id": app_api_client.app_id}, files={"file": ("table.xlsx", f, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
+            )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data == {"file_id": "xlsx123", "s3_url": f"s3://rag/uploads/{app_api_client.app_id}/xlsx123/table.xlsx", "filename": "table.xlsx"}
+
     def test_upload_no_filename(self, app_api_client, api_client, tmp_path):
         """Uploading a file with no filename returns a client error."""
         bad = tmp_path / "test.txt"
@@ -112,36 +127,12 @@ class TestUploadAPI:
         assert resp.status_code == 200, resp.text
         assert resp.json() == {"file_id": "generatedfile001"}
 
-    def test_index_presigned_url_accepts_parser_override(self, app_api_client, monkeypatch):
-        seen = {}
-
-        def index_object(application, file_id, presigned_url, s3_url, filename, parser=None):
-            seen["parser"] = parser
-            return 1, 1
-
-        monkeypatch.setattr(service, "index_presigned_object", index_object)
-        monkeypatch.setattr(runtime.application.parser, "is_available", lambda parser: parser == "table")
-
-        resp = app_api_client.post(
-            "/api/open/files",
-            json={
-                "parser": "standard",
-                "presigned_url": "https://example.com/presigned",
-                "s3_url": "s3://rag/generated.pdf",
-                "filename": "test_ai.pdf",
-            },
-        )
-
-        assert resp.status_code == 200, resp.text
-        assert seen["parser"] == "table"
-
     def test_index_presigned_url_rejects_unavailable_parser(self, app_api_client, monkeypatch):
-        monkeypatch.setattr(runtime.application.parser, "is_available", lambda parser: False)
+        monkeypatch.setattr(runtime.application.parser, "is_available", lambda: False)
 
         resp = app_api_client.post(
             "/api/open/files",
             json={
-                "parser": "standard",
                 "presigned_url": "https://example.com/presigned",
                 "s3_url": "s3://rag/generated.pdf",
                 "filename": "test_ai.pdf",
@@ -149,7 +140,7 @@ class TestUploadAPI:
         )
 
         assert resp.status_code == 400
-        assert resp.json()["detail"] == "parser is unavailable: standard"
+        assert resp.json()["detail"] == "parser is unavailable"
 
     def test_async_index_job_returns_file_id(self, app_api_client, monkeypatch):
         """``POST /api/open/files/jobs`` enqueues an async index job and returns file_id."""

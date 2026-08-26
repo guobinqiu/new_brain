@@ -144,14 +144,10 @@ def _index_object(application, job) -> dict:
     presigned_url = job["presigned_url"]
     s3_url = job["s3_url"]
     filename = job.get("filename")
-    parser = job.get("parser")
     if not application.store.app_collection_exists(app_id):
         raise ValueError("app database is not initialized")
     with application.store.app_context(app_id):
-        if parser is None:
-            count, file_size = index_presigned_object(application, file_id, presigned_url, s3_url, filename)
-        else:
-            count, file_size = index_presigned_object(application, file_id, presigned_url, s3_url, filename, parser=parser)
+        count, file_size = index_presigned_object(application, file_id, presigned_url, s3_url, filename)
     logger.info(
         "Object indexed",
         extra={

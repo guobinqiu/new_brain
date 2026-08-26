@@ -257,6 +257,10 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helv
 .chunk-content { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--el-text-color-primary); }
 .chunk-content-tooltip { max-width: min(720px, 80vw); }
 .chunk-content-tooltip-body { white-space: pre-wrap; word-break: break-word; max-height: 420px; overflow: auto; line-height: 1.55; }
+.table-parts { display: grid; gap: 12px; max-height: 62vh; overflow: auto; }
+.table-part { border: 1px solid var(--el-border-color); border-radius: 6px; padding: 10px 12px; background: var(--el-fill-color-light); }
+.table-part-head { display: flex; gap: 14px; margin-bottom: 8px; font-size: 12px; color: var(--el-text-color-secondary); }
+.table-part pre { margin: 0; white-space: pre-wrap; word-break: break-word; font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; color: var(--el-text-color-primary); }
 
 /* Monitor */
 .monitor-section { background: var(--el-bg-color); border: 1px solid var(--el-border-color); border-radius: 6px; padding: 18px 22px; margin-bottom: 20px; box-shadow: none; }
@@ -337,6 +341,7 @@ html.dark .logs-box { background: #050b13; color: #d6e4f2; }
 .result-file { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--el-text-color-secondary); flex: 1; overflow: hidden; }
 .result-file span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .result-file svg { stroke: var(--el-text-color-secondary); }
+.result-table-meta { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--el-text-color-secondary); }
 .result-body { font-size: 14px; line-height: 1.8; color: var(--el-text-color-primary); }
 .no-results { text-align: center; padding: 48px 24px; }
 .no-results p { font-size: 14px; color: var(--el-text-color-secondary); }

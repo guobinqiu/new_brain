@@ -34,11 +34,9 @@
               <div><span>ocr</span><strong>{{ configComponentModel(node.data?.ocr) }}</strong></div>
             </div>
             <div class="kv-list">
-              <div><span>{{ t('config.parser') }}</span><strong>{{ node.data?.parser?.type || '-' }}</strong></div>
-              <div><span>standard</span><strong>{{ parserAvailableText(node.data?.parser, 'standard') }}</strong></div>
               <div><span>text.chunk_size</span><strong>{{ node.data?.parser?.text?.chunk_size ?? '-' }}</strong></div>
               <div><span>text.chunk_overlap</span><strong>{{ node.data?.parser?.text?.chunk_overlap ?? '-' }}</strong></div>
-              <div><span>table.chunk_max_chars</span><strong>{{ node.data?.parser?.table?.chunk_max_chars ?? '-' }}</strong></div>
+              <div><span>table.chunk_size</span><strong>{{ node.data?.parser?.table?.chunk_size ?? '-' }}</strong></div>
             </div>
             <div class="kv-list">
               <div><span>{{ t('config.storage') }}</span><strong>{{ node.data?.store?.type || '-' }}</strong></div>
@@ -69,11 +67,6 @@ function configStoreLocation(config) {
 function configComponentModel(item) {
   if (!item || item.enable === false) return 'disabled'
   return item.model_name || item.name || item.type || '-'
-}
-
-function parserAvailableText(parser, name) {
-  const item = (parser?.available || []).find((entry) => entry.name === name)
-  return item?.available ? 'ready' : 'disabled'
 }
 
 async function fetchConfig() {

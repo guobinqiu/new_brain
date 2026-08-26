@@ -67,7 +67,6 @@ class ParserTableConfig:
 
 @dataclass(frozen=True)
 class ParserConfig:
-    type: str = "standard"
     text: ParserTextConfig = field(default_factory=ParserTextConfig)
     table: ParserTableConfig = field(default_factory=ParserTableConfig)
 
@@ -156,7 +155,6 @@ def parse_app_config(raw: dict[str, Any]) -> AppConfig:
     _validate_supported("database.type", database_name, {"postgres", "database/postgres"})
     _required(database, "url", "database")
     _validate_supported("search.default_mode", search.get("default_mode", "hybrid"), {"dense", "sparse", "hybrid"})
-    _validate_supported("parser.type", parser.get("type", "standard"), {"standard", "fast", "text", "table"})
     if store_type in ("qdrant", "store/qdrant"):
         _required(store, "url", "store")
     if store_type in ("chroma", "store/chroma"):
@@ -212,7 +210,6 @@ def parse_app_config(raw: dict[str, Any]) -> AppConfig:
             rrf_k=int(search.get("rrf_k", 60)),
         ),
         parser=ParserConfig(
-            type=str(parser.get("type", "standard")),
             text=ParserTextConfig(
                 chunk_size=int((parser.get("text") or {}).get("chunk_size", 500)),
                 chunk_overlap=int((parser.get("text") or {}).get("chunk_overlap", 80)),

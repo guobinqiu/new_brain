@@ -138,8 +138,8 @@ def test_index_file_uses_application_parser(tmp_path):
     calls = []
 
     class Parser:
-        def parse_file(self, path, *, original_filename, ocr, parser_type):
-            calls.append((path, original_filename, ocr, parser_type))
+        def parse_file(self, path, *, original_filename, ocr):
+            calls.append((path, original_filename, ocr))
             return [{"id": "550e8400-e29b-41d4-a716-446655440000", "content": "hello", "metadata": {"filename": original_filename, "chunk_index": 0}}]
 
     class Store:
@@ -155,10 +155,10 @@ def test_index_file_uses_application_parser(tmp_path):
     path = tmp_path / "a.txt"
     path.write_text("hello", encoding="utf-8")
 
-    count = index_file(Application(), "file-1", path, "a.txt", parser="table")
+    count = index_file(Application(), "file-1", path, "a.txt")
 
     assert count == 1
-    assert calls[0] == (str(path), "a.txt", Application.ocr, "table")
+    assert calls[0] == (str(path), "a.txt", Application.ocr)
     assert calls[1][0] == "store"
 
 

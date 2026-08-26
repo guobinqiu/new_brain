@@ -14,8 +14,7 @@ class TestConfigAPI:
         for key in ("default_mode", "top_k", "rerank", "rerank_available", "fetch_k", "dense_weight", "sparse_weight", "rrf_k"):
             assert key in cfg
         assert cfg["sparse"]["name"] == "bm25"
-        assert {"name": "fast", "available": True} in cfg["parser"]["available"]
-        assert any(item["name"] == "standard" and isinstance(item["available"], bool) for item in cfg["parser"]["available"])
+        assert isinstance(cfg["parser"]["available"], bool)
 
     def test_get_config_includes_components(self, api_client):
         """``GET /api/config`` returns the active component profile."""
@@ -30,7 +29,7 @@ class TestConfigAPI:
         assert cfg["dense"]["model_path"]
         assert cfg["sparse"]["name"] == "bm25"
         assert cfg["sparse"]["tokenizer"] == "jieba"
-        assert cfg["ocr"]["model_name"] == "rapidocr"
+        assert cfg["ocr"]["model_name"] == "paddleocr"
         assert cfg["ocr"]["name"]
 
     def test_get_config_includes_runtime_switchable_components(self, api_client):
@@ -39,7 +38,7 @@ class TestConfigAPI:
         assert resp.status_code == 200
         available = resp.json()["available_components"]
 
-        assert any(item["name"] == "rapid" and item["active"] for item in available["ocr"])
+        assert any(item["name"] == "paddle" and item["active"] for item in available["ocr"])
         assert all("active" in item for item in available["rerank"])
 
     def test_put_config_not_available(self, api_client):
@@ -75,8 +74,8 @@ class TestMonitorAPI:
         assert components["Sparse"]["model"] == "bm25"
         assert components["Rerank"]["status"] in {"disabled", "ready"}
         assert components["OCR"]["status"] == "ready"
-        assert components["OCR"]["model"] == "rapidocr"
-        expected_parser_status = "ready" if any(item["name"] == "standard" and item["available"] for item in api_client.get("/api/config").json()["parser"]["available"]) else "error"
+        assert components["OCR"]["model"] == "paddleocr"
+        expected_parser_status = "ready" if api_client.get("/api/config").json()["parser"]["available"] else "error"
         assert components["Parser"]["status"] == expected_parser_status
         assert "database" in components
         assert all(component["status"] in {"ready", "loading", "disabled", "error"} for component in components.values())

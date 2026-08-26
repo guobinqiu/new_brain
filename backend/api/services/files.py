@@ -204,6 +204,10 @@ def chunk_record(document: dict) -> dict[str, Any]:
         "filename": metadata.get("filename"),
         "chunk_index": metadata.get("chunk_index"),
         "s3_url": metadata.get("s3_url"),
+        "content_type": metadata.get("content_type"),
+        "table_id": metadata.get("table_id"),
+        "table_part_index": metadata.get("table_part_index"),
+        "table_part_count": metadata.get("table_part_count"),
         "created_at": iso_datetime(metadata.get("created_at")),
         "content": document.get("content"),
     }

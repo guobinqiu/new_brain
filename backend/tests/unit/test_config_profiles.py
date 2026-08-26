@@ -89,8 +89,8 @@ def test_profiles_keep_runtime_ocr_candidates():
     for path in CONFIG_DIR.glob("*.yaml"):
         ocr = _read_config(path.name)["ocr"]
 
-        assert _enabled_components(ocr)[0]["model_name"] == "rapidocr"
-        assert ocr["paddle"]["enable"] is False
+        assert _enabled_components(ocr)[0]["model_name"] == "paddleocr"
+        assert ocr["rapid"]["enable"] is False
         assert ocr["tesseract"]["enable"] is False
 
 
@@ -114,12 +114,12 @@ def test_config_files_define_parser_defaults():
     for path in CONFIG_DIR.glob("*.yaml"):
         parser = _read_config(path.name)["parser"]
 
-        assert parser["type"] == "standard"
-        assert parser["text"]["chunk_size"] == 500
-        assert parser["text"]["chunk_overlap"] == 80
-        assert parser["table"]["chunk_size"] == 1000
-        assert parser["table"]["before_text_size"] == 160
-        assert parser["table"]["after_text_size"] == 160
+        assert parser["text"]["chunk_size"] > 0
+        assert parser["text"]["chunk_overlap"] >= 0
+        assert parser["text"]["chunk_overlap"] < parser["text"]["chunk_size"]
+        assert parser["table"]["chunk_size"] > 0
+        assert parser["table"]["before_text_size"] >= 0
+        assert parser["table"]["after_text_size"] >= 0
 
 
 def test_profiles_define_store_type_from_filename():

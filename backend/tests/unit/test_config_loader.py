@@ -28,7 +28,7 @@ def test_load_app_config_loads_local_config(monkeypatch):
     assert config.sparse.import_path == "sparse.bm25.BM25Sparse"
     assert config.store.import_path == "store.qdrant.QdrantStore"
     assert config.rerank is None
-    assert config.ocr.import_path == "ocr.rapid.RapidOCR"
+    assert config.ocr.import_path == "ocr.paddle.PaddleOCR"
 
 
 def test_load_app_config_can_use_explicit_yaml(monkeypatch, tmp_path):
@@ -56,14 +56,13 @@ search:
   sparse_weight: 0.3
   rrf_k: 80
 parser:
-  type: standard
   text:
-    chunk_size: 500
-    chunk_overlap: 80
+    chunk_size: 321
+    chunk_overlap: 45
   table:
-    chunk_size: 1000
-    before_text_size: 160
-    after_text_size: 160
+    chunk_size: 777
+    before_text_size: 123
+    after_text_size: 234
 logging:
   level: DEBUG
   file: logs/test-rag.jsonl
@@ -89,12 +88,11 @@ ocr: test_ocr
     assert config.search.top_k == 12
     assert config.search.fetch_k == 48
     assert config.search.dense_weight == 0.7
-    assert config.parser.type == "standard"
-    assert config.parser.text.chunk_size == 500
-    assert config.parser.text.chunk_overlap == 80
-    assert config.parser.table.chunk_size == 1000
-    assert config.parser.table.before_text_size == 160
-    assert config.parser.table.after_text_size == 160
+    assert config.parser.text.chunk_size == 321
+    assert config.parser.text.chunk_overlap == 45
+    assert config.parser.table.chunk_size == 777
+    assert config.parser.table.before_text_size == 123
+    assert config.parser.table.after_text_size == 234
     assert config.logging.level == "DEBUG"
     assert config.logging.file == "logs/test-rag.jsonl"
     assert config.logging.max_bytes == 2048

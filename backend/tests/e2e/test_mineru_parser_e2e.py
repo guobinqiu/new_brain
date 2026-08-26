@@ -66,7 +66,6 @@ def test_mineru_parser_runs_real_pipeline(tmp_path):
         chunks = parser_service.parse_file(
             str(pdf_path),
             original_filename="mineru-e2e.pdf",
-            parser_type="table",
         )
     finally:
         parser_service.stop()

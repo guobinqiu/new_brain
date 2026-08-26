@@ -17,7 +17,7 @@ from parser.validation import validate_pdf_file
 
 
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
-STRUCTURED_EXTS = {".md", ".markdown", ".docx", ".xlsx"}
+STRUCTURED_EXTS = {".md", ".docx", ".xlsx"}
 
 LOADERS = {
     ".txt": TextLoader,
@@ -43,7 +43,7 @@ class TextParser:
             raise ValueError(f"Unsupported file type: {ext}")
         filename = original_filename or os.path.basename(filepath)
 
-        if ext in (".md", ".markdown"):
+        if ext == ".md":
             chunks = blocks_to_documents(parse_markdown_blocks(filepath, self.config, ocr or self.ocr), filename, self.config)
             if not chunks:
                 raise ValueError(f"Empty file: {filename}")

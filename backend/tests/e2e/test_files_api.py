@@ -3,6 +3,7 @@ import uuid
 
 from api.runtime import runtime
 from api.services import files as service
+from tests.e2e.test_search_api import _index_ready_file
 
 
 pytestmark = pytest.mark.e2e
@@ -16,7 +17,19 @@ class TestFilesAPI:
             runtime.application.store.add_file_chunks(
                 [
                     {"id": str(uuid.uuid4()), "content": "人工智能和向量检索第一段", "metadata": {"filename": "chunked.txt", "chunk_index": 0, "s3_url": "s3://rag/chunked.txt"}},
-                    {"id": str(uuid.uuid4()), "content": "人工智能和向量检索第二段", "metadata": {"filename": "chunked.txt", "chunk_index": 1, "s3_url": "s3://rag/chunked.txt"}},
+                    {
+                        "id": str(uuid.uuid4()),
+                        "content": "人工智能和向量检索第二段",
+                        "metadata": {
+                            "filename": "chunked.txt",
+                            "chunk_index": 1,
+                            "s3_url": "s3://rag/chunked.txt",
+                            "content_type": "table",
+                            "table_id": "table_1",
+                            "table_part_index": 0,
+                            "table_part_count": 1,
+                        },
+                    },
                 ],
                 file_id=file_id,
             )
@@ -41,6 +54,10 @@ class TestFilesAPI:
         assert second_page.status_code == 200, second_page.text
         second_body = second_page.json()
         assert len(second_body["chunks"]) == 1
+        assert second_body["chunks"][0]["content_type"] == "table"
+        assert second_body["chunks"][0]["table_id"] == "table_1"
+        assert second_body["chunks"][0]["table_part_index"] == 0
+        assert second_body["chunks"][0]["table_part_count"] == 1
 
     def test_list_files_api_uses_cursor_pagination(self, app_api_client, api_client, monkeypatch):
         """``GET /api/files`` returns PG-backed file pages via single-direction cursors."""

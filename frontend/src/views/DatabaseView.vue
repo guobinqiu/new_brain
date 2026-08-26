@@ -21,7 +21,7 @@
         <el-button type="danger" class="database-delete-btn" @click="deleteDatabase">{{ t('database.delete') }}</el-button>
       </div>
       <div class="chunk-filter">
-        <span>File IDs</span>
+        <span>{{ t('database.fileIds') }}</span>
         <el-input v-model.trim="databaseFileIdsText" :placeholder="t('database.fileIdsPlaceholder')" @keyup.enter="fetchChunks" />
         <el-button :disabled="!appId || chunksLoading" @click="fetchChunks">{{ t('database.query') }}</el-button>
       </div>
@@ -35,8 +35,8 @@
           v-loading="chunksLoading"
           @scroll="onChunksScroll"
         >
-          <el-table-column prop="id" label="chunk_id" min-width="140" show-overflow-tooltip />
-          <el-table-column label="file_id" min-width="170" show-overflow-tooltip>
+          <el-table-column prop="id" :label="t('database.chunkId')" min-width="140" show-overflow-tooltip />
+          <el-table-column :label="t('database.fileId')" min-width="170" show-overflow-tooltip>
             <template #default="{ row }">
               <div class="copy-cell">
                 <span class="chunk-id">{{ row.file_id }}</span>
@@ -44,7 +44,7 @@
               </div>
             </template>
           </el-table-column>
-          <el-table-column label="s3_url" min-width="240" show-overflow-tooltip>
+          <el-table-column :label="t('database.s3Url')" min-width="240" show-overflow-tooltip>
             <template #default="{ row }">
               <div class="copy-cell">
                 <span class="chunk-id">{{ row.s3_url }}</span>
@@ -52,12 +52,26 @@
               </div>
             </template>
           </el-table-column>
-          <el-table-column prop="filename" label="filename" min-width="120" show-overflow-tooltip />
-          <el-table-column label="created_at" min-width="150">
+          <el-table-column prop="filename" :label="t('database.filename')" min-width="120" show-overflow-tooltip />
+          <el-table-column :label="t('database.createdAt')" min-width="150">
             <template #default="{ row }">{{ shortTime(row.created_at) }}</template>
           </el-table-column>
-          <el-table-column prop="chunk_index" label="chunk_index" width="92" />
-          <el-table-column label="content" min-width="260">
+          <el-table-column :label="t('database.contentType')" width="96">
+            <template #default="{ row }">{{ row.content_type || '-' }}</template>
+          </el-table-column>
+          <el-table-column :label="t('database.tableId')" min-width="120" show-overflow-tooltip>
+            <template #default="{ row }">{{ row.table_id || '-' }}</template>
+          </el-table-column>
+          <el-table-column :label="t('database.tablePartIndex')" width="120">
+            <template #default="{ row }">
+              {{ row.table_part_index ?? '-' }}
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('database.tablePartCount')" width="120">
+            <template #default="{ row }">{{ row.table_part_count ?? '-' }}</template>
+          </el-table-column>
+          <el-table-column prop="chunk_index" :label="t('database.chunkIndex')" width="92" />
+          <el-table-column :label="t('database.content')" min-width="260">
             <template #default="{ row }">
               <div class="copy-cell">
                 <el-tooltip placement="top" popper-class="chunk-content-tooltip">
@@ -70,9 +84,26 @@
               </div>
             </template>
           </el-table-column>
+          <el-table-column :label="t('common.actions')" width="120" fixed="right">
+            <template #default="{ row }">
+              <el-button v-if="row.content_type === 'table' && row.table_id" size="small" @click="openTableParts(row)">{{ t('database.viewTable') }}</el-button>
+            </template>
+          </el-table-column>
         </el-table>
       </template>
     </div>
+    <el-dialog v-model="tablePartsVisible" :title="tablePartsTitle" width="860px">
+      <div v-if="tableParts.length === 0" class="docs-empty">{{ t('database.emptyTableParts') }}</div>
+      <div v-else class="table-parts">
+        <section v-for="part in tableParts" :key="part.table_part_index" class="table-part">
+          <div class="table-part-head">
+            <span>{{ t('database.tablePartIndex') }}: {{ part.table_part_index }}</span>
+            <span>{{ t('database.chunkIndex') }}: {{ part.chunk_index }}</span>
+          </div>
+          <pre>{{ part.content }}</pre>
+        </section>
+      </div>
+    </el-dialog>
   </main>
 </template>
 
@@ -103,6 +134,9 @@ const chunksHasMore = ref(false)
 const chunksLoading = ref(false)
 const databaseInitializing = ref(false)
 const chunksTableRef = ref(null)
+const tablePartsVisible = ref(false)
+const tableParts = ref([])
+const tablePartsTitle = ref('')
 
 async function fetchDatabaseStatus() {
   if (!currentAppId.value) {
@@ -195,6 +229,22 @@ function onChunksScroll(event) {
   const scrollTop = event?.scrollTop ?? wrap.scrollTop
   if (scrollTop + wrap.clientHeight >= wrap.scrollHeight - 24 && chunksHasMore.value) {
     fetchNextChunks()
+  }
+}
+
+async function openTableParts(row) {
+  if (!currentAppId.value || !row.file_id || !row.table_id) return
+  try {
+    const res = await axios.post(`${API}/tables/parts`, {
+      app_id: currentAppId.value,
+      file_id: row.file_id,
+      table_id: row.table_id,
+    })
+    tableParts.value = res.data.parts || []
+    tablePartsTitle.value = `${row.file_id} · ${row.table_id}`
+    tablePartsVisible.value = true
+  } catch (err) {
+    showToast('error', errorMessage(err))
   }
 }
 

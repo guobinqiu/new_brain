@@ -1,10 +1,11 @@
-from parser.table_transform import TableBlock, TextBlock, blocks_to_chunks, table_html_to_blocks
+from parser.chunker import blocks_to_documents, blocks_to_chunks
+from parser.schema import TableBlock, TextBlock
+from parser.table_transform import table_html_to_blocks
 from schema import ParserConfig, ParserTableConfig, ParserTextConfig
 
 
 def test_table_blocks_carry_context_without_changing_text_blocks():
     config = ParserConfig(
-        type="text",
         text=ParserTextConfig(chunk_size=200, chunk_overlap=20),
         table=ParserTableConfig(chunk_size=1000, before_text_size=4, after_text_size=4),
     )
@@ -24,6 +25,76 @@ def test_table_blocks_carry_context_without_changing_text_blocks():
     assert isinstance(blocks[2], TextBlock)
     assert chunks == [
         "前置说明文字很长",
-        "文字很长\n\n库: Qdrant；能力: 过滤\n\n后置说明",
+        "文字很长\n\n| 库 | 能力 |\n| --- | --- |\n| Qdrant | 过滤 |\n\n后置说明",
         "后置说明文字很长",
     ]
+
+
+def test_table_documents_include_table_metadata():
+    config = ParserConfig(
+        text=ParserTextConfig(chunk_size=200, chunk_overlap=20),
+        table=ParserTableConfig(chunk_size=1000, before_text_size=4, after_text_size=4),
+    )
+    blocks = [
+        TextBlock("表格标题"),
+        *table_html_to_blocks(
+            "<table><tr><td>库</td><td>能力</td></tr><tr><td>Qdrant</td><td>过滤</td></tr></table>",
+            config,
+        ),
+    ]
+
+    documents = blocks_to_documents(blocks, "report.pdf", config)
+
+    table_documents = [document for document in documents if document["metadata"]["content_type"] == "table"]
+    assert len(table_documents) == 1
+    assert table_documents[0]["metadata"]["filename"] == "report.pdf"
+    assert table_documents[0]["metadata"]["table_id"] == "table_1"
+    assert table_documents[0]["metadata"]["table_part_index"] == 0
+    assert table_documents[0]["metadata"]["table_part_count"] == 1
+
+
+def test_table_does_not_use_next_section_title_as_after_context():
+    config = ParserConfig(
+        text=ParserTextConfig(chunk_size=200, chunk_overlap=20),
+        table=ParserTableConfig(chunk_size=1000, before_text_size=20, after_text_size=20),
+    )
+    blocks = [
+        TextBlock("1. 数据规模对比"),
+        *table_html_to_blocks(
+            "<table>"
+            "<tr><td>向量库</td><td>能力</td></tr>"
+            "<tr><td>Qdrant</td><td>过滤</td></tr>"
+            "</table>",
+            config,
+        ),
+        TextBlock("2. 查询类型对比"),
+        *table_html_to_blocks(
+            "<table>"
+            "<tr><td>向量库</td><td>查询</td></tr>"
+            "<tr><td>Milvus</td><td>混合检索</td></tr>"
+            "</table>",
+            config,
+        ),
+    ]
+
+    documents = blocks_to_documents(blocks, "report.pdf", config)
+    table_documents = [document for document in documents if document["metadata"]["content_type"] == "table"]
+
+    assert len(table_documents) == 2
+    assert "2. 查询类型对比" not in table_documents[0]["content"]
+    assert "2. 查询类型对比" in table_documents[1]["content"]
+
+
+def test_table_uses_first_single_cell_row_as_title():
+    blocks = table_html_to_blocks(
+        "<table>"
+        "<tr><td>5. 运维复杂度对比</td><td></td><td></td></tr>"
+        "<tr><td>向量库</td><td>安装难度</td><td>集群管理</td></tr>"
+        "<tr><td>Qdrant</td><td>Docker</td><td>K8s</td></tr>"
+        "</table>",
+        ParserConfig(),
+    )
+
+    assert len(blocks) == 1
+    assert blocks[0].text.startswith("5. 运维复杂度对比\n| 向量库 | 安装难度 | 集群管理 |")
+    assert "| 5. 运维复杂度对比 | 列2 | 列3 |" not in blocks[0].text
