@@ -8,8 +8,9 @@ logger = logging.getLogger("rag.app")
 
 
 class BGEM3LexicalEncoder:
-    def __init__(self, model_name: str):
+    def __init__(self, model_name: str, batch_size: int = 4):
         self.model_name = model_name
+        self.batch_size = batch_size
         self._model = None
         self.ready = False
 
@@ -29,13 +30,16 @@ class BGEM3LexicalEncoder:
 
     def embed_documents(self, texts: list[str]) -> list[dict[int, float]]:
         self._require_ready()
-        output = self._model.encode(
-            texts,
-            return_dense=False,
-            return_sparse=True,
-            return_colbert_vecs=False,
-        )
-        return [_normalize_lexical_weights(weights) for weights in output["lexical_weights"]]
+        vectors = []
+        for index in range(0, len(texts), self.batch_size):
+            output = self._model.encode(
+                texts[index:index + self.batch_size],
+                return_dense=False,
+                return_sparse=True,
+                return_colbert_vecs=False,
+            )
+            vectors.extend(_normalize_lexical_weights(weights) for weights in output["lexical_weights"])
+        return vectors
 
     def _load_model(self):
         from FlagEmbedding import BGEM3FlagModel

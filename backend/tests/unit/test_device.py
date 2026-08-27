@@ -123,6 +123,25 @@ def test_dense_stop_releases_loaded_model(monkeypatch):
     assert calls == ["release"]
 
 
+def test_dense_embeds_documents_in_batches():
+    from dense.huggingface import HuggingFaceDense
+
+    calls = []
+
+    class FakeEmbeddings:
+        def embed_documents(self, texts):
+            calls.append(list(texts))
+            return [[float(len(text))] for text in texts]
+
+    dense = HuggingFaceDense(model_name="/models/bge", batch_size=2)
+    dense._dense = FakeEmbeddings()
+    dense._vector_size = 1
+    dense.ready = True
+
+    assert dense.embed_documents(["a", "bb", "ccc", "dddd", "eeeee"]) == [[1.0], [2.0], [3.0], [4.0], [5.0]]
+    assert calls == [["a", "bb"], ["ccc", "dddd"], ["eeeee"]]
+
+
 def test_rerank_passes_auto_device_to_cross_encoder(monkeypatch):
     import importlib
     import rerank.cross_encoder
