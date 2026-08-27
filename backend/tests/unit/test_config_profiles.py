@@ -114,9 +114,11 @@ def test_config_files_define_parser_defaults():
     for path in CONFIG_DIR.glob("*.yaml"):
         parser = _read_config(path.name)["parser"]
 
-        assert parser["chunk_size"] > 0
-        assert parser["chunk_overlap"] >= 0
-        assert parser["chunk_overlap"] < parser["chunk_size"]
+        assert parser["text"]["chunk_size"] > 0
+        assert parser["text"]["chunk_overlap"] >= 0
+        assert parser["text"]["chunk_overlap"] < parser["text"]["chunk_size"]
+        assert parser["table"]["header_backward_chars"] >= 0
+        assert parser["table"]["footer_forward_chars"] >= 0
 
 
 def test_profiles_define_store_type_from_filename():

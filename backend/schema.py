@@ -53,9 +53,43 @@ class SearchConfig:
 
 
 @dataclass(frozen=True)
-class ParserConfig:
+class TextParserConfig:
     chunk_size: int = 500
     chunk_overlap: int = 80
+
+
+@dataclass(frozen=True)
+class TableParserConfig:
+    header_backward_chars: int = 160
+    footer_forward_chars: int = 160
+
+
+@dataclass(frozen=True, init=False)
+class ParserConfig:
+    text: TextParserConfig = field(default_factory=TextParserConfig)
+    table: TableParserConfig = field(default_factory=TableParserConfig)
+
+    def __init__(
+        self,
+        text: TextParserConfig | None = None,
+        table: TableParserConfig | None = None,
+        chunk_size: int | None = None,
+        chunk_overlap: int | None = None,
+    ):
+        text_config = text or TextParserConfig(
+            chunk_size=500 if chunk_size is None else chunk_size,
+            chunk_overlap=80 if chunk_overlap is None else chunk_overlap,
+        )
+        object.__setattr__(self, "text", text_config)
+        object.__setattr__(self, "table", table or TableParserConfig())
+
+    @property
+    def chunk_size(self) -> int:
+        return self.text.chunk_size
+
+    @property
+    def chunk_overlap(self) -> int:
+        return self.text.chunk_overlap
 
 
 @dataclass(frozen=True)
@@ -118,6 +152,8 @@ def parse_app_config(raw: dict[str, Any]) -> AppConfig:
     database = raw.get("database") or {}
     search = raw.get("search") or {}
     parser = raw.get("parser") or {}
+    parser_text = parser.get("text") or {}
+    parser_table = parser.get("table") or {}
     logging = raw.get("logging") or {}
     auth = raw.get("auth") or {}
     rerank = raw.get("rerank")
@@ -197,8 +233,14 @@ def parse_app_config(raw: dict[str, Any]) -> AppConfig:
             rrf_k=int(search.get("rrf_k", 60)),
         ),
         parser=ParserConfig(
-            chunk_size=int(parser.get("chunk_size", 500)),
-            chunk_overlap=int(parser.get("chunk_overlap", 80)),
+            text=TextParserConfig(
+                chunk_size=int(parser_text.get("chunk_size", parser.get("chunk_size", 500))),
+                chunk_overlap=int(parser_text.get("chunk_overlap", parser.get("chunk_overlap", 80))),
+            ),
+            table=TableParserConfig(
+                header_backward_chars=int(parser_table.get("header_backward_chars", 160)),
+                footer_forward_chars=int(parser_table.get("footer_forward_chars", 160)),
+            ),
         ),
         logging=LoggingConfig(
             level=str(logging.get("level", "INFO")),

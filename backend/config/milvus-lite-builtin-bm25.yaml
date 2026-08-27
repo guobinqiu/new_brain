@@ -33,8 +33,12 @@ search:
   sparse_weight: 0.5
   rrf_k: 60
 parser:
-  chunk_size: 500
-  chunk_overlap: 80
+  text:
+    chunk_size: 500
+    chunk_overlap: 80
+  table:
+    header_backward_chars: 160
+    footer_forward_chars: 160
 rerank:
   bge_base:
     enable: true

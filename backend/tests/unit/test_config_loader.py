@@ -92,6 +92,44 @@ ocr: test_ocr
     assert config.logging.search_trace is False
 
 
+def test_load_app_config_supports_nested_parser_config(monkeypatch, tmp_path):
+    from loader import load_app_config
+
+    path = tmp_path / "nested_parser.yaml"
+    path.write_text(
+        """
+database:
+  type: postgres
+  url: postgresql://rag:rag@localhost:5432/rag
+dense: test_dense
+sparse:
+  type: bm25
+  tokenizer: jieba
+store:
+  type: qdrant
+  url: http://localhost:6333
+parser:
+  text:
+    chunk_size: 321
+    chunk_overlap: 45
+  table:
+    header_backward_chars: 120
+    footer_forward_chars: 80
+rerank: test_rerank
+ocr: test_ocr
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CONFIG_FILE", str(path))
+
+    config = load_app_config()
+
+    assert config.parser.text.chunk_size == 321
+    assert config.parser.text.chunk_overlap == 45
+    assert config.parser.table.header_backward_chars == 120
+    assert config.parser.table.footer_forward_chars == 80
+
+
 def test_load_app_config_supports_single_vector_sparse(monkeypatch, tmp_path):
     from loader import load_app_config
 

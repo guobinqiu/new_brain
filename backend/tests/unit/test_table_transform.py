@@ -73,6 +73,24 @@ def test_table_uses_next_section_title_as_footer_context():
     assert "2. 查询类型对比" in table_documents[1]["content"]
 
 
+def test_table_context_uses_configured_backward_and_forward_chars():
+    from parser.chunker import blocks_to_documents
+    from parser.schema import TableBlock, TextBlock
+    from schema import ParserConfig, TableParserConfig
+
+    chunks = blocks_to_documents(
+        [
+            TextBlock("前文" + "A" * 20),
+            TableBlock("| 名称 | 大小 |\n| --- | --- |\n| bootstrap | 70MB |"),
+            TextBlock("B" * 20 + "后文"),
+        ],
+        "report.md",
+        ParserConfig(table=TableParserConfig(header_backward_chars=6, footer_forward_chars=5)),
+    )
+
+    assert chunks[1]["content"] == "AAAAAA\n\n| 名称 | 大小 |\n| --- | --- |\n| bootstrap | 70MB |\n\nBBBBB"
+
+
 def test_table_uses_first_single_cell_row_as_title():
     blocks = table_html_to_blocks(
         "<table>"

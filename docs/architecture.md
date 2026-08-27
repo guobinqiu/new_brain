@@ -789,20 +789,26 @@ MinerU 使用 pipeline 后端。运行时模型根目录是实体目录 `models/
 
 模型加载和模型使用分离：应用启动阶段加载 dense、sparse、rerank、OCR 和可用的 MinerU 模型；索引阶段只使用已经加载的模型，不在请求处理中懒加载 MinerU，也不通过子进程执行 MinerU CLI。MinerU 调用走 Python SDK，复用当前进程里的 pipeline 模型单例。
 
-最终 chunk 中，普通正文走文本切片；每张逻辑表完整写入一个 table chunk。表格块内部如果出现“标题行 + 新表头”，会拆成多张逻辑表，每张逻辑表仍然各自完整写入一个 chunk。表格 header/footer 上下文分别来自前后相邻完整文本块。向量库 `content` 保存 Markdown 表格文本。
+最终 chunk 中，普通正文走文本切片；每张逻辑表完整写入一个 table chunk。表格块内部如果出现“标题行 + 新表头”，会拆成多张逻辑表，每张逻辑表仍然各自完整写入一个 chunk。表格 header/footer 上下文分别来自前后相邻文本块，header 从前文向后截取，footer 从后文向前截取。向量库 `content` 保存 Markdown 表格文本。
 
 切片参数由配置决定：
 
 ```yaml
 parser:
-  chunk_size: 500
-  chunk_overlap: 80
+  text:
+    chunk_size: 500
+    chunk_overlap: 80
+  table:
+    header_backward_chars: 160
+    footer_forward_chars: 160
 ```
 
 | 参数 | 含义 |
 | --- | --- |
-| `parser.chunk_size` | 普通文本 chunk 字符上限 |
-| `parser.chunk_overlap` | 普通文本相邻 chunk 重叠字符数 |
+| `parser.text.chunk_size` | 普通文本 chunk 字符上限 |
+| `parser.text.chunk_overlap` | 普通文本相邻 chunk 重叠字符数 |
+| `parser.table.header_backward_chars` | 表格 header 从前一个文本块末尾截取的字符数 |
+| `parser.table.footer_forward_chars` | 表格 footer 从后一个文本块开头截取的字符数 |
 
 切片按中文文档常见边界拆分，优先使用段落、换行、中文句号、感叹号、问号、分号、逗号和空格。
 

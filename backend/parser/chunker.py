@@ -39,7 +39,7 @@ def _text_blocks_to_documents(blocks: list[str], filename: str, parser_config: P
         return []
     return [
         _document(chunk.strip(), filename, {})
-        for chunk in split_text(text, parser_config.chunk_size, parser_config.chunk_overlap)
+        for chunk in split_text(text, parser_config.text.chunk_size, parser_config.text.chunk_overlap)
         if chunk.strip()
     ]
 
@@ -68,11 +68,23 @@ def _table_chunk_with_context(content: str, header: str, footer: str) -> str:
 def _table_header(blocks: list[Block], index: int, parser_config: ParserConfig) -> str:
     if index == 0 or not isinstance(blocks[index - 1], TextBlock):
         return ""
-    return blocks[index - 1].text.strip()
+    return _take_backward(blocks[index - 1].text, parser_config.table.header_backward_chars)
 
 
 def _table_footer(blocks: list[Block], index: int, parser_config: ParserConfig) -> str:
     if index + 1 >= len(blocks) or not isinstance(blocks[index + 1], TextBlock):
         return ""
     next_block = blocks[index + 1]
-    return next_block.text.strip()
+    return _take_forward(next_block.text, parser_config.table.footer_forward_chars)
+
+
+def _take_backward(text: str, chars: int) -> str:
+    if chars <= 0:
+        return ""
+    return text.strip()[-chars:]
+
+
+def _take_forward(text: str, chars: int) -> str:
+    if chars <= 0:
+        return ""
+    return text.strip()[:chars]
