@@ -40,7 +40,10 @@ class HuggingFaceDense:
         self._require_ready()
         vectors = []
         for index in range(0, len(texts), self.batch_size):
-            vectors.extend(self._dense.embed_documents(texts[index:index + self.batch_size]))
+            try:
+                vectors.extend(self._dense.embed_documents(texts[index:index + self.batch_size]))
+            finally:
+                device.release_memory()
         return vectors
 
     def as_langchain_dense(self):

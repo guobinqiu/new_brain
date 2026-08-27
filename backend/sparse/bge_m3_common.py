@@ -32,13 +32,16 @@ class BGEM3LexicalEncoder:
         self._require_ready()
         vectors = []
         for index in range(0, len(texts), self.batch_size):
-            output = self._model.encode(
-                texts[index:index + self.batch_size],
-                return_dense=False,
-                return_sparse=True,
-                return_colbert_vecs=False,
-            )
-            vectors.extend(_normalize_lexical_weights(weights) for weights in output["lexical_weights"])
+            try:
+                output = self._model.encode(
+                    texts[index:index + self.batch_size],
+                    return_dense=False,
+                    return_sparse=True,
+                    return_colbert_vecs=False,
+                )
+                vectors.extend(_normalize_lexical_weights(weights) for weights in output["lexical_weights"])
+            finally:
+                device.release_memory()
         return vectors
 
     def _load_model(self):

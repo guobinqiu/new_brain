@@ -3,6 +3,7 @@ import os
 import tempfile
 from pathlib import Path
 
+import device
 from parser.schema import Block
 from parser.table_transform import read_table_blocks, read_table_documents
 from parser.validation import validate_pdf_file
@@ -32,12 +33,15 @@ def parse_pdf_table(filepath: str, filename: str, parser_config: ParserConfig) -
     validate_pdf_file(filepath)
 
     with tempfile.TemporaryDirectory(prefix="mineru_") as output_dir:
-        _mineru_do_parse(
-            output_dir=output_dir,
-            filepath=filepath,
-            filename=filename,
-        )
-        chunks = read_table_documents(Path(output_dir), filename, parser_config)
+        try:
+            _mineru_do_parse(
+                output_dir=output_dir,
+                filepath=filepath,
+                filename=filename,
+            )
+            chunks = read_table_documents(Path(output_dir), filename, parser_config)
+        finally:
+            device.release_memory()
 
     if not chunks:
         raise ValueError(f"Empty file: {filename}")
@@ -49,13 +53,16 @@ def parse_document_blocks(filepath: str, filename: str, file_type: str, parser_c
         raise ValueError("table parser is not installed")
 
     with tempfile.TemporaryDirectory(prefix="mineru_") as output_dir:
-        _mineru_do_parse(
-            output_dir=output_dir,
-            filepath=filepath,
-            filename=filename,
-            file_type=file_type,
-        )
-        blocks = read_table_blocks(Path(output_dir), parser_config)
+        try:
+            _mineru_do_parse(
+                output_dir=output_dir,
+                filepath=filepath,
+                filename=filename,
+                file_type=file_type,
+            )
+            blocks = read_table_blocks(Path(output_dir), parser_config)
+        finally:
+            device.release_memory()
 
     if not blocks:
         raise ValueError(f"Empty file: {filename}")

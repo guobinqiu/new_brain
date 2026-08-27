@@ -13,8 +13,9 @@ RERANK_MIN_SCORE = 0.0
 
 
 class CrossEncoderRerank:
-    def __init__(self, model_name: str = MODEL_NAME):
+    def __init__(self, model_name: str = MODEL_NAME, batch_size: int = 4):
         self.model_name = model_name
+        self.batch_size = batch_size
         self._reranker = None
         self.ready = False
 
@@ -26,6 +27,7 @@ class CrossEncoderRerank:
     def stop(self) -> None:
         self._reranker = None
         self.ready = False
+        device.release_memory()
 
     def rerank(self, query: str, items: list[dict], top_k: int) -> list[dict]:
         if not items:
@@ -34,10 +36,13 @@ class CrossEncoderRerank:
             raise RuntimeError("rerank is not initialized")
 
         pairs = [(query, item["content"]) for item in items]
-        if hasattr(self._reranker, "predict"):
-            scores = self._reranker.predict(pairs)
-        else:
-            scores = self._reranker.score(pairs)
+        try:
+            if hasattr(self._reranker, "predict"):
+                scores = self._reranker.predict(pairs, batch_size=self.batch_size)
+            else:
+                scores = self._reranker.score(pairs)
+        finally:
+            device.release_memory()
 
         scored = [(item, float(score)) for item, score in zip(items, scores) if float(score) >= RERANK_MIN_SCORE]
         scored.sort(key=lambda x: x[1], reverse=True)

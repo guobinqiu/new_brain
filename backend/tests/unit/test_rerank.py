@@ -10,13 +10,13 @@ class RealisticFakeReranker:
     def __init__(self):
         self.calls = []
 
-    def predict(self, pairs):
-        self.calls.append(pairs)
+    def predict(self, pairs, batch_size=None):
+        self.calls.append((pairs, batch_size))
         return [float(len(p[1])) for p in pairs]
 
 
 class ThresholdFakeReranker:
-    def predict(self, pairs):
+    def predict(self, pairs, batch_size=None):
         return [-0.5, 0.0, 0.8]
 
 
@@ -97,6 +97,19 @@ class TestRerank:
         results = application.rerank("agi", items, top_k=3)
         assert [r["id"] for r in results] == ["long", "mid", "short"]
 
+    def test_rerank_passes_batch_size_to_predict(self):
+        from rerank.cross_encoder import CrossEncoderRerank
+
+        fake = RealisticFakeReranker()
+        items = [_make_item(f"id{i}", f"content {i}") for i in range(5)]
+        application = CrossEncoderRerank(batch_size=2)
+        application._reranker = fake
+        application.ready = True
+
+        application.rerank("test query", items, top_k=3)
+
+        assert fake.calls == [([("test query", item["content"]) for item in items], 2)]
+
     def test_rerank_empty_items(self):
         """``rerank`` with no items returns an empty list."""
         from rerank.cross_encoder import CrossEncoderRerank
@@ -165,7 +178,7 @@ class TestRerankRealAPI:
         # No AttributeError raised — the regression itself
         assert len(results) == 2
         # predict() received the (query, content) pairs
-        assert fake.calls == [[("agi", item["content"]) for item in items]]
+        assert fake.calls == [([("agi", item["content"]) for item in items], 4)]
         # predict() scores drove the ranking (longest content first)
         assert [r["id"] for r in results] == ["long", "mid"]
 
