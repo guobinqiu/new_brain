@@ -82,6 +82,19 @@ class TestRerank:
                 assert key in r
             assert "score" not in r
 
+    def test_rerank_sets_internal_score(self):
+        from rerank.cross_encoder import CrossEncoderRerank
+
+        items = [_make_item("short", "x"), _make_item("long", "x" * 10)]
+        application = CrossEncoderRerank()
+        application._reranker = RealisticFakeReranker()
+        application.ready = True
+
+        results = application.rerank("query", items, top_k=2)
+
+        assert results[0]["_score"] == 10.0
+        assert results[1]["_score"] == 1.0
+
     def test_rerank_sorts_by_score(self):
         """FakeReranker scores by content length → longest content ranks first."""
         from rerank.cross_encoder import CrossEncoderRerank

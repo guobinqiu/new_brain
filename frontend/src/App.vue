@@ -341,6 +341,7 @@ html.dark .logs-box { background: #050b13; color: #d6e4f2; }
 .result-file { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--el-text-color-secondary); flex: 1; overflow: hidden; }
 .result-file span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .result-file svg { stroke: var(--el-text-color-secondary); }
+.result-score { font-size: 12px; color: var(--el-text-color-secondary); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .result-table-meta { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--el-text-color-secondary); }
 .result-body { font-size: 14px; line-height: 1.8; color: var(--el-text-color-primary); }
 .no-results { text-align: center; padding: 48px 24px; }

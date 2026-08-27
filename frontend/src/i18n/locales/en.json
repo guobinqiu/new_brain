@@ -50,6 +50,7 @@
     "resultCount": "{count} results",
     "mode": "Mode",
     "files": "Files",
+    "score": "Score",
     "balance": "Balance",
     "elapsed": "Elapsed",
     "noResults": "No matching results",

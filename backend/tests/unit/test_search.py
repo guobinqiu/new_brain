@@ -108,6 +108,18 @@ def test_executor_searches_single_chunks_collection_with_file_filter():
     assert ("get_search_documents", ("file-filter", ("file_a",))) in store.calls
 
 
+def test_executor_exposes_retrieval_score():
+    import search as search_mod
+
+    results = search_mod._SearchExecutor(
+        search_mod.SearchPlan("query", mode="dense", top_k=1),
+        store=FakeStore(),
+    ).execute()
+
+    assert results[0]["score"] == 0.8
+    assert "_score" not in results[0]
+
+
 def test_rerank_fetch_k_is_clamped_by_file_filtered_total_chunks():
     import search as search_mod
 

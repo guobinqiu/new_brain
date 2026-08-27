@@ -330,7 +330,10 @@ def _dedupe(items: list[dict]) -> list[dict]:
 
 
 def _public_item(item: dict) -> dict:
-    return {key: value for key, value in item.items() if not key.startswith("_")}
+    result = {key: value for key, value in item.items() if not key.startswith("_")}
+    if "_score" in item:
+        result["score"] = float(item["_score"])
+    return result
 
 
 def _item_to_document(item: dict) -> Document:

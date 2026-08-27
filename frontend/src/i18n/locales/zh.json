@@ -50,6 +50,7 @@
     "resultCount": "{count} 条结果",
     "mode": "模式",
     "files": "文件",
+    "score": "分数",
     "balance": "平衡",
     "elapsed": "耗时",
     "noResults": "未找到匹配结果",

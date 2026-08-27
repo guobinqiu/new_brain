@@ -46,10 +46,12 @@ class CrossEncoderRerank:
 
         scored = [(item, float(score)) for item, score in zip(items, scores) if float(score) >= RERANK_MIN_SCORE]
         scored.sort(key=lambda x: x[1], reverse=True)
-        return [
-            {key: value for key, value in item.items() if not key.startswith("_")}
-            for item, _score in scored[:top_k]
-        ]
+        results = []
+        for item, score in scored[:top_k]:
+            result = dict(item)
+            result["_score"] = score
+            results.append(result)
+        return results
 
     def _load_reranker(self):
         logger.info("Loading reranker model", extra={"event": "model_load", "component": "rerank", "model": self.model_name})
