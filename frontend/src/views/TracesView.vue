@@ -83,7 +83,7 @@ const route = useRoute()
 const traces = ref([])
 const tracesLoading = ref(false)
 const tracesHasMore = ref(false)
-const tracesNextEnd = ref(null)
+const tracesNextStart = ref(null)
 const tracesTableRef = ref(null)
 const timeRange = ref(defaultRange())
 const currentAppId = computed(() => route.params.app_id || appId.value)
@@ -108,7 +108,7 @@ function traceModeText(mode) {
 async function loadTraces() {
   traces.value = []
   tracesHasMore.value = false
-  tracesNextEnd.value = null
+  tracesNextStart.value = null
   await fetchNextTraces()
 }
 
@@ -125,13 +125,13 @@ async function fetchNextTraces() {
       params.start = timeRange.value[0]
       params.end = timeRange.value[1]
     }
-    if (tracesNextEnd.value != null) params.end = tracesNextEnd.value
+    if (tracesNextStart.value != null) params.start = tracesNextStart.value
     const res = await axios.get('/api/traces', {
       params,
     })
     traces.value = traces.value.concat(res.data?.traces || [])
     tracesHasMore.value = Boolean(res.data?.has_more)
-    tracesNextEnd.value = res.data?.next_end || null
+    tracesNextStart.value = res.data?.next_start || null
   } finally {
     tracesLoading.value = false
   }

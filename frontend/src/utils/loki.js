@@ -16,9 +16,9 @@ export async function fetchLogs(filter = {}) {
     params.set('start', String(filter.range[0]))
     params.set('end', String(filter.range[1]))
   }
-  if (filter.end != null) params.set('end', String(filter.end))
+  if (filter.start != null) params.set('start', String(filter.start))
   const res = await axios.get(`/api/logs?${params.toString()}`)
-  return res.data || { logs: [], has_more: false, next_end: null }
+  return res.data || { logs: [], has_more: false, next_start: null }
 }
 
 export function formatLogLine(row) {

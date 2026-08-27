@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 
 from fastapi import HTTPException
 
-from loki_client import parse_traces, previous_ns, query_range, timestamp_to_ns, trace_query
+from loki_client import next_ns, parse_traces, query_range, timestamp_to_ns, trace_query
 
 
 async def traces(
@@ -21,11 +21,11 @@ async def traces(
         timestamp_to_ns(start, now_ms - 24 * 60 * 60 * 1000),
         timestamp_to_ns(end, now_ms),
         page_limit,
-        "backward",
+        "forward",
     )
     rows = parse_traces(streams, app_id=app_id, limit=page_limit)
     return {
         "traces": rows,
         "has_more": len(rows) >= page_limit,
-        "next_end": previous_ns(rows[-1]["ts"]) if rows else None,
+        "next_start": next_ns(rows[-1]["ts"]) if rows else None,
     }

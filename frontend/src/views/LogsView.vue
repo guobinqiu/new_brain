@@ -50,7 +50,7 @@ const logs = ref([])
 const loading = ref(false)
 const logsBoxRef = ref(null)
 const logsHasMore = ref(false)
-const logsNextEnd = ref(null)
+const logsNextStart = ref(null)
 const timeRange = ref(defaultRange())
 
 function defaultRange() {
@@ -71,7 +71,7 @@ async function loadFilters() {
 async function loadLogs() {
   logs.value = []
   logsHasMore.value = false
-  logsNextEnd.value = null
+  logsNextStart.value = null
   await fetchNextLogs()
 }
 
@@ -83,11 +83,11 @@ async function fetchNextLogs() {
       nodeId: nodeId.value,
       container: container.value,
       range: timeRange.value,
-      end: logsNextEnd.value,
+      start: logsNextStart.value,
     })
     logs.value = logs.value.concat(res.logs || [])
     logsHasMore.value = Boolean(res.has_more)
-    logsNextEnd.value = res.next_end || null
+    logsNextStart.value = res.next_start || null
   } finally {
     loading.value = false
   }

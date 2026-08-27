@@ -21,14 +21,14 @@ def test_loki_parse_logs_returns_rows_in_time_order():
         ]},
     ])
 
-    assert [row["line"] for row in rows] == ['{"level":"INFO","message":"second"}', "plain"]
-    assert rows[0]["parsed"]["message"] == "second"
+    assert [row["line"] for row in rows] == ["plain", '{"level":"INFO","message":"second"}']
+    assert rows[0]["parsed"] is None
     assert rows[0]["node_id"] == "node-1"
     assert rows[0]["container"] == "rag-backend"
-    assert rows[1]["parsed"] is None
+    assert rows[1]["parsed"]["message"] == "second"
 
 
-def test_loki_parse_traces_filters_by_app_id_and_sorts_desc():
+def test_loki_parse_traces_filters_by_app_id_and_sorts_asc():
     from loki_client import parse_traces
 
     rows = parse_traces([
@@ -39,7 +39,7 @@ def test_loki_parse_traces_filters_by_app_id_and_sorts_desc():
         ]},
     ], app_id="a")
 
-    assert [row["query"] for row in rows] == ["new", "old"]
+    assert [row["query"] for row in rows] == ["old", "new"]
     assert rows[0]["created_at"]
 
 

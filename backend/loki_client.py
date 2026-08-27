@@ -69,7 +69,7 @@ def parse_logs(streams: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "line": line,
                 "parsed": _parse_json(line),
             })
-    return sorted(rows, key=lambda row: int(row["ts"]), reverse=True)
+    return sorted(rows, key=lambda row: int(row["ts"]))
 
 
 def parse_traces(streams: list[dict[str, Any]], app_id: str | None = None, limit: int = 500) -> list[dict[str, Any]]:
@@ -87,15 +87,15 @@ def parse_traces(streams: list[dict[str, Any]], app_id: str | None = None, limit
                 "created_at": parsed.get("time") or _format_timestamp(ts),
                 "name": parsed.get("trace_name") or parsed.get("name"),
             })
-    return sorted(rows, key=lambda row: int(row["ts"]), reverse=True)[:limit]
+    return sorted(rows, key=lambda row: int(row["ts"]))[:limit]
 
 
 def ns_from_ms(value: int) -> str:
     return str(value * 1_000_000)
 
 
-def previous_ns(value: str) -> str:
-    return str(max(int(value) - 1, 0))
+def next_ns(value: str) -> str:
+    return str(int(value) + 1)
 
 
 def timestamp_to_ns(value: str | None, default_ms: int) -> str:
