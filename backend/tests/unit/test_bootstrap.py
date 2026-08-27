@@ -76,7 +76,7 @@ def test_application_splits_model_loading_from_runtime_connections():
 def test_application_selects_production_components():
     import bootstrap
     from dense.huggingface import HuggingFaceDense
-    from ocr.rapid import RapidOCR
+    from ocr.paddle import PaddleOCR
     from search.pipeline import SearchPipeline
     from sparse.bm25 import BM25Sparse
     from store.qdrant import QdrantStore
@@ -88,7 +88,7 @@ def test_application_selects_production_components():
     assert isinstance(application.store, QdrantStore)
     assert isinstance(application.search, SearchPipeline)
     assert application.rerank is None
-    assert isinstance(application.ocr, RapidOCR)
+    assert isinstance(application.ocr, PaddleOCR)
     assert application.parser.__class__.__name__ == "ParserService"
 
 

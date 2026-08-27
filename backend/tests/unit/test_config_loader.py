@@ -391,7 +391,7 @@ ocr:
     config = load_app_config()
 
     assert config.ocr.name == "paddle"
-    assert config.ocr.model_path == str(PROJECT_ROOT / "models" / "paddleocr")
+    assert config.ocr.model_path == str(PROJECT_ROOT / "models" / "PaddlePaddle" / "PaddleOCR")
 
 
 def test_load_app_config_supports_tesseract_ocr(monkeypatch, tmp_path):

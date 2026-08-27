@@ -25,15 +25,17 @@ class TestModelPaths:
         assert cf.MODELS_DIR == expected
 
     def test_model_subdirs_exist(self):
-        """DENSE/RERANKER/RAPIDOCR dirs live under MODELS_DIR with correct names."""
+        """Model dirs live under MODELS_DIR with correct names."""
         import config as cf
 
         assert cf.DENSE_MODEL_DIR.startswith(cf.MODELS_DIR)
         assert cf.RERANKER_MODEL_DIR.startswith(cf.MODELS_DIR)
         assert cf.RAPIDOCR_MODEL_DIR.startswith(cf.MODELS_DIR)
+        assert cf.PADDLEOCR_MODEL_DIR.startswith(cf.MODELS_DIR)
         assert cf.DENSE_MODEL_DIR.endswith(os.path.join("AI-ModelScope", "bge-base-zh-v1.5"))
         assert cf.RERANKER_MODEL_DIR.endswith(os.path.join("BAAI", "bge-reranker-base"))
         assert cf.RAPIDOCR_MODEL_DIR.endswith(os.path.join("RapidAI", "RapidOCR"))
+        assert cf.PADDLEOCR_MODEL_DIR.endswith(os.path.join("PaddlePaddle", "PaddleOCR"))
 
     def test_ocr_uses_model_root_dir(self, monkeypatch):
         """RapidOCR constructs RapidOCR with Global.model_root_dir from config."""

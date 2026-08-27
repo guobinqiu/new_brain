@@ -76,7 +76,7 @@ def test_paddle_ocr_logs_loading_message(monkeypatch, caplog):
 
     monkeypatch.setattr(PaddleOCR, "_load_ocr", lambda self: object())
 
-    application = PaddleOCR(model_dir="/models/paddleocr")
+    application = PaddleOCR(model_dir="/models/PaddlePaddle/PaddleOCR")
 
     caplog.set_level("INFO", logger="rag.app")
     application.start()

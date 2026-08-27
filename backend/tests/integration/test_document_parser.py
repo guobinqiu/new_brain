@@ -264,6 +264,46 @@ class TestParserService:
         assert "Word 图片说明" in combined
         assert "Word 图片文字" in combined
 
+    def test_parse_docx_keeps_native_list_paragraphs(self, tmp_path, monkeypatch):
+        import json
+        import parser.mineru
+        from docx import Document
+
+        docx_file = tmp_path / "workflow.docx"
+        doc = Document()
+        doc.add_paragraph("核心工作流")
+        doc.add_paragraph("1. 开发/配置阶段 (离线)")
+        doc.add_paragraph("人 创建新商户目录，编写 （人设）和 （示例）。")
+        doc.add_paragraph("脚本/工具 读取 ，自动编译生成 （JSON Schema）。")
+        doc.add_paragraph("2. 运行阶段 (在线)")
+        doc.add_paragraph("系统启动：")
+        doc.add_paragraph("读取 ，将路由规则加载到内存中。")
+        doc.save(str(docx_file))
+
+        def fake_do_parse(output_dir, filepath, filename, file_type):
+            output_dir = tmp_path / "mineru-output"
+            output_dir.mkdir(exist_ok=True)
+            (output_dir / "workflow_content_list.json").write_text(
+                json.dumps([
+                    {"type": "text", "text": "核心工作流"},
+                    {"type": "text", "text": "1. 开发/配置阶段 (离线)"},
+                    {"type": "text", "text": "2. 运行阶段 (在线)"},
+                ]),
+                encoding="utf-8",
+            )
+
+        monkeypatch.setattr(parser.mineru, "table_parser_available", lambda: True)
+        monkeypatch.setattr(parser.mineru, "load_table_parser", lambda: None)
+        monkeypatch.setattr(parser.mineru.tempfile, "TemporaryDirectory", lambda prefix: _TempDir(tmp_path / "mineru-output"))
+        monkeypatch.setattr(parser.mineru, "_mineru_do_parse", fake_do_parse)
+
+        chunks = _parse_file(str(docx_file))
+
+        combined = "\n".join(chunk["content"] for chunk in chunks)
+        assert "人 创建新商户目录" in combined
+        assert "脚本/工具 读取" in combined
+        assert "读取 ，将路由规则加载到内存中。" in combined
+
     def test_parse_xlsx_table_file(self, tmp_path, monkeypatch):
         import json
         import parser.mineru

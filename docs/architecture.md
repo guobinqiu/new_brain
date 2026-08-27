@@ -427,13 +427,18 @@ backend/
 | `schema.py`          | 校验配置结构和默认值                                                             |
 | `index/`             | 文件索引领域，负责索引请求校验、入队、消费、对象存储下载、解析和写入向量库       |
 | `parser/`           | 文件解析、文本清理、表格归一化和 chunk 生成                                     |
-| `parser/service.py` | Parser 标准解析入口，统一调度具体格式 parser                                   |
-| `parser/text.py`    | 普通文本解析器                                                                  |
+| `parser/service.py` | Parser 生命周期组件                                                             |
+| `parser/document.py` | 文件格式分发入口，调用具体格式 parser                                          |
+| `parser/pdf.py`    | PDF 解析，调用 MinerU 并抽取内嵌图片                                            |
+| `parser/docx.py`   | DOCX 解析，读取正文段落并使用 MinerU 解析表格和图片                            |
+| `parser/excel.py`  | XLSX 解析，调用 MinerU 并抽取内嵌图片                                           |
+| `parser/markdown.py` | Markdown 原生解析                                                              |
+| `parser/image.py`  | 图片文件和 ImageBlock 解析                                                      |
+| `parser/text.py`   | TXT 读取和通用文本 chunk 工具                                                   |
 | `parser/text_splitter.py` | 文本清理和普通文本 chunk 切片工具                                             |
-| `parser/table.py`   | 表格优先解析器组件入口                                                          |
-| `parser/mineru.py`  | MinerU 文档解析适配，负责模型配置、加载和调用 MinerU SDK                      |
+| `parser/mineru.py` | MinerU 文档解析适配，负责模型配置、加载和调用 MinerU SDK                      |
 | `parser/table_transform.py` | 表格结构归一化，把 MinerU JSON/HTML 表格转换为 Markdown 表格文本              |
-| `parser/table_splitter.py` | 表格 chunk 切片，按行边界控制 chunk 大小                                      |
+| `parser/table_splitter.py` | 表格渲染为 Markdown 表格文本                                                  |
 | `dense/`             | 生成 dense 向量                                                                  |
 | `sparse/`            | 执行应用内 sparse 检索，或生成 sparse vector                                     |
 | `store/`             | 连接向量库，负责写入、删除、列表、dense 查询、可选 sparse 查询                   |
@@ -718,25 +723,27 @@ Parser 代码按领域边界拆分：
 ```text
 parser/
 ├── service.py
-│   └── 标准解析入口
+│   └── ParserService：Application 生命周期组件
+├── document.py
+│   └── DocumentParser：按文件类型分发，调用对应 BlockParser 类
 ├── schema.py
-│   └── 统一内部结构：TextBlock / TableBlock / ImageBlock，其中标准图片解析输出 TextBlock / TableBlock
+│   └── 统一内部结构：TextBlock / TableBlock / ImageBlock
 ├── text.py
-│   └── txt / md / docx / xlsx / pdf / image 分发入口
+│   └── TextBlockParser：TXT 读取为 TextBlock；保留通用文本切片工具
+├── pdf.py
+│   └── PdfBlockParser：MinerU 输出 TextBlock / TableBlock，内嵌图片输出 ImageBlock 后展开
 ├── image.py
-│   └── 图片调用 MinerU 输出 TextBlock / TableBlock
+│   └── ImageBlockParser：图片文件和 ImageBlock 调用 MinerU 输出 TextBlock / TableBlock
 ├── markdown.py
-│   └── 原生解析 Markdown 正文和 pipe table，输出 TextBlock / TableBlock
+│   └── MarkdownBlockParser：原生解析 Markdown 正文和 pipe table，图片引用输出 ImageBlock 后展开
 ├── docx.py
-│   └── MinerU 输出 TextBlock / TableBlock
+│   └── DocxBlockParser：python-docx 读取正文顺序和段落，MinerU 解析表格和内嵌图片
 ├── excel.py
-│   └── MinerU 输出 TextBlock / TableBlock
-├── table.py
-│   └── 统一解析入口
+│   └── ExcelBlockParser：MinerU 输出 TextBlock / TableBlock，内嵌图片输出 ImageBlock 后展开
 ├── mineru.py
-│   └── PDF / DOCX / XLSX / 图片解析：MinerU 输出 TextBlock / TableBlock，文档内图片走 image parser
+│   └── MinerU 适配层：调用 MinerU 并读取 content list
 ├── table_transform.py
-│   └── HTML/rows 表格结构 -> Markdown 表格文本
+│   └── MinerU 表格输出转换：HTML/rows -> Markdown 表格文本 -> TableBlock
 ├── normalizer.py
 │   └── blocks 结构纠偏：空块过滤、连续文本合并、章节标题识别
 ├── table_splitter.py
@@ -746,7 +753,7 @@ parser/
 ├── validation.py
 │   └── DOCX / XLSX / PDF / 图片真实格式校验
 └── chunker.py
-    └── TextBlock / ImageBlock / TableBlock -> 最终 chunk document
+    └── TextBlock / TableBlock -> 最终 chunk document
 ```
 
 真实格式校验在具体格式入口执行：DOCX 检查 zip 包和 Word 目录结构；XLSX 检查 zip 包和 Excel 目录结构；PDF 在解析前用 PyMuPDF 打开验证；图片在交给 MinerU 前用 Pillow `Image.verify()` 验证。TXT / Markdown 按文本格式处理，校验重点是可读取且非空。
@@ -755,33 +762,26 @@ parser/
 
 ```text
 文件
-└── 格式 parser
-    └── blocks[]
-        ├── TextBlock(text)
-        └── TableBlock(text)
-                ↓
-            normalizer
-                ├── 合并连续 TextBlock
-                ├── 章节标题标记为 TextBlock(kind=section_title)
-                └── 保留 TableBlock 边界
-                ↓
-            chunker
-                ├── TextBlock -> text chunk
-                ├── TableBlock -> table chunk
-                ├── 表格 header：使用前一个完整 TextBlock
-                └── 表格 footer：使用后一个完整 TextBlock
-                ↓
-            chunk document
-            ├── content：检索正文
-            ├── id：chunk UUID
-            └── metadata
-                ├── filename
-                └── chunk_index
+└── DocumentParser
+    ├── PDF：MinerU -> TextBlock / TableBlock，内嵌图片 -> ImageBlock -> MinerU
+    ├── DOCX：python-docx -> TextBlock，MinerU -> TableBlock，内嵌图片 -> ImageBlock -> MinerU
+    ├── XLSX：MinerU -> TextBlock / TableBlock，内嵌图片 -> ImageBlock -> MinerU
+    ├── 图片：MinerU -> TextBlock / TableBlock
+    ├── Markdown：原生 parser -> TextBlock / TableBlock，图片引用 -> ImageBlock -> MinerU
+    └── TXT：文本读取 -> TextBlock
+        ↓
+    TextBlock / TableBlock
+        ↓
+    normalizer
+        ↓
+    chunker
+        ↓
+    chunk document(content, id, metadata)
 ```
 
 图片文件和文档内嵌图片使用 MinerU 解析，解析结果同样进入统一 `TextBlock` / `TableBlock` 管线。图片里的普通文字会作为 text chunk 写入；图片里的表格如果 MinerU 输出表格结构，则转换为完整 table chunk。
 
-Markdown 由原生 parser 读取正文和标准 pipe table；PDF、Word、Excel 和图片由 MinerU 输出结构化 content list。系统把表格 HTML 或 rows 解析成统一行列结构，再转换成 Markdown 表格文本。这样可以复用同一套表格切片逻辑，避免 Markdown、Word、Excel、PDF 和图片各写一套表格处理代码。
+Markdown 由原生 parser 读取正文和标准 pipe table；PDF、Excel 和图片由 MinerU 输出结构化 content list。DOCX 正文段落由 python-docx 按 Word body 顺序读取，表格仍使用 MinerU 输出。系统把表格 HTML 或 rows 解析成统一行列结构，再转换成 Markdown 表格文本。这样可以复用同一套表格切片逻辑，避免 Markdown、Word、Excel、PDF 和图片各写一套表格处理代码。
 
 MinerU 是 PDF、Word、Excel 和图片的结构化解析实现细节，不作为独立业务 parser 暴露。
 

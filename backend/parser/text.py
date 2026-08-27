@@ -1,8 +1,9 @@
 import uuid
 
 from langchain_community.document_loaders import TextLoader
-from schema import ParserConfig
-
+from ocr.base import OCR
+from parser.base import BlockParser
+from parser.schema import Block, TextBlock
 from parser.text_splitter import clean_cjk_spaces, split_text
 
 LOADERS = {
@@ -15,11 +16,22 @@ def chunk_text(text: str, filename: str, chunk_size: int = 500, overlap: int = 8
     return chunks_to_documents(split_text(text, chunk_size=chunk_size, overlap=overlap), filename)
 
 
-def load_text_chunks(filepath: str, ext: str, filename: str, parser_config: ParserConfig) -> list[str]:
-    text = clean_cjk_spaces(_load_text(filepath, ext, filename))
-    if not text.strip():
-        raise ValueError(f"Empty file: {filename}")
-    return split_text(text, parser_config.chunk_size, parser_config.chunk_overlap)
+class TextBlockParser(BlockParser):
+    def parse(self, filepath: str, ocr: OCR | None = None) -> list[Block]:
+        ext = ".txt"
+        filename = filepath.rsplit("/", 1)[-1]
+        text = clean_cjk_spaces(self._load_text(filepath, ext, filename))
+        if not text.strip():
+            raise ValueError(f"Empty file: {filename}")
+        chunks = split_text(text, self.parser_config.chunk_size, self.parser_config.chunk_overlap)
+        return [TextBlock(text) for text in chunks]
+
+    def _load_text(self, filepath: str, ext: str, filename: str) -> str:
+        loader_cls = LOADERS[ext]
+        docs = loader_cls(filepath).load()
+        if not docs or not docs[0].page_content.strip():
+            raise ValueError(f"Empty file: {filename}")
+        return "\n".join(doc.page_content for doc in docs)
 
 
 def chunks_to_documents(chunks: list[str], filename: str) -> list[dict]:
@@ -38,10 +50,3 @@ def chunks_to_documents(chunks: list[str], filename: str) -> list[dict]:
         })
     return results
 
-
-def _load_text(filepath: str, ext: str, filename: str) -> str:
-    loader_cls = LOADERS[ext]
-    docs = loader_cls(filepath).load()
-    if not docs or not docs[0].page_content.strip():
-        raise ValueError(f"Empty file: {filename}")
-    return "\n".join(doc.page_content for doc in docs)

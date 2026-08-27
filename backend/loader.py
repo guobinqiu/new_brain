@@ -83,9 +83,9 @@ def _resolve_model_paths(raw: dict) -> None:
     _resolve_component(raw, "ocr", {
         "test_ocr": "ocr",
         "rapid": "RapidAI/RapidOCR",
-        "paddle": "paddleocr",
+        "paddle": "PaddlePaddle/PaddleOCR",
         "rapidocr": "RapidAI/RapidOCR",
-        "paddleocr": "paddleocr",
+        "paddleocr": "PaddlePaddle/PaddleOCR",
         "tesseract": "tesseract",
     })
 
