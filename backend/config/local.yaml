@@ -9,6 +9,9 @@ logging:
   max_bytes: 10485760
   backup_count: 5
   search_trace: true
+api:
+  rate_limit: 120/minute
+  rate_limit_index: 10/minute
 auth:
   admin:
     username: admin

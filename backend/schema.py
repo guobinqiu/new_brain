@@ -102,6 +102,12 @@ class LoggingConfig:
 
 
 @dataclass(frozen=True)
+class ApiConfig:
+    rate_limit: str = "120/minute"
+    rate_limit_index: str = "10/minute"
+
+
+@dataclass(frozen=True)
 class AdminAuthConfig:
     username: str
     password: str
@@ -141,6 +147,7 @@ class AppConfig:
     auth: AuthConfig
     parser: ParserConfig = field(default_factory=ParserConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
+    api: ApiConfig = field(default_factory=ApiConfig)
     available_components: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     name: str = ""
 
@@ -155,6 +162,7 @@ def parse_app_config(raw: dict[str, Any]) -> AppConfig:
     parser_text = parser.get("text") or {}
     parser_table = parser.get("table") or {}
     logging = raw.get("logging") or {}
+    api = raw.get("api") or {}
     auth = raw.get("auth") or {}
     rerank = raw.get("rerank")
     ocr = raw.get("ocr")
@@ -248,6 +256,10 @@ def parse_app_config(raw: dict[str, Any]) -> AppConfig:
             max_bytes=int(logging.get("max_bytes", 10485760)),
             backup_count=int(logging.get("backup_count", 5)),
             search_trace=bool(logging.get("search_trace", True)),
+        ),
+        api=ApiConfig(
+            rate_limit=str(api.get("rate_limit", "120/minute")),
+            rate_limit_index=str(api.get("rate_limit_index", "10/minute")),
         ),
         auth=AuthConfig(
             admin=AdminAuthConfig(

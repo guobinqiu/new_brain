@@ -336,6 +336,18 @@ logging:
 
 Docker 运行时由 Docker `json-file` driver 按大小滚动容器 stdout 日志。集中日志写入 Loki，默认保留 30 天；Docker 本地日志只做短期兜底。
 
+## API 限流
+
+对外 open API 的限流由配置文件里的 `api` 控制：
+
+```yaml
+api:
+  rate_limit: 120/minute
+  rate_limit_index: 10/minute
+```
+
+`rate_limit` 用于普通 open API，`rate_limit_index` 用于同步索引接口 `/api/open/files`。
+
 ## 数据目录
 
 本地数据目录按数据库产品分组：

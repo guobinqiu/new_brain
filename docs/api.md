@@ -239,6 +239,7 @@ Content-Type: application/json
 | 403 | 请求体 `app_id` 与签名 `X-App-Id` 不一致（`app_id is not allowed`） |
 | 409 | 目标 app 数据库未初始化（`app database is not initialized`） |
 | 422 | 请求体校验失败：缺 `presigned_url`/`s3_url`、`s3_url` 不以 `s3://` 开头、`file_id` 不是 UUID 或长度不在 1..64、包含未定义字段 |
+| 429 | 请求过于频繁，超过 `api.rate_limit_index` |
 | 500 | 下载或索引处理失败（如 `presigned_url` 失效、文件解析异常） |
 | 503 | 应用未完成初始化（`search is not initialized`） |
 
@@ -348,6 +349,8 @@ open 侧（外部上游）的 `file_id` 保持可选：外部文件不经过 `/a
 POST /api/open/search
 Content-Type: application/json
 ```
+
+超过 `api.rate_limit` 时返回 429。
 
 请求字段：
 

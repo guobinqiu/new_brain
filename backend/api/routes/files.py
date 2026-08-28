@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 
+from api.rate_limit import require_index_rate_limit, require_rate_limit
 from api.services.auth import require_aksk, require_jwt
 from api.schemas import AdminIndexJobRequest, ChunksQueryRequest, ObjectIndexRequest, PresignRequest
 from api.services import files as service
@@ -17,7 +18,7 @@ async def upload_file(
     return await service.upload_file(file, app_id, principal)
 
 
-@router.post("/api/open/files")
+@router.post("/api/open/files", dependencies=[Depends(require_index_rate_limit)])
 def client_index_object(req: ObjectIndexRequest, principal=Depends(require_aksk)):
     return service.client_index_object(req, principal)
 
@@ -52,7 +53,7 @@ def chunks(req: ChunksQueryRequest, principal=Depends(require_jwt)):
     return service.chunks(req, principal)
 
 
-@router.delete("/api/open/files/{file_id}")
+@router.delete("/api/open/files/{file_id}", dependencies=[Depends(require_rate_limit)])
 def client_delete_file(file_id: str, principal=Depends(require_aksk)):
     return service.client_delete_file(file_id, principal)
 

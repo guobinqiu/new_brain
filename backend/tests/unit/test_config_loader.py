@@ -27,6 +27,8 @@ def test_load_app_config_loads_local_config(monkeypatch):
     assert config.dense.import_path == "dense.huggingface.HuggingFaceDense"
     assert config.sparse.import_path == "sparse.bm25.BM25Sparse"
     assert config.store.import_path == "store.qdrant.QdrantStore"
+    assert config.api.rate_limit == "120/minute"
+    assert config.api.rate_limit_index == "10/minute"
     assert config.rerank is None
     assert config.ocr.import_path == "ocr.paddle.PaddleOCR"
 
@@ -64,6 +66,9 @@ logging:
   max_bytes: 2048
   backup_count: 3
   search_trace: false
+api:
+  rate_limit: 60/minute
+  rate_limit_index: 5/minute
 rerank: test_rerank
 ocr: test_ocr
 """,
@@ -90,6 +95,8 @@ ocr: test_ocr
     assert config.logging.max_bytes == 2048
     assert config.logging.backup_count == 3
     assert config.logging.search_trace is False
+    assert config.api.rate_limit == "60/minute"
+    assert config.api.rate_limit_index == "5/minute"
 
 
 def test_load_app_config_supports_nested_parser_config(monkeypatch, tmp_path):
