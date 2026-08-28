@@ -5,8 +5,73 @@ x-json-logging: &json-logging
     max-file: "5"
 
 services:
-  backend:
-    image: rag-backend:cpu
+  postgres:
+    image: postgres:16-alpine
+    container_name: brain-postgres
+    labels:
+      logging: loki
+    env_file:
+      - ../.env
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rag -d rag"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    ports:
+      - "5432:5432"
+    volumes:
+      - ../../pg_data:/var/lib/postgresql/data
+    logging: *json-logging
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:v1.18.3
+    container_name: brain-qdrant
+    labels:
+      logging: loki
+    env_file:
+      - ../.env
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - ../../qdrant_data:/qdrant/storage
+    logging: *json-logging
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:RELEASE.2024-05-28T17-19-04Z
+    container_name: brain-minio
+    labels:
+      logging: loki
+    env_file:
+      - ../.env
+    command: minio server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - ../../minio_data:/data
+    logging: *json-logging
+    restart: unless-stopped
+
+  loki:
+    image: grafana/loki:3.4.1
+    container_name: brain-loki
+    env_file:
+      - ../.env
+    command: -config.file=/etc/loki/config.yml
+    ports:
+      - "3100:3100"
+    volumes:
+      - ../../deploy/monitor/loki-config.yml:/etc/loki/config.yml:ro
+      - ../../loki_data:/loki
+    logging: *json-logging
+    restart: unless-stopped
+
+  rag:
+    image: brain-rag:cpu
+    pull_policy: build
     build:
       context: ../..
       dockerfile: deploy/cpu/Dockerfile
@@ -15,42 +80,79 @@ services:
         APT_MIRROR: ${APT_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/debian}
         APT_SECURITY_MIRROR: ${APT_SECURITY_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/debian-security}
         UV_DEFAULT_INDEX_CN: ${UV_DEFAULT_INDEX_CN:-https://pypi.tuna.tsinghua.edu.cn/simple}
-    container_name: rag-backend
+        UV_HTTP_TIMEOUT: ${UV_HTTP_TIMEOUT:-120}
+    container_name: brain-rag
     labels:
       logging: loki
     env_file:
       - ../.env
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
       - "6000:6000"
     volumes:
-      - ../../backend:/app/backend
-      - ../../models:/app/models:ro
+      - ../../rag:/app/rag
+      - ../../auth:/app/auth:ro
+      - ../../models:/app/models
       - ../../chroma_data:/app/chroma_data
       - ../../milvus_data/lite:/app/milvus_data/lite
-      - ../../backend/.uv-cache-docker:/root/.cache/uv
+      - ../../rag/.uv-cache-docker:/root/.cache/uv
     logging: *json-logging
     restart: unless-stopped
 
-  frontend:
-    image: node:22-bookworm-slim
-    container_name: rag-frontend
+  llm:
+    image: brain-llm:dev
+    pull_policy: build
+    build:
+      context: ../..
+      dockerfile: llm/Dockerfile
+      args:
+        USE_CN_MIRROR: ${USE_CN_MIRROR:-false}
+    container_name: brain-llm
     labels:
       logging: loki
-    working_dir: /app/frontend
+    env_file:
+      - ../.env
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      RAG_BASE_URL: http://rag:6000
+      LANGCHAIN_API_KEY: ${LANGSMITH_API_KEY}
+      LANGCHAIN_ENDPOINT: ${LANGSMITH_ENDPOINT}
+      LANGCHAIN_PROJECT: ${LLM_LANGSMITH_PROJECT}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "6001:6001"
+    volumes:
+      - ../../llm/src:/app/llm/src
+      - ../../llm/tests:/app/llm/tests
+      - ../../rag:/app/rag:ro
+      - ../../auth:/app/auth:ro
+    logging: *json-logging
+    restart: unless-stopped
+
+  webui:
+    image: node:22-bookworm-slim
+    container_name: brain-webui
+    labels:
+      logging: loki
+    working_dir: /app/webui
     env_file:
       - ../.env
     command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+    ports:
+      - "5173:5173"
     volumes:
-      - ../../frontend:/app/frontend
-      - ../../frontend/.node_modules-docker:/app/frontend/node_modules
+      - ../../webui:/app/webui
+      - ../../webui/.node_modules-docker:/app/webui/node_modules
     logging: *json-logging
     restart: unless-stopped
 
   nginx:
     image: nginx:1.27-alpine
-    container_name: rag-nginx
+    container_name: brain-nginx
     labels:
       logging: loki
     env_file:
@@ -59,20 +161,56 @@ services:
       - "5175:80"
     volumes:
       - ../../deploy/nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
-    depends_on:
-      - backend
-      - frontend
     logging: *json-logging
     restart: unless-stopped
 
   promtail:
     image: grafana/promtail:3.4.1
-    container_name: rag-promtail
+    container_name: brain-promtail
     env_file:
       - ../.env
     command: -config.file=/etc/promtail/config.yml -config.expand-env=true
     volumes:
       - ../../deploy/monitor/promtail-config.yml:/etc/promtail/config.yml:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
+    logging: *json-logging
+    restart: unless-stopped
+
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.25
+    container_name: brain-etcd
+    labels:
+      logging: loki
+    profiles:
+      - milvus
+    env_file:
+      - ../.env
+    command: >
+      etcd
+      -advertise-client-urls=http://etcd:2379
+      -listen-client-urls http://0.0.0.0:2379
+      --data-dir /etcd
+    volumes:
+      - ../../milvus_data/standalone/etcd:/etcd
+    logging: *json-logging
+    restart: unless-stopped
+
+  milvus:
+    image: milvusdb/milvus:v2.6.20
+    container_name: brain-milvus
+    labels:
+      logging: loki
+    profiles:
+      - milvus
+    command: ["milvus", "run", "standalone"]
+    security_opt:
+      - seccomp:unconfined
+    env_file:
+      - ../.env
+    ports:
+      - "19530:19530"
+      - "9091:9091"
+    volumes:
+      - ../../milvus_data/standalone/milvus:/var/lib/milvus
     logging: *json-logging
     restart: unless-stopped

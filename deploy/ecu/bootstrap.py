@@ -13,7 +13,7 @@ def init_ecu() -> None:
 
 
 if __name__ == "__main__":
-    os.chdir("/app/backend")
-    sys.path.insert(0, "/app/backend")
+    os.chdir("/app/rag")
+    sys.path.insert(0, "/app/rag")
     init_ecu()
-    uvicorn.run("main:app", host="0.0.0.0", port=6000)
+    uvicorn.run("rag.main:app", host="0.0.0.0", port=6000)

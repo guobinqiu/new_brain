@@ -36,7 +36,7 @@ download_snapshot() {
   fi
 
   mkdir -p "$dir"
-  "$ROOT_DIR/backend/.venv/bin/modelscope" download "$repo" --local-dir "$dir"
+  "$ROOT_DIR/rag/.venv/bin/modelscope" download "$repo" --local-dir "$dir"
 }
 
 download_dense() {
@@ -67,7 +67,7 @@ download_mineru() {
   local dir="$MODELS_DIR/mineru"
   echo "下载 MinerU 模型: pipeline -> $dir/pipeline"
   mkdir -p "$dir"
-  "$ROOT_DIR/backend/.venv/bin/python" - "$dir" <<'PY'
+  "$ROOT_DIR/rag/.venv/bin/python" - "$dir" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -82,7 +82,7 @@ config = {
 }
 (mineru_dir / "mineru.json").write_text(json.dumps(config, ensure_ascii=False, indent=4) + "\n", encoding="utf-8")
 PY
-  MINERU_TOOLS_CONFIG_JSON="$dir/mineru.json" "$ROOT_DIR/backend/.venv/bin/mineru-models-download" -s modelscope -m pipeline
+  MINERU_TOOLS_CONFIG_JSON="$dir/mineru.json" "$ROOT_DIR/rag/.venv/bin/mineru-models-download" -s modelscope -m pipeline
 }
 
 download_one() {
@@ -133,7 +133,7 @@ main() {
 
   echo "安装模型下载工具"
   curl -LsSf https://astral.sh/uv/install.sh | sh && source "$HOME/.local/bin/env"
-  (cd "$ROOT_DIR/backend" && uv venv .venv && uv pip install modelscope "mineru[core]")
+  (cd "$ROOT_DIR/rag" && uv venv .venv && uv pip install modelscope "mineru[core]")
 
   mkdir -p "$MODELS_DIR"
   echo "模型目录: $MODELS_DIR"

@@ -4,9 +4,11 @@ ARG USE_CN_MIRROR=false
 ARG APT_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/debian
 ARG APT_SECURITY_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/debian-security
 ARG UV_DEFAULT_INDEX_CN=https://pypi.tuna.tsinghua.edu.cn/simple
+ARG UV_HTTP_TIMEOUT=120
 
 ENV PYTHONUNBUFFERED=1
 ENV UV_PROJECT_ENVIRONMENT=/app/.venv
+ENV UV_HTTP_TIMEOUT=${UV_HTTP_TIMEOUT}
 
 RUN if [ "$USE_CN_MIRROR" = "true" ]; then \
         sed -i \
@@ -24,13 +26,13 @@ RUN if [ "$USE_CN_MIRROR" = "true" ]; then \
         tesseract-ocr-eng \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app/backend
+WORKDIR /app
 
-COPY backend/pyproject.toml backend/uv.lock ./
+COPY rag/pyproject.toml rag/uv.lock /app/rag/
 RUN if [ "$USE_CN_MIRROR" = "true" ]; then \
-        UV_DEFAULT_INDEX="$UV_DEFAULT_INDEX_CN" uv sync --extra cpu; \
+        cd /app/rag && UV_DEFAULT_INDEX="$UV_DEFAULT_INDEX_CN" uv sync --no-install-project --extra cpu; \
     else \
-        uv sync --extra cpu; \
+        cd /app/rag && uv sync --no-install-project --extra cpu; \
     fi
 
-CMD ["/app/.venv/bin/uvicorn", "main:app", "--host", "0.0.0.0", "--port", "6000", "--reload"]
+CMD ["/app/.venv/bin/uvicorn", "rag.main:app", "--host", "0.0.0.0", "--port", "6000", "--reload"]

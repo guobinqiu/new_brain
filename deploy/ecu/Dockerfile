@@ -4,9 +4,11 @@ ARG USE_CN_MIRROR=false
 ARG APT_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/debian
 ARG APT_SECURITY_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/debian-security
 ARG UV_DEFAULT_INDEX_CN=https://pypi.tuna.tsinghua.edu.cn/simple
+ARG UV_HTTP_TIMEOUT=120
 
 ENV PYTHONUNBUFFERED=1
 ENV UV_PROJECT_ENVIRONMENT=/app/.venv
+ENV UV_HTTP_TIMEOUT=${UV_HTTP_TIMEOUT}
 ENV UV_SKIP_WHEEL_FILENAME_CHECK=1
 ENV LD_LIBRARY_PATH=/opt/rivs/lib:${LD_LIBRARY_PATH}
 
@@ -26,14 +28,14 @@ RUN if [ "$USE_CN_MIRROR" = "true" ]; then \
         tesseract-ocr-eng \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app/backend
+WORKDIR /app
 
-COPY deploy/ecu/pyproject.toml ./
+COPY deploy/ecu/pyproject.toml /app/rag/pyproject.toml
 COPY --from=ecu_wheels . /tmp/ecu_wheels
 RUN if [ "$USE_CN_MIRROR" = "true" ]; then \
-        UV_DEFAULT_INDEX="$UV_DEFAULT_INDEX_CN" uv sync --no-install-project; \
+        cd /app/rag && UV_DEFAULT_INDEX="$UV_DEFAULT_INDEX_CN" uv sync --no-install-project; \
     else \
-        uv sync --no-install-project; \
+        cd /app/rag && uv sync --no-install-project; \
     fi \
     && uv pip install --no-deps /tmp/ecu_wheels/*.whl \
     && rm -rf /tmp/ecu_wheels

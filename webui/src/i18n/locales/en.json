@@ -1,0 +1,181 @@
+{
+  "app": {
+    "title": "RAG Search",
+    "desc": "Upload documents, filter by file scope, and search with Dense, Sparse, or Hybrid retrieval."
+  },
+  "theme": {
+    "light": "Light",
+    "dark": "Dark"
+  },
+  "nav": {
+    "upload": "Upload",
+    "database": "Database",
+    "search": "Search",
+    "trace": "Trace",
+    "monitor": "Monitor",
+    "logs": "Logs",
+    "config": "Config",
+    "apps": "Apps",
+    "llm": "LLM"
+  },
+  "auth": {
+    "title": "Sign in",
+    "desc": "Access the RAG console",
+    "username": "Username",
+    "password": "Password",
+    "login": "Sign in",
+    "logout": "Sign out"
+  },
+  "common": {
+    "all": "All",
+    "refresh": "Refresh",
+    "loading": "Loading",
+    "loadMore": "Load more",
+    "copy": "Copy",
+    "delete": "Delete",
+    "deleting": "Deleting",
+    "search": "Query",
+    "actions": "Actions",
+    "startTime": "Start time",
+    "endTime": "End time"
+  },
+  "search": {
+    "topK": "Top K",
+    "rerank": "Rerank",
+    "fetchK": "Fetch K",
+    "fetchKTitle": "Candidate count sent into retrieval/rerank",
+    "placeholder": "Enter a search query...",
+    "fileIdsPlaceholder": "Comma-separated file_id values; leave empty to search all files",
+    "submit": "Search",
+    "searching": "Searching",
+    "resultCount": "{count} results",
+    "mode": "Mode",
+    "files": "Files",
+    "score": "Score",
+    "balance": "Balance",
+    "elapsed": "Elapsed",
+    "noResults": "No matching results",
+    "noResultsHint": "Try another search mode or adjust the Sparse / Dense balance"
+  },
+  "upload": {
+    "choose": "Choose documents",
+    "hint": "Drop files here · PDF / TXT / MD / DOCX / XLSX / PNG / JPG / JPEG / WEBP / BMP.",
+    "submit": "Upload",
+    "uploading": "Uploading",
+    "files": "Uploaded files",
+    "empty": "No uploaded files",
+    "indexSubmitted": "{count} file(s) indexed.",
+    "selectApp": "Select an app first",
+    "deletedFile": "{name} deleted"
+  },
+  "monitor": {
+    "title": "Runtime",
+    "components": "Components",
+    "traces": "Trace",
+    "noTraces": "No searches yet",
+    "noAppSelected": "Select an app first"
+  },
+  "cluster": {
+    "desc": "Runtime status for all rag nodes",
+    "configDesc": "Active configuration for all rag nodes",
+    "allNodes": "All nodes",
+    "unreachable": "Unreachable",
+    "configDrift": "Config drift"
+  },
+  "status": {
+    "ready": "Ready",
+    "loading": "Loading",
+    "disabled": "Off",
+    "error": "Error"
+  },
+  "database": {
+    "title": "Database",
+    "location": "Location",
+    "chunks": "Vector data",
+    "app": "App",
+    "initialize": "Initialize database",
+    "initialized": "{appId} database initialized",
+    "delete": "Delete database",
+    "deleted": "{appId} database deleted",
+    "deleteConfirm": "Delete database for {appId}?",
+    "query": "Query",
+    "fileIds": "File IDs",
+    "fileIdsPlaceholder": "Separate file_id values with commas",
+    "chunkId": "Chunk ID",
+    "fileId": "File ID",
+    "s3Url": "S3 URL",
+    "filename": "Filename",
+    "createdAt": "Created at",
+    "chunkIndex": "Chunk index",
+    "content": "Content",
+    "empty": "No vector data"
+  },
+  "trace": {
+    "title": "Trace",
+    "desc": "Stage timings for recent search requests",
+    "empty": "No searches yet",
+    "columns": {
+      "time": "Time",
+      "query": "Query",
+      "mode": "Mode",
+      "topK": "Top K",
+      "elapsed": "Elapsed",
+      "prepare": "Prepare",
+      "dense": "Dense",
+      "sparse": "Sparse",
+      "fusion": "Fusion",
+      "dedupe": "Dedupe",
+      "rerank": "Rerank",
+      "format": "Format"
+    },
+    "modeValues": {
+      "dense": "Dense",
+      "sparse": "Sparse",
+      "hybrid": "Hybrid"
+    }
+  },
+  "logs": {
+    "title": "Logs",
+    "desc": "Container logs from all nodes",
+    "allContainers": "All services",
+    "empty": "No logs yet",
+    "columns": {
+      "time": "Time",
+      "level": "Level",
+      "logger": "Logger",
+      "event": "Event",
+      "message": "Message"
+    }
+  },
+  "config": {
+    "title": "Config",
+    "searchDefaults": "Search defaults",
+    "components": "Components",
+    "parser": "Parser",
+    "storage": "Storage path"
+  },
+  "apps": {
+    "title": "Apps",
+    "desc": "Manage upstream app_id and AK/SK credentials",
+    "appIdPlaceholder": "Start with a letter. Letters, numbers, underscore only",
+    "appIdRule": "app_id must start with a letter, be 2-64 chars, and contain only letters, numbers, or underscore",
+    "create": "Create app",
+    "created": "{appId} created",
+    "deleted": "{appId} deleted",
+    "deleteConfirm": "Delete AK/SK for {appId}?",
+    "current": "Current app",
+    "enter": "Enter",
+    "empty": "No apps"
+  },
+  "llm": {
+    "title": "LLM",
+    "thread": "Thread",
+    "newConversation": "New conversation",
+    "empty": "No messages",
+    "user": "User",
+    "assistant": "Assistant",
+    "placeholder": "Ask a question...",
+    "send": "Send",
+    "responding": "Responding"
+  }
+}

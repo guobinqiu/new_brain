@@ -13,28 +13,27 @@ just models all
 1. 启动 Qdrant、MinIO 和 PostgreSQL：
 
 ```bash
-docker compose -f deploy/svc/docker-compose.yml up -d qdrant minio postgres
+just svc up
 ```
 
-2. 启动后端：
+2. 启动 RAG 后端：
 
 ```bash
-cd backend
-S3_ENDPOINT_URL=http://localhost:9000 CONFIG_FILE=local.yaml .venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 6000
+S3_ENDPOINT_URL=http://localhost:9000 CONFIG_FILE=local.yaml rag/.venv/bin/python -m uvicorn rag.main:app --host 0.0.0.0 --port 6000
 ```
 
-3. 启动前端：
+3. 启动 LLM 后端：
 
 ```bash
-cd frontend
+OPENAI_API_KEY=dummy OPENAI_BASE_URL=http://19.16.1.233:8000/v1 MODEL_NAME=vllm DATABASE_URL=postgresql://rag:rag@localhost:5432/rag RAG_BASE_URL=http://localhost:6000 llm/.venv/bin/python -m uvicorn llm.src.main:app --host 0.0.0.0 --port 6001
+```
+
+4. 启动前端：
+
+```bash
+cd webui
 npm install
-npm run dev -- --host 0.0.0.0 --port 5175
-```
-
-访问地址：
-
-```text
-http://localhost:5175
+npm run dev -- --host 0.0.0.0 --port 5173
 ```
 
 ## Docker 启动
@@ -51,11 +50,22 @@ cp deploy/.env.example deploy/.env
 just svc up
 ```
 
+单独启停服务：
+
+```bash
+just postgres up
+just qdrant up
+just minio up
+just loki up
+just nginx up
+just promtail up
+```
+
 CPU 应用节点：
 
 ```bash
-just rag cpu build
-just rag cpu up
+just rag build cpu
+just rag up cpu
 ```
 
 GPU 应用节点：
@@ -67,52 +77,34 @@ CONFIG_FILE=docker-gpu.yaml
 ```
 
 ```bash
-just rag gpu build
-just rag gpu up
+just rag build gpu
+just rag up gpu
 ```
 
 国内网络构建时可以加镜像开关：
 
 ```bash
-USE_CN_MIRROR=true just rag cpu build
-USE_CN_MIRROR=true just rag gpu build
+USE_CN_MIRROR=true just rag build cpu
+USE_CN_MIRROR=true just rag build gpu
 ```
 
 停止：
 
 ```bash
 just svc down
-just rag cpu down
-just rag gpu down
+just rag down
+just llm down
+just webui down
 ```
 
 重启：
 
 ```bash
 just svc restart
-just rag cpu restart
-just rag gpu restart
+just rag restart
+just llm restart
+just webui restart
 ```
-
-Docker 前端访问地址：
-
-```text
-http://<服务器地址>
-```
-
-Docker API 地址：
-
-```text
-http://<服务器地址>/api
-```
-
-多节点监控和日志：
-
-- `/api` 由 Nginx 负载均衡到 backend 节点。
-- 管理台通过 `/api/nodes/monitor` 和 `/api/nodes/config` 聚合所有节点状态。
-- 日志页通过后端接口查询集中日志。
-- 共享依赖只部署一套；主服务节点运行入口服务，计算节点只运行 backend 和日志采集。
-- 节点差异写在各节点 `deploy/.env`：`RAG_NODE_ID` 标识当前节点，`DATABASE_URL`、`QDRANT_URL`、`S3_ENDPOINT_URL` 和 `LOKI_URL` 指向共享依赖所在节点的 IP 或域名。
 
 ## API
 
@@ -120,11 +112,12 @@ http://<服务器地址>/api
 
 总览：
 
-| 方法 | 路径 | 说明 |
-|---|---|---|
-| `POST` | `/api/open/files` | 同步索引对象存储文件，完成后返回 `file_id` |
-| `POST` | `/api/open/search` | 按 `query` 和可选 `file_ids` 搜索知识库 |
-| `DELETE` | `/api/open/files/{file_id}` | 删除当前应用向量库中的索引文件 |
+| 方法     | 路径                        | 说明                                       |
+| -------- | --------------------------- | ------------------------------------------ |
+| `POST`   | `/api/open/files`           | 同步索引对象存储文件，完成后返回 `file_id` |
+| `POST`   | `/api/open/search`          | 按 `query` 和可选 `file_ids` 搜索知识库    |
+| `POST`   | `/api/open/llm/chat/stream` | 流式 RAG 问答                              |
+| `DELETE` | `/api/open/files/{file_id}` | 删除当前应用向量库中的索引文件             |
 
 索引接口接收 `presigned_url`、`s3_url`、可选 `filename` 和可选 `file_id`。上游传 `file_id` 时服务端原样保存，推荐使用 UUID；不传时由 RAG 生成 UUID。搜索时不传 `file_ids` 表示全库搜索。
 
@@ -134,12 +127,12 @@ http://<服务器地址>/api
 
 请求头：
 
-| Header | 说明 |
-|---|---|
-| `X-App-Id` | 调用方应用 ID |
+| Header         | 说明                    |
+| -------------- | ----------------------- |
+| `X-App-Id`     | 调用方应用 ID           |
 | `X-Access-Key` | 管理台创建的 access_key |
-| `X-Timestamp` | Unix 秒级时间戳 |
-| `X-Signature` | HMAC-SHA256 签名 hex |
+| `X-Timestamp`  | Unix 秒级时间戳         |
+| `X-Signature`  | HMAC-SHA256 签名 hex    |
 
 签名算法见 [API 文档](docs/api.md)。
 
@@ -149,12 +142,12 @@ http://<服务器地址>/api
 
 请求字段：
 
-| 字段 | 类型 | 必填 | 说明 |
-|---|---|---|---|
-| `presigned_url` | string | 是 | RAG 下载文件用的预签名 URL |
-| `s3_url` | string | 是 | 稳定对象存储地址，写入 chunk metadata 用于追溯 |
-| `filename` | string | 否 | 展示文件名；不传时从 `s3_url` 推导 |
-| `file_id` | string | 否 | 上游指定的文件 ID，推荐使用 UUID；不传时由 RAG 生成 UUID |
+| 字段            | 类型   | 必填 | 说明                                                     |
+| --------------- | ------ | ---- | -------------------------------------------------------- |
+| `presigned_url` | string | 是   | RAG 下载文件用的预签名 URL                               |
+| `s3_url`        | string | 是   | 稳定对象存储地址，写入 chunk metadata 用于追溯           |
+| `filename`      | string | 否   | 展示文件名；不传时从 `s3_url` 推导                       |
+| `file_id`       | string | 否   | 上游指定的文件 ID，推荐使用 UUID；不传时由 RAG 生成 UUID |
 
 请求：
 
@@ -181,17 +174,17 @@ http://<服务器地址>/api
 
 请求字段：
 
-| 字段 | 类型 | 必填 | 说明 |
-|---|---|---|---|
-| `query` | string | 是 | 搜索问题 |
-| `mode` | string | 否 | `dense` / `sparse` / `hybrid`，不传使用服务默认值 |
-| `top_k` | integer | 否 | 最多返回条数，不传使用服务默认值 |
-| `fetch_k` | integer | 否 | 检索候选数量，不传使用服务默认值 |
-| `rerank` | boolean | 否 | 是否启用重排，不传使用服务默认值 |
-| `dense_weight` | number | 否 | hybrid 模式 dense 权重，不传使用服务默认值 |
-| `sparse_weight` | number | 否 | hybrid 模式 sparse 权重，不传使用服务默认值 |
-| `rrf_k` | integer | 否 | RRF 融合参数，不传使用服务默认值 |
-| `file_ids` | string[] | 否 | 文件 ID 过滤；不传表示搜索当前 app 的整个 collection |
+| 字段            | 类型     | 必填 | 说明                                                 |
+| --------------- | -------- | ---- | ---------------------------------------------------- |
+| `query`         | string   | 是   | 搜索问题                                             |
+| `mode`          | string   | 否   | `dense` / `sparse` / `hybrid`，不传使用服务默认值    |
+| `top_k`         | integer  | 否   | 最多返回条数，不传使用服务默认值                     |
+| `fetch_k`       | integer  | 否   | 检索候选数量，不传使用服务默认值                     |
+| `rerank`        | boolean  | 否   | 是否启用重排，不传使用服务默认值                     |
+| `dense_weight`  | number   | 否   | hybrid 模式 dense 权重，不传使用服务默认值           |
+| `sparse_weight` | number   | 否   | hybrid 模式 sparse 权重，不传使用服务默认值          |
+| `rrf_k`         | integer  | 否   | RRF 融合参数，不传使用服务默认值                     |
+| `file_ids`      | string[] | 否   | 文件 ID 过滤；不传表示搜索当前 app 的整个 collection |
 
 请求：
 
@@ -234,135 +227,3 @@ http://<服务器地址>/api
   "elapsed_ms": 271.7
 }
 ```
-
-## 配置文件
-
-后端通过 `CONFIG_FILE` 选择配置文件，配置文件位于 `backend/config/`。
-
-本地 native 运行默认使用 `local.yaml`。手动启动后端时可以显式指定：
-
-```bash
-CONFIG_FILE=local.yaml
-```
-
-Docker 运行使用前面的 `just svc ...` 或 `just rag ...` 命令启动。
-
-配置文件：
-
-| 文件 | 用途 | 说明 |
-|---|---|---|
-| `local.yaml` | native 默认入口 | 连接 `http://localhost:6333`，默认启用 `bge_base` dense、`bm25` sparse（`tokenizer=jieba`），不加载 rerank。 |
-| `docker-cpu.yaml` | Docker CPU 入口 | 连接 Docker Compose 内的 Qdrant 服务名 `qdrant`，默认启用 `bge_base` dense、`bm25` sparse（`tokenizer=jieba`），不加载 rerank。 |
-| `docker-gpu.yaml` | Docker GPU 入口 | 连接 Docker Compose 内的 Qdrant 服务名 `qdrant`，默认启用 `bge_m3` dense、`bge_m3` sparse、`bge_reranker_v2_m3` rerank。 |
-| `qdrant-bge-base.yaml` | Qdrant 评估入口 | 固定 BGE-base dense + app BM25。 |
-| `qdrant-bge-m3.yaml` | Qdrant 评估入口 | 固定 BGE-M3 dense + BGE-M3 sparse。 |
-| `chroma-bge-base.yaml` | Chroma 评估入口 | 固定 BGE-base dense + app BM25。 |
-| `chroma-bge-m3.yaml` | Chroma 评估入口 | 固定 BGE-M3 dense + app BM25。Chroma local 不启用 vector sparse。 |
-| `milvus-bge-base.yaml` | Milvus 评估入口 | 固定 BGE-base dense + app BM25。 |
-| `milvus-bge-m3.yaml` | Milvus 评估入口 | 固定 BGE-M3 dense + BGE-M3 sparse。 |
-| `milvus-builtin-bm25.yaml` | Milvus 评估入口 | 固定 BGE-base dense + Milvus built-in BM25 sparse。 |
-| `milvus-lite-bge-base.yaml` | Milvus Lite 评估入口 | 固定 BGE-base dense + app BM25。 |
-| `milvus-lite-bge-m3.yaml` | Milvus Lite 评估入口 | 固定 BGE-M3 dense + BGE-M3 sparse。 |
-| `milvus-lite-builtin-bm25.yaml` | Milvus Lite 评估入口 | 固定 BGE-base dense + Milvus built-in BM25 sparse。 |
-
-配置文件固定会影响索引结构的内容：向量库、dense 模型和 sparse 类型。collection 名由 `app_id` 生成。`rerank`、`ocr` 可以在配置文件内用 `enable` 切换；`sparse` 不做运行时切换，需要换配置文件并重建对应 collection。
-
-本地 native 切换配置示例：
-
-```bash
-CONFIG_FILE=milvus-bge-base.yaml .venv/bin/python -m uvicorn main:app --host 0.0.0.0 --port 6000
-```
-
-## Benchmark
-
-准确性 benchmark 每个问题执行一次，按问题分别生成报告：
-
-```bash
-RUN_BENCHMARK=1 backend/.venv/bin/python -m pytest backend/tests/benchmark/test_search_accuracy_benchmark.py -m benchmark -s
-```
-
-性能 benchmark 对同一问题重复执行，输出 p50 / p95 / p99：
-
-```bash
-RUN_BENCHMARK=1 BENCHMARK_RUNS=30 backend/.venv/bin/python -m pytest backend/tests/benchmark/test_search_benchmark.py -m benchmark -s
-```
-
-## LangSmith
-
-LangSmith 默认关闭。需要跟踪搜索链路时设置环境变量：
-
-```bash
-export LANGSMITH_TRACING=true
-export LANGSMITH_API_KEY=你的 LangSmith API Key
-export LANGSMITH_PROJECT=rag-search
-```
-
-native 后端启动时会读取这些环境变量。Docker 启动时 compose 会把这些变量透传到 backend 容器。
-
-搜索链路已经使用 LangChain Runnable / Retriever 组织，开启 LangSmith 后可以看到：
-
-```text
-search
-  prepare_plan
-  dense / sparse retriever
-  fusion
-  dedupe
-  rerank
-  format_response
-```
-
-## 日志
-
-应用日志由配置文件里的 `logging` 控制：
-
-```yaml
-logging:
-  level: INFO
-  max_bytes: 10485760
-  backup_count: 5
-  search_trace: true
-```
-
-默认只输出 JSONL 到 stdout。需要 native 运行时同时落文件，可以加：
-
-```yaml
-logging:
-  level: INFO
-  file: logs/rag.jsonl
-  max_bytes: 10485760
-  backup_count: 5
-  search_trace: true
-```
-
-Docker 运行时由 Docker `json-file` driver 按大小滚动容器 stdout 日志。集中日志写入 Loki，默认保留 30 天；Docker 本地日志只做短期兜底。
-
-## API 限流
-
-对外 open API 的限流由配置文件里的 `api` 控制：
-
-```yaml
-api:
-  rate_limit: 120/minute
-  rate_limit_index: 10/minute
-```
-
-`rate_limit` 用于普通 open API，`rate_limit_index` 用于同步索引接口 `/api/open/files`。
-
-## 数据目录
-
-本地数据目录按数据库产品分组：
-
-```text
-qdrant_data/
-
-chroma_data/
-
-milvus_data/
-  standalone/
-  lite/
-    lite.db
-
-pg_data/           # PostgreSQL 文件元数据（app_files 表）
-```
-
-Qdrant 和 Milvus Standalone 是服务型数据库，backend 通过网络访问。Chroma local 和 Milvus Lite 是嵌入式文件库，本地后端和 Docker 后端使用同一份数据目录；不要同时启动两个后端访问同一份嵌入式库文件。
