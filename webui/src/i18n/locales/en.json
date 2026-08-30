@@ -1,7 +1,7 @@
 {
   "app": {
-    "title": "RAG Search",
-    "desc": "Upload documents, filter by file scope, and search with Dense, Sparse, or Hybrid retrieval."
+    "title": "Odysseus",
+    "desc": "Manage RAG retrieval, document indexing, and LLM chat in one console."
   },
   "theme": {
     "light": "Light",
@@ -16,11 +16,11 @@
     "logs": "Logs",
     "config": "Config",
     "apps": "Apps",
-    "llm": "LLM"
+    "llm": "Chat"
   },
   "auth": {
     "title": "Sign in",
-    "desc": "Access the RAG console",
+    "desc": "Access the Odysseus console",
     "username": "Username",
     "password": "Password",
     "login": "Sign in",
@@ -168,7 +168,7 @@
     "empty": "No apps"
   },
   "llm": {
-    "title": "LLM",
+    "title": "Chat",
     "thread": "Thread",
     "newConversation": "New conversation",
     "empty": "No messages",
@@ -176,6 +176,8 @@
     "assistant": "Assistant",
     "placeholder": "Ask a question...",
     "send": "Send",
-    "responding": "Responding"
+    "responding": "Responding",
+    "requestFailed": "Chat request failed",
+    "streamError": "Stream error"
   }
 }

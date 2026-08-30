@@ -4,7 +4,6 @@
     <template v-else>
       <div class="llm-toolbar">
         <div>
-          <h2>{{ t('llm.title') }}</h2>
           <p>{{ t('llm.thread') }}: <span class="thread-id">{{ threadId }}</span></p>
         </div>
         <el-button @click="newConversation">{{ t('llm.newConversation') }}</el-button>
@@ -121,7 +120,7 @@ async function sendMessage() {
     if (!res.ok) throw new Error(await res.text())
     await readStream(res, assistantIndex)
   } catch (err) {
-    messages.value[assistantIndex].content = errorMessage(err, 'LLM request failed')
+    messages.value[assistantIndex].content = errorMessage(err, t('llm.requestFailed'))
     showToast('error', messages.value[assistantIndex].content)
   } finally {
     streaming.value = false
@@ -151,7 +150,7 @@ function handleEvent(eventText, assistantIndex) {
     if (event.type === 'token') messages.value[assistantIndex].content += event.content || ''
     if (event.type === 'error') throw new Error(event.message || 'stream error')
   } catch (err) {
-    messages.value[assistantIndex].content = errorMessage(err, 'Stream error')
+    messages.value[assistantIndex].content = errorMessage(err, t('llm.streamError'))
   }
 }
 </script>
@@ -159,7 +158,6 @@ function handleEvent(eventText, assistantIndex) {
 <style scoped>
 .llm-view { display: grid; grid-template-rows: auto minmax(360px, 1fr) auto; gap: 16px; min-height: calc(100vh - 142px); }
 .llm-toolbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
-.llm-toolbar h2 { font-size: 18px; font-weight: 650; margin-bottom: 6px; }
 .llm-toolbar p { font-size: 12px; color: var(--el-text-color-secondary); }
 .thread-id { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; color: var(--el-text-color-primary); }
 .llm-chat { min-height: 360px; overflow: auto; border: 1px solid var(--el-border-color); border-radius: 6px; padding: 16px; background: var(--el-bg-color); }

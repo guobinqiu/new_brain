@@ -1,7 +1,7 @@
 {
   "app": {
-    "title": "RAG Search",
-    "desc": "上传文档后按文件范围检索，在 Dense（语义）、Sparse（关键词）、Hybrid（融合）三种模式间切换"
+    "title": "奥德休斯",
+    "desc": "统一管理 RAG 检索、文档索引和 LLM 对话"
   },
   "theme": {
     "light": "Light",
@@ -16,11 +16,11 @@
     "logs": "日志",
     "config": "配置",
     "apps": "应用",
-    "llm": "LLM"
+    "llm": "对话"
   },
   "auth": {
     "title": "登录",
-    "desc": "进入 RAG 管理台",
+    "desc": "进入奥德休斯控制台",
     "username": "用户名",
     "password": "密码",
     "login": "登录",
@@ -168,7 +168,7 @@
     "empty": "暂无应用"
   },
   "llm": {
-    "title": "LLM",
+    "title": "对话",
     "thread": "会话",
     "newConversation": "新会话",
     "empty": "暂无对话",
@@ -176,6 +176,8 @@
     "assistant": "助手",
     "placeholder": "输入问题...",
     "send": "发送",
-    "responding": "生成中"
+    "responding": "生成中",
+    "requestFailed": "问答请求失败",
+    "streamError": "流式响应错误"
   }
 }
