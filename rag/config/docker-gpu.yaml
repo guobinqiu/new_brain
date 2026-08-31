@@ -41,7 +41,7 @@ embedding:
   release_memory: after_call
 parser:
   mineru:
-    enable: true
+    enable: false
     text:
       chunk_size: 500
       chunk_overlap: 80
@@ -49,7 +49,7 @@ parser:
       header_backward_chars: 160
       footer_forward_chars: 160
   unstructured:
-    enable: false
+    enable: true
     strategy: hi_res
     infer_table_structure: true
     languages:
