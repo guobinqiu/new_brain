@@ -1,47 +1,17 @@
 # RAG Knowledge Search
 
-## Native 启动
+## Docker 启动
 
-Native 方式只把后端和前端跑在宿主机上，默认仍使用 Docker 启动 Qdrant、MinIO 和 PostgreSQL。
+首次部署先从模板生成本机配置：
+
+```bash
+cp deploy/.env.example deploy/.env
+```
 
 准备模型：
 
 ```bash
 just models all
-```
-
-1. 启动 Qdrant、MinIO 和 PostgreSQL：
-
-```bash
-just svc up
-```
-
-2. 启动 RAG 后端：
-
-```bash
-S3_ENDPOINT_URL=http://localhost:9000 CONFIG_FILE=local.yaml rag/.venv/bin/python -m uvicorn rag.main:app --host 0.0.0.0 --port 6000
-```
-
-3. 启动 LLM 后端：
-
-```bash
-OPENAI_API_KEY=dummy OPENAI_BASE_URL=http://19.16.1.233:8000/v1 MODEL_NAME=vllm DATABASE_URL=postgresql://rag:rag@localhost:5432/rag RAG_BASE_URL=http://localhost:6000 llm/.venv/bin/python -m uvicorn llm.src.main:app --host 0.0.0.0 --port 6001
-```
-
-4. 启动前端：
-
-```bash
-cd webui
-npm install
-npm run dev -- --host 0.0.0.0 --port 5173
-```
-
-## Docker 启动
-
-Docker 部署读取 `deploy/.env`。首次部署先从模板生成本机配置：
-
-```bash
-cp deploy/.env.example deploy/.env
 ```
 
 启动共享依赖：
@@ -50,64 +20,36 @@ cp deploy/.env.example deploy/.env
 just svc up
 ```
 
-`svc` 只包含 PostgreSQL、Qdrant、MinIO、Loki 和 Promtail，不启动 nginx。
-
-单独启停服务：
+启动服务：
 
 ```bash
-just postgres up
-just qdrant up
-just minio up
-just loki up
-just promtail up
+just rag up
+just llm up
+just webui up
+```
+
+启动 nginx：
+
+```bash
 just nginx up
 ```
 
-CPU 应用节点：
+构建：
 
 ```bash
 just rag build cpu
-just rag up cpu
-```
-
-GPU 应用节点：
-
-`deploy/.env` 中设置：
-
-```env
-CONFIG_FILE=docker-gpu.yaml
-```
-
-```bash
 just rag build gpu
-just rag up gpu
-```
-
-国内网络构建时可以加镜像开关：
-
-```bash
-USE_CN_MIRROR=true just rag build cpu
-USE_CN_MIRROR=true just rag build gpu
+just llm build
 ```
 
 停止：
 
 ```bash
-just svc down
-just rag down
-just llm down
-just webui down
 just nginx down
-```
-
-重启：
-
-```bash
-just svc restart
-just rag restart
-just llm restart
-just webui restart
-just nginx restart
+just webui down
+just llm down
+just rag down
+just svc down
 ```
 
 ## API

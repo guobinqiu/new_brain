@@ -33,6 +33,7 @@ RUN if [ "$USE_CN_MIRROR" = "true" ]; then \
         cd /app/rag && UV_DEFAULT_INDEX="$UV_DEFAULT_INDEX_CN" uv sync --no-install-project --extra cpu; \
     else \
         cd /app/rag && uv sync --no-install-project --extra cpu; \
-    fi
+    fi \
+    && /app/.venv/bin/python -m spacy download en_core_web_sm
 
 CMD ["/app/.venv/bin/uvicorn", "rag.main:app", "--host", "0.0.0.0", "--port", "6000", "--reload"]

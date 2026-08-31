@@ -18,6 +18,11 @@ from rag.schema import UnstructuredParserConfig
 logger = logging.getLogger("rag.parser")
 
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+UNSTRUCTURED_DIR = PROJECT_ROOT / "models" / "unstructured"
+UNSTRUCTURED_MODEL_CONFIG = UNSTRUCTURED_DIR / "yolox.json"
+
+
 class UnstructuredDocumentParser:
     ready = False
 
@@ -26,6 +31,7 @@ class UnstructuredDocumentParser:
         self.ocr = ocr
 
     def start(self) -> None:
+        _prepare_unstructured_runtime_config()
         self.ready = True
 
     def stop(self) -> None:
@@ -59,6 +65,13 @@ _ARCHIVE_IMAGE_PREFIXES = {
     ".docx": "word/media/",
     ".xlsx": "xl/media/",
 }
+
+
+def _prepare_unstructured_runtime_config() -> None:
+    if not UNSTRUCTURED_MODEL_CONFIG.exists():
+        return
+    os.environ.setdefault("UNSTRUCTURED_DEFAULT_MODEL_NAME", "yolox")
+    os.environ.setdefault("UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH", str(UNSTRUCTURED_MODEL_CONFIG))
 
 
 def _validate_file(filepath: str, ext: str) -> None:

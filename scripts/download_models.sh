@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MODELS_DIR="$ROOT_DIR/models"
+RAG_VENV="${RAG_VENV:-$ROOT_DIR/rag/.venv}"
 
 usage() {
   cat <<'EOF'
@@ -17,6 +18,7 @@ Models:
   reranker-large
   rapidocr
   mineru
+  unstructured
   all
 
 Environment:
@@ -36,7 +38,7 @@ download_snapshot() {
   fi
 
   mkdir -p "$dir"
-  "$ROOT_DIR/rag/.venv/bin/modelscope" download "$repo" --local-dir "$dir"
+  "$RAG_VENV/bin/modelscope" download "$repo" --local-dir "$dir"
 }
 
 download_dense() {
@@ -67,7 +69,7 @@ download_mineru() {
   local dir="$MODELS_DIR/mineru"
   echo "下载 MinerU 模型: pipeline -> $dir/pipeline"
   mkdir -p "$dir"
-  "$ROOT_DIR/rag/.venv/bin/python" - "$dir" <<'PY'
+  "$RAG_VENV/bin/python" - "$dir" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -82,7 +84,52 @@ config = {
 }
 (mineru_dir / "mineru.json").write_text(json.dumps(config, ensure_ascii=False, indent=4) + "\n", encoding="utf-8")
 PY
-  MINERU_TOOLS_CONFIG_JSON="$dir/mineru.json" "$ROOT_DIR/rag/.venv/bin/mineru-models-download" -s modelscope -m pipeline
+  MINERU_TOOLS_CONFIG_JSON="$dir/mineru.json" "$RAG_VENV/bin/mineru-models-download" -s modelscope -m pipeline
+}
+
+download_unstructured() {
+  local dir="$MODELS_DIR/unstructured"
+  local layout_model="$dir/yolox_l0.05.onnx"
+  local model_config="$dir/yolox.json"
+
+  echo "下载 Unstructured 模型: yolox -> $dir"
+  mkdir -p "$dir"
+
+  "$RAG_VENV/bin/python" -m spacy download en_core_web_sm
+
+  "$RAG_VENV/bin/python" - "$layout_model" "$model_config" <<'PY'
+import json
+import shutil
+import sys
+from pathlib import Path
+
+from huggingface_hub import hf_hub_download
+
+layout_model = Path(sys.argv[1])
+model_config = Path(sys.argv[2])
+source = hf_hub_download("unstructuredio/yolo_x_layout", "yolox_l0.05.onnx")
+if Path(source).resolve() != layout_model.resolve():
+    shutil.copyfile(source, layout_model)
+config = {
+    "model_path": str(layout_model),
+    "label_map": {
+        "0": "Caption",
+        "1": "Footnote",
+        "2": "Formula",
+        "3": "List-item",
+        "4": "Page-footer",
+        "5": "Page-header",
+        "6": "Picture",
+        "7": "Section-header",
+        "8": "Table",
+        "9": "Text",
+        "10": "Title",
+    },
+}
+model_config.write_text(json.dumps(config, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+print(f"  layout model: {layout_model}")
+print(f"  model config: {model_config}")
+PY
 }
 
 download_one() {
@@ -108,6 +155,9 @@ download_one() {
     mineru)
       download_mineru
       ;;
+    unstructured)
+      download_unstructured
+      ;;
     all)
       download_dense
       download_reranker
@@ -116,6 +166,7 @@ download_one() {
       download_reranker_large
       download_rapidocr
       download_mineru
+      download_unstructured
       ;;
     *)
       echo "Unknown model: $1" >&2
@@ -133,7 +184,12 @@ main() {
 
   echo "安装模型下载工具"
   curl -LsSf https://astral.sh/uv/install.sh | sh && source "$HOME/.local/bin/env"
-  (cd "$ROOT_DIR/rag" && uv venv .venv && uv pip install modelscope "mineru[core]")
+  if [[ ! -x "$RAG_VENV/bin/python" ]]; then
+    (cd "$ROOT_DIR/rag" && uv venv .venv)
+  fi
+  if [[ ! -x "$RAG_VENV/bin/modelscope" || ! -x "$RAG_VENV/bin/mineru-models-download" ]]; then
+    UV_PROJECT_ENVIRONMENT="$RAG_VENV" uv pip install modelscope "mineru[core]" "unstructured[all-docs]>=0.18.0"
+  fi
 
   mkdir -p "$MODELS_DIR"
   echo "模型目录: $MODELS_DIR"

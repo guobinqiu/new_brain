@@ -1,15 +1,20 @@
 .git/
 .DS_Store
 
-backend/.venv/
-backend/.pytest_cache/
-backend/__pycache__/
-backend/**/*.pyc
 
-frontend/node_modules/
-frontend/dist/
 
 chroma_data/
 milvus_data/
 qdrant_data/
 models/
+rag/.venv/
+rag/.uv-cache-local/
+rag/.uv-cache-docker/
+rag/.pytest_cache/
+rag/__pycache__/
+llm/.venv/
+llm/.pytest_cache/
+llm/__pycache__/
+webui/node_modules/
+webui/.node_modules-docker/
+webui/dist/

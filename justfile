@@ -29,7 +29,7 @@ promtail action="up" target="cpu":
 	@just _services {{target}} {{action}} promtail
 
 models target="all":
-	@scripts/download_models.sh {{target}}
+	@docker compose --env-file "$PWD/deploy/.env" -f deploy/cpu/docker-compose.yml run --rm --no-deps -v "$PWD/scripts:/app/scripts:ro" -e RAG_VENV=/app/.venv rag /app/scripts/download_models.sh {{target}}
 
 _services target action +services:
 	@if [ "{{action}}" = "build" ]; then docker compose --env-file "$PWD/deploy/.env" -f deploy/{{target}}/docker-compose.yml build {{services}}; elif [ "{{action}}" = "down" ]; then docker compose --env-file "$PWD/deploy/.env" -f deploy/{{target}}/docker-compose.yml stop {{services}}; else docker compose --env-file "$PWD/deploy/.env" -f deploy/{{target}}/docker-compose.yml {{action}} -d {{services}}; fi

@@ -38,6 +38,7 @@ RUN if [ "$USE_CN_MIRROR" = "true" ]; then \
         cd /app/rag && uv sync --no-install-project; \
     fi \
     && uv pip install --no-deps /tmp/ecu_wheels/*.whl \
+    && /app/.venv/bin/python -m spacy download en_core_web_sm \
     && rm -rf /tmp/ecu_wheels
 
 COPY deploy/ecu/bootstrap.py /app/ecu/bootstrap.py
