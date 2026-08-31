@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 
 @dataclass(frozen=True)
@@ -50,6 +50,16 @@ class SearchConfig:
     dense_weight: float = 0.5
     sparse_weight: float = 0.5
     rrf_k: int = 60
+
+
+EmbeddingReleasePolicy = Literal["per_batch", "after_call", "never"]
+
+
+@dataclass(frozen=True)
+class EmbeddingConfig:
+    dense_batch_size: int = 4
+    sparse_batch_size: int = 4
+    release_memory: EmbeddingReleasePolicy = "per_batch"
 
 
 @dataclass(frozen=True)
@@ -145,6 +155,7 @@ class AppConfig:
     rerank: RerankConfig | None
     ocr: OCRConfig
     auth: AuthConfig
+    embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
     parser: ParserConfig = field(default_factory=ParserConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     api: ApiConfig = field(default_factory=ApiConfig)
@@ -159,6 +170,7 @@ def parse_app_config(raw: dict[str, Any]) -> AppConfig:
     database = raw.get("database") or {}
     search = raw.get("search") or {}
     parser = raw.get("parser") or {}
+    embedding = raw.get("embedding") or {}
     parser_text = parser.get("text") or {}
     parser_table = parser.get("table") or {}
     logging = raw.get("logging") or {}
@@ -186,6 +198,7 @@ def parse_app_config(raw: dict[str, Any]) -> AppConfig:
     _validate_supported("database.type", database_name, {"postgres", "database/postgres"})
     _required(database, "url", "database")
     _validate_supported("search.default_mode", search.get("default_mode", "hybrid"), {"dense", "sparse", "hybrid"})
+    _validate_supported("embedding.release_memory", embedding.get("release_memory", "per_batch"), {"per_batch", "after_call", "never"})
     if store_type in ("qdrant", "store/qdrant"):
         _required(store, "url", "store")
     if store_type in ("chroma", "store/chroma"):
@@ -239,6 +252,11 @@ def parse_app_config(raw: dict[str, Any]) -> AppConfig:
             dense_weight=float(search.get("dense_weight", 0.5)),
             sparse_weight=float(search.get("sparse_weight", 0.5)),
             rrf_k=int(search.get("rrf_k", 60)),
+        ),
+        embedding=EmbeddingConfig(
+            dense_batch_size=int(embedding.get("dense_batch_size", 4)),
+            sparse_batch_size=int(embedding.get("sparse_batch_size", 4)),
+            release_memory=embedding.get("release_memory", "per_batch"),
         ),
         parser=ParserConfig(
             text=TextParserConfig(

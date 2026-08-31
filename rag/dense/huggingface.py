@@ -10,9 +10,10 @@ logger = logging.getLogger("rag.app")
 
 
 class HuggingFaceDense:
-    def __init__(self, model_name: str = DENSE_MODEL_DIR, batch_size: int = 4):
+    def __init__(self, model_name: str = DENSE_MODEL_DIR, batch_size: int = 4, release_memory: str = "per_batch"):
         self.model_name = model_name
         self.batch_size = batch_size
+        self.release_memory = release_memory
         self._dense = None
         self._vector_size: int | None = None
         self.ready = False
@@ -39,10 +40,15 @@ class HuggingFaceDense:
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         self._require_ready()
         vectors = []
-        for index in range(0, len(texts), self.batch_size):
-            try:
-                vectors.extend(self._dense.embed_documents(texts[index:index + self.batch_size]))
-            finally:
+        try:
+            for index in range(0, len(texts), self.batch_size):
+                try:
+                    vectors.extend(self._dense.embed_documents(texts[index:index + self.batch_size]))
+                finally:
+                    if self.release_memory == "per_batch":
+                        device.release_memory()
+        finally:
+            if self.release_memory == "after_call":
                 device.release_memory()
         return vectors
 

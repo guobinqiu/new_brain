@@ -8,9 +8,10 @@ logger = logging.getLogger("rag.app")
 
 
 class BGEM3LexicalEncoder:
-    def __init__(self, model_name: str, batch_size: int = 4):
+    def __init__(self, model_name: str, batch_size: int = 4, release_memory: str = "per_batch"):
         self.model_name = model_name
         self.batch_size = batch_size
+        self.release_memory = release_memory
         self._model = None
         self.ready = False
 
@@ -31,16 +32,21 @@ class BGEM3LexicalEncoder:
     def embed_documents(self, texts: list[str]) -> list[dict[int, float]]:
         self._require_ready()
         vectors = []
-        for index in range(0, len(texts), self.batch_size):
-            try:
-                output = self._model.encode(
-                    texts[index:index + self.batch_size],
-                    return_dense=False,
-                    return_sparse=True,
-                    return_colbert_vecs=False,
-                )
-                vectors.extend(_normalize_lexical_weights(weights) for weights in output["lexical_weights"])
-            finally:
+        try:
+            for index in range(0, len(texts), self.batch_size):
+                try:
+                    output = self._model.encode(
+                        texts[index:index + self.batch_size],
+                        return_dense=False,
+                        return_sparse=True,
+                        return_colbert_vecs=False,
+                    )
+                    vectors.extend(_normalize_lexical_weights(weights) for weights in output["lexical_weights"])
+                finally:
+                    if self.release_memory == "per_batch":
+                        device.release_memory()
+        finally:
+            if self.release_memory == "after_call":
                 device.release_memory()
         return vectors
 

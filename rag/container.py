@@ -75,6 +75,9 @@ class ApplicationContainer(containers.DeclarativeContainer):
     database_type = providers.Callable(lambda app_config: _component_key(app_config.database.type), config)
     database_url = providers.Callable(lambda app_config: app_config.database.url, config)
     database_pool_size = providers.Callable(lambda app_config: app_config.database.pool_size, config)
+    embedding_dense_batch_size = providers.Callable(lambda app_config: app_config.embedding.dense_batch_size, config)
+    embedding_sparse_batch_size = providers.Callable(lambda app_config: app_config.embedding.sparse_batch_size, config)
+    embedding_release_memory = providers.Callable(lambda app_config: app_config.embedding.release_memory, config)
     tokenizer = providers.Selector(
         sparse_tokenizer,
         jieba=providers.Factory(JiebaTokenizer),
@@ -82,19 +85,19 @@ class ApplicationContainer(containers.DeclarativeContainer):
 
     dense = providers.Selector(
         dense_name,
-        test_dense=providers.Singleton(HuggingFaceDense, model_name=dense_model_path),
-        huggingface=providers.Singleton(HuggingFaceDense, model_name=dense_model_path),
-        bge_base=providers.Singleton(HuggingFaceDense, model_name=dense_model_path),
-        bge_base_zh_v15=providers.Singleton(HuggingFaceDense, model_name=dense_model_path),
-        bge_m3=providers.Singleton(HuggingFaceDense, model_name=dense_model_path),
+        test_dense=providers.Singleton(HuggingFaceDense, model_name=dense_model_path, batch_size=embedding_dense_batch_size, release_memory=embedding_release_memory),
+        huggingface=providers.Singleton(HuggingFaceDense, model_name=dense_model_path, batch_size=embedding_dense_batch_size, release_memory=embedding_release_memory),
+        bge_base=providers.Singleton(HuggingFaceDense, model_name=dense_model_path, batch_size=embedding_dense_batch_size, release_memory=embedding_release_memory),
+        bge_base_zh_v15=providers.Singleton(HuggingFaceDense, model_name=dense_model_path, batch_size=embedding_dense_batch_size, release_memory=embedding_release_memory),
+        bge_m3=providers.Singleton(HuggingFaceDense, model_name=dense_model_path, batch_size=embedding_dense_batch_size, release_memory=embedding_release_memory),
     )
 
     sparse = providers.Selector(
         sparse_key,
         bm25=providers.Singleton(BM25Sparse, tokenizer=tokenizer),
         milvus_bm25=providers.Singleton(MilvusBM25Sparse),
-        qdrant_bge_m3=providers.Singleton(QdrantBGEM3Sparse, model_name=sparse_model_path),
-        milvus_bge_m3=providers.Singleton(MilvusBGEM3Sparse, model_name=sparse_model_path),
+        qdrant_bge_m3=providers.Singleton(QdrantBGEM3Sparse, model_name=sparse_model_path, batch_size=embedding_sparse_batch_size, release_memory=embedding_release_memory),
+        milvus_bge_m3=providers.Singleton(MilvusBGEM3Sparse, model_name=sparse_model_path, batch_size=embedding_sparse_batch_size, release_memory=embedding_release_memory),
     )
 
     rerank = providers.Selector(
@@ -177,7 +180,7 @@ def _load_class(import_path: str):
 
 def build_dense(config: AppConfig) -> Dense:
     if config.dense.import_path:
-        return _load_class(config.dense.import_path)(model_name=config.dense.model_path)
+        return _load_class(config.dense.import_path)(model_name=config.dense.model_path, batch_size=config.embedding.dense_batch_size, release_memory=config.embedding.release_memory)
     return _resolve(create_container(config).dense, "dense", config.dense.name)
 
 
@@ -192,7 +195,7 @@ def build_sparse(config: AppConfig) -> Sparse:
             return cls(tokenizer=JiebaTokenizer())
         if key == "milvus_bm25":
             return cls()
-        return cls(model_name=sparse_config.model_path)
+        return cls(model_name=sparse_config.model_path, batch_size=config.embedding.sparse_batch_size, release_memory=config.embedding.release_memory)
     return _resolve(create_container(config).sparse, "sparse", sparse_config.name)
 
 

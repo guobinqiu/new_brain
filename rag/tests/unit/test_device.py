@@ -142,6 +142,46 @@ def test_dense_embeds_documents_in_batches():
     assert calls == [["a", "bb"], ["ccc", "dddd"], ["eeeee"]]
 
 
+def test_dense_release_memory_after_call(monkeypatch):
+    from rag.dense.huggingface import HuggingFaceDense
+
+    calls = []
+
+    class FakeEmbeddings:
+        def embed_documents(self, texts):
+            return [[1.0] for _ in texts]
+
+    dense = HuggingFaceDense(model_name="/models/bge", batch_size=2, release_memory="after_call")
+    dense._dense = FakeEmbeddings()
+    dense._vector_size = 1
+    dense.ready = True
+    monkeypatch.setattr("rag.device.release_memory", lambda: calls.append("release"))
+
+    dense.embed_documents(["a", "b", "c", "d", "e"])
+
+    assert calls == ["release"]
+
+
+def test_dense_release_memory_per_batch(monkeypatch):
+    from rag.dense.huggingface import HuggingFaceDense
+
+    calls = []
+
+    class FakeEmbeddings:
+        def embed_documents(self, texts):
+            return [[1.0] for _ in texts]
+
+    dense = HuggingFaceDense(model_name="/models/bge", batch_size=2)
+    dense._dense = FakeEmbeddings()
+    dense._vector_size = 1
+    dense.ready = True
+    monkeypatch.setattr("rag.device.release_memory", lambda: calls.append("release"))
+
+    dense.embed_documents(["a", "b", "c", "d", "e"])
+
+    assert calls == ["release", "release", "release"]
+
+
 def test_rerank_passes_auto_device_to_cross_encoder(monkeypatch):
     import importlib
     import rag.rerank.cross_encoder

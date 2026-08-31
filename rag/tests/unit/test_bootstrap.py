@@ -75,11 +75,11 @@ def test_application_splits_model_loading_from_runtime_connections():
 
 def test_application_selects_production_components():
     import rag.bootstrap as bootstrap
-    from dense.huggingface import HuggingFaceDense
+    from rag.dense.huggingface import HuggingFaceDense
     from rag.ocr.paddle import PaddleOCR
-    from search.pipeline import SearchPipeline
+    from rag.search.pipeline import SearchPipeline
     from rag.sparse.bm25 import BM25Sparse
-    from store.qdrant import QdrantStore
+    from rag.store.qdrant import QdrantStore
 
     application = bootstrap.Application()
 
@@ -94,7 +94,7 @@ def test_application_selects_production_components():
 
 def test_application_selects_configured_dense_and_bm25_sparse():
     import rag.bootstrap as bootstrap
-    from dense.huggingface import HuggingFaceDense
+    from rag.dense.huggingface import HuggingFaceDense
     from rag.loader import load_config_file
     from rag.rerank.cross_encoder import CrossEncoderRerank
     from rag.sparse.bm25 import BM25Sparse
@@ -146,6 +146,48 @@ ocr:
     assert isinstance(application.sparse, QdrantBGEM3Sparse)
     assert application.sparse.model_name == config.sparse.model_path
     assert application.store.sparse is application.sparse
+
+
+def test_application_passes_embedding_config_to_vector_components(tmp_path):
+    import rag.bootstrap as bootstrap
+    from rag.loader import load_config_file
+
+    path = tmp_path / "embedding_config.yaml"
+    path.write_text(
+        """
+database:
+  type: postgres
+  url: postgresql://rag:rag@localhost:5432/rag
+dense:
+  name: bge_m3
+  model_name: bge-m3
+  import_path: dense.huggingface.HuggingFaceDense
+sparse:
+  type: bge_m3
+  model_name: bge-m3
+  import_path: sparse.qdrant_bge_m3.QdrantBGEM3Sparse
+store:
+  type: qdrant
+  url: http://localhost:6333
+search:
+  default_mode: hybrid
+embedding:
+  dense_batch_size: 32
+  sparse_batch_size: 16
+  release_memory: after_call
+rerank: test_rerank
+ocr: test_ocr
+""",
+        encoding="utf-8",
+    )
+
+    config = load_config_file(path)
+    application = bootstrap.Application(config=config)
+
+    assert application.dense.batch_size == 32
+    assert application.dense.release_memory == "after_call"
+    assert application.sparse._encoder.batch_size == 16
+    assert application.sparse._encoder.release_memory == "after_call"
 
 
 def test_application_passes_store_config_to_qdrant_store():

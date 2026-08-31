@@ -4,9 +4,9 @@ from rag.sparse.bge_m3_common import BGEM3LexicalEncoder
 
 
 class MilvusBGEM3Sparse:
-    def __init__(self, model_name: str):
+    def __init__(self, model_name: str, batch_size: int = 4, release_memory: str = "per_batch"):
         self.model_name = model_name
-        self._encoder = BGEM3LexicalEncoder(model_name)
+        self._encoder = BGEM3LexicalEncoder(model_name, batch_size=batch_size, release_memory=release_memory)
 
     def start(self) -> None:
         self._encoder.start()

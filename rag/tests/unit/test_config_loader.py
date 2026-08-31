@@ -99,6 +99,40 @@ ocr: test_ocr
     assert config.api.rate_limit_index == "5/minute"
 
 
+def test_load_app_config_supports_embedding_runtime_config(monkeypatch, tmp_path):
+    from rag.loader import load_app_config
+
+    path = tmp_path / "embedding_config.yaml"
+    path.write_text(
+        """
+database:
+  type: postgres
+  url: postgresql://rag:rag@localhost:5432/rag
+dense: bge_m3
+sparse:
+  type: bge_m3
+  model_name: bge-m3
+store:
+  type: qdrant
+  url: http://localhost:6333
+embedding:
+  dense_batch_size: 32
+  sparse_batch_size: 16
+  release_memory: after_call
+rerank: test_rerank
+ocr: test_ocr
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CONFIG_FILE", str(path))
+
+    config = load_app_config()
+
+    assert config.embedding.dense_batch_size == 32
+    assert config.embedding.sparse_batch_size == 16
+    assert config.embedding.release_memory == "after_call"
+
+
 def test_load_app_config_supports_nested_parser_config(monkeypatch, tmp_path):
     from rag.loader import load_app_config
 

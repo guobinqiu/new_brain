@@ -35,6 +35,10 @@ search:
   dense_weight: 0.5
   sparse_weight: 0.5
   rrf_k: 60
+embedding:
+  dense_batch_size: 16
+  sparse_batch_size: 8
+  release_memory: after_call
 parser:
   text:
     chunk_size: 500
