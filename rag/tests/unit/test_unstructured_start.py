@@ -108,13 +108,16 @@ def test_unstructured_table_load_uses_local_table_snapshot(monkeypatch, tmp_path
     (table_cache / "refs" / "main").write_text("abc123", encoding="utf-8")
 
     calls = []
-    tables = types.SimpleNamespace(DEFAULT_MODEL="microsoft/table-transformer-structure-recognition", load_agent=lambda: calls.append("load_agent"))
+    tables = types.ModuleType("unstructured_inference.models.tables")
+    tables.DEFAULT_MODEL = "microsoft/table-transformer-structure-recognition"
+    tables.load_agent = lambda: calls.append("load_agent")
     models = types.ModuleType("unstructured_inference.models")
     models.tables = tables
     package = types.ModuleType("unstructured_inference")
     package.models = models
     monkeypatch.setitem(sys.modules, "unstructured_inference", package)
     monkeypatch.setitem(sys.modules, "unstructured_inference.models", models)
+    monkeypatch.setitem(sys.modules, "unstructured_inference.models.tables", tables)
     monkeypatch.setattr(runtime, "TABLE_STRUCTURE_MODEL_CACHE", table_cache, raising=False)
 
     runtime.load_unstructured_table_model()

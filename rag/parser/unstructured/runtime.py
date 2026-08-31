@@ -1,3 +1,4 @@
+import importlib
 import importlib.util
 import os
 from pathlib import Path
@@ -30,14 +31,18 @@ def prepare_unstructured_runtime_config() -> None:
 
 
 def load_unstructured_layout_model() -> None:
-    from unstructured_inference.models.base import get_model
-
+    try:
+        get_model = importlib.import_module("unstructured_inference.models.base").get_model
+    except ImportError as exc:
+        raise RuntimeError("unstructured inference parser is not installed") from exc
     get_model()
 
 
 def load_unstructured_table_model() -> None:
-    from unstructured_inference.models import tables
-
+    try:
+        tables = importlib.import_module("unstructured_inference.models.tables")
+    except ImportError as exc:
+        raise RuntimeError("unstructured inference parser is not installed") from exc
     configure_unstructured_table_model(tables)
     tables.load_agent()
 
