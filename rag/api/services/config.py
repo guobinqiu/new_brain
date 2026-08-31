@@ -50,13 +50,31 @@ def parser_config() -> dict[str, Any]:
     parser = runtime.application.config.parser
     return {
         "available": runtime.application.parser.is_available(),
-        "text": {
-            "chunk_size": parser.text.chunk_size,
-            "chunk_overlap": parser.text.chunk_overlap,
+        "enabled": parser.enabled_parser,
+        "mineru": {
+            "enable": parser.mineru.enable,
+            "text": {
+                "chunk_size": parser.mineru.text.chunk_size,
+                "chunk_overlap": parser.mineru.text.chunk_overlap,
+            },
+            "table": {
+                "header_backward_chars": parser.mineru.table.header_backward_chars,
+                "footer_forward_chars": parser.mineru.table.footer_forward_chars,
+            },
         },
-        "table": {
-            "header_backward_chars": parser.table.header_backward_chars,
-            "footer_forward_chars": parser.table.footer_forward_chars,
+        "unstructured": {
+            "enable": parser.unstructured.enable,
+            "strategy": parser.unstructured.strategy,
+            "infer_table_structure": parser.unstructured.infer_table_structure,
+            "languages": parser.unstructured.languages,
+            "text": {
+                "chunk_size": parser.unstructured.text.chunk_size,
+                "chunk_overlap": parser.unstructured.text.chunk_overlap,
+            },
+            "table": {
+                "header_backward_chars": parser.unstructured.table.header_backward_chars,
+                "footer_forward_chars": parser.unstructured.table.footer_forward_chars,
+            },
         },
     }
 

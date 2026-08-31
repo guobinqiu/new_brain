@@ -53,6 +53,8 @@ class SearchConfig:
 
 
 EmbeddingReleasePolicy = Literal["per_batch", "after_call", "never"]
+ParserType = Literal["mineru", "unstructured"]
+ParserStrategy = Literal["auto", "fast", "hi_res"]
 
 
 @dataclass(frozen=True)
@@ -74,32 +76,44 @@ class TableParserConfig:
     footer_forward_chars: int = 160
 
 
-@dataclass(frozen=True, init=False)
-class ParserConfig:
+@dataclass(frozen=True)
+class MineruParserConfig:
+    enable: bool = True
     text: TextParserConfig = field(default_factory=TextParserConfig)
     table: TableParserConfig = field(default_factory=TableParserConfig)
 
+
+@dataclass(frozen=True)
+class UnstructuredParserConfig:
+    enable: bool = False
+    strategy: ParserStrategy = "hi_res"
+    infer_table_structure: bool = True
+    languages: list[str] = field(default_factory=lambda: ["chi_sim", "eng"])
+    text: TextParserConfig = field(default_factory=TextParserConfig)
+    table: TableParserConfig = field(default_factory=TableParserConfig)
+
+
+@dataclass(frozen=True, init=False)
+class ParserConfig:
+    mineru: MineruParserConfig = field(default_factory=MineruParserConfig)
+    unstructured: UnstructuredParserConfig = field(default_factory=UnstructuredParserConfig)
+
     def __init__(
         self,
-        text: TextParserConfig | None = None,
-        table: TableParserConfig | None = None,
-        chunk_size: int | None = None,
-        chunk_overlap: int | None = None,
+        mineru: MineruParserConfig | None = None,
+        unstructured: UnstructuredParserConfig | None = None,
     ):
-        text_config = text or TextParserConfig(
-            chunk_size=500 if chunk_size is None else chunk_size,
-            chunk_overlap=80 if chunk_overlap is None else chunk_overlap,
-        )
-        object.__setattr__(self, "text", text_config)
-        object.__setattr__(self, "table", table or TableParserConfig())
+        mineru_config = mineru or MineruParserConfig()
+        unstructured_config = unstructured or UnstructuredParserConfig()
+        _validate_single_parser_enabled(mineru_config, unstructured_config)
+        object.__setattr__(self, "mineru", mineru_config)
+        object.__setattr__(self, "unstructured", unstructured_config)
 
     @property
-    def chunk_size(self) -> int:
-        return self.text.chunk_size
-
-    @property
-    def chunk_overlap(self) -> int:
-        return self.text.chunk_overlap
+    def enabled_parser(self) -> ParserType:
+        if self.mineru.enable:
+            return "mineru"
+        return "unstructured"
 
 
 @dataclass(frozen=True)
@@ -171,8 +185,6 @@ def parse_app_config(raw: dict[str, Any]) -> AppConfig:
     search = raw.get("search") or {}
     parser = raw.get("parser") or {}
     embedding = raw.get("embedding") or {}
-    parser_text = parser.get("text") or {}
-    parser_table = parser.get("table") or {}
     logging = raw.get("logging") or {}
     api = raw.get("api") or {}
     auth = raw.get("auth") or {}
@@ -199,6 +211,7 @@ def parse_app_config(raw: dict[str, Any]) -> AppConfig:
     _required(database, "url", "database")
     _validate_supported("search.default_mode", search.get("default_mode", "hybrid"), {"dense", "sparse", "hybrid"})
     _validate_supported("embedding.release_memory", embedding.get("release_memory", "per_batch"), {"per_batch", "after_call", "never"})
+    parser_config = _parse_parser_config(parser)
     if store_type in ("qdrant", "store/qdrant"):
         _required(store, "url", "store")
     if store_type in ("chroma", "store/chroma"):
@@ -258,16 +271,7 @@ def parse_app_config(raw: dict[str, Any]) -> AppConfig:
             sparse_batch_size=int(embedding.get("sparse_batch_size", 4)),
             release_memory=embedding.get("release_memory", "per_batch"),
         ),
-        parser=ParserConfig(
-            text=TextParserConfig(
-                chunk_size=int(parser_text.get("chunk_size", parser.get("chunk_size", 500))),
-                chunk_overlap=int(parser_text.get("chunk_overlap", parser.get("chunk_overlap", 80))),
-            ),
-            table=TableParserConfig(
-                header_backward_chars=int(parser_table.get("header_backward_chars", 160)),
-                footer_forward_chars=int(parser_table.get("footer_forward_chars", 160)),
-            ),
-        ),
+        parser=parser_config,
         logging=LoggingConfig(
             level=str(logging.get("level", "INFO")),
             file=logging.get("file"),
@@ -299,6 +303,61 @@ def parse_app_config(raw: dict[str, Any]) -> AppConfig:
             import_path=ocr.get("import_path"),
         ),
     )
+
+
+def _parse_parser_config(parser: dict[str, Any]) -> ParserConfig:
+    mineru = parser.get("mineru") or {}
+    unstructured = parser.get("unstructured") or {}
+    _validate_supported("parser.unstructured.strategy", unstructured.get("strategy", "hi_res"), {"auto", "fast", "hi_res"})
+    return ParserConfig(
+        mineru=MineruParserConfig(
+            enable=_bool(mineru.get("enable", True)),
+            text=_parse_text_parser_config(mineru),
+            table=_parse_table_parser_config(mineru),
+        ),
+        unstructured=UnstructuredParserConfig(
+            enable=_bool(unstructured.get("enable", False)),
+            strategy=unstructured.get("strategy", "hi_res"),
+            infer_table_structure=_bool(unstructured.get("infer_table_structure", True)),
+            languages=list(unstructured.get("languages", ["chi_sim", "eng"])),
+            text=_parse_text_parser_config(unstructured),
+            table=_parse_table_parser_config(unstructured),
+        ),
+    )
+
+
+def _parse_text_parser_config(parser: dict[str, Any]) -> TextParserConfig:
+    parser_text = parser.get("text") or {}
+    return TextParserConfig(
+        chunk_size=int(parser_text.get("chunk_size", 500)),
+        chunk_overlap=int(parser_text.get("chunk_overlap", 80)),
+    )
+
+
+def _parse_table_parser_config(parser: dict[str, Any]) -> TableParserConfig:
+    parser_table = parser.get("table") or {}
+    return TableParserConfig(
+        header_backward_chars=int(parser_table.get("header_backward_chars", 160)),
+        footer_forward_chars=int(parser_table.get("footer_forward_chars", 160)),
+    )
+
+
+def _validate_single_parser_enabled(mineru: MineruParserConfig, unstructured: UnstructuredParserConfig) -> None:
+    enabled_count = int(mineru.enable) + int(unstructured.enable)
+    if enabled_count != 1:
+        raise ValueError("parser must enable exactly one backend")
+
+
+def _bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    raise ValueError(f"invalid boolean value: {value}")
 
 
 def _component_name(value: Any, section_name: str) -> str:

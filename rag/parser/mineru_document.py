@@ -1,4 +1,6 @@
+import logging
 import os
+import time
 
 from rag.ocr.base import OCR
 from rag.parser import mineru
@@ -10,13 +12,16 @@ from rag.parser.image import ImageBlockParser
 from rag.parser.markdown import MarkdownBlockParser
 from rag.parser.pdf import PdfBlockParser
 from rag.parser.text import TextBlockParser
-from rag.schema import ParserConfig
+from rag.schema import MineruParserConfig
 
 
-class DocumentParser:
+logger = logging.getLogger("rag.parser")
+
+
+class MineruDocumentParser:
     ready = False
 
-    def __init__(self, config: ParserConfig, ocr: OCR | None = None):
+    def __init__(self, config: MineruParserConfig, ocr: OCR | None = None):
         self.config = config
         self.ocr = ocr
         image_parser = ImageBlockParser(config)
@@ -52,7 +57,11 @@ class DocumentParser:
         if block_parser is None:
             raise ValueError(f"Unsupported file type: {ext}")
         filename = original_filename or os.path.basename(filepath)
+        started = time.perf_counter()
+        logger.info("Parser start", extra={"event": "parser_start", "parser": "mineru", "document_filename": filename, "ext": ext})
         chunks = blocks_to_documents(block_parser.parse(filepath, ocr or self.ocr), filename, self.config)
+        total_ms = round((time.perf_counter() - started) * 1000, 1)
+        logger.info("Parser done", extra={"event": "parser_done", "parser": "mineru", "document_filename": filename, "ext": ext, "chunk_count": len(chunks), "total_ms": total_ms})
         if not chunks:
             raise ValueError(f"Empty file: {filename}")
         return chunks

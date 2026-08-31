@@ -1,16 +1,22 @@
 import uuid
+from typing import Protocol
 
 from rag.parser.normalizer import normalize_blocks
 from rag.parser.schema import Block, TableBlock, TextBlock
 from rag.parser.text_splitter import split_text
-from rag.schema import ParserConfig
+from rag.schema import TableParserConfig, TextParserConfig
 
 
-def blocks_to_chunks(blocks: list[Block], parser_config: ParserConfig) -> list[str]:
+class ChunkParserConfig(Protocol):
+    text: TextParserConfig
+    table: TableParserConfig
+
+
+def blocks_to_chunks(blocks: list[Block], parser_config: ChunkParserConfig) -> list[str]:
     return [document["content"] for document in blocks_to_documents(blocks, "", parser_config)]
 
 
-def blocks_to_documents(blocks: list[Block], filename: str, parser_config: ParserConfig) -> list[dict]:
+def blocks_to_documents(blocks: list[Block], filename: str, parser_config: ChunkParserConfig) -> list[dict]:
     blocks = normalize_blocks(blocks)
     chunks = []
     text_blocks = []
@@ -33,7 +39,7 @@ def blocks_to_documents(blocks: list[Block], filename: str, parser_config: Parse
     return chunks
 
 
-def _text_blocks_to_documents(blocks: list[str], filename: str, parser_config: ParserConfig) -> list[dict]:
+def _text_blocks_to_documents(blocks: list[str], filename: str, parser_config: ChunkParserConfig) -> list[dict]:
     text = "\n".join(block.strip() for block in blocks if block.strip())
     if not text:
         return []
@@ -65,13 +71,13 @@ def _table_chunk_with_context(content: str, header: str, footer: str) -> str:
     return "\n\n".join(parts)
 
 
-def _table_header(blocks: list[Block], index: int, parser_config: ParserConfig) -> str:
+def _table_header(blocks: list[Block], index: int, parser_config: ChunkParserConfig) -> str:
     if index == 0 or not isinstance(blocks[index - 1], TextBlock):
         return ""
     return _take_backward(blocks[index - 1].text, parser_config.table.header_backward_chars)
 
 
-def _table_footer(blocks: list[Block], index: int, parser_config: ParserConfig) -> str:
+def _table_footer(blocks: list[Block], index: int, parser_config: ChunkParserConfig) -> str:
     if index + 1 >= len(blocks) or not isinstance(blocks[index + 1], TextBlock):
         return ""
     next_block = blocks[index + 1]

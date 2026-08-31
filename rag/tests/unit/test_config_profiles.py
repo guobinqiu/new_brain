@@ -114,11 +114,14 @@ def test_config_files_define_parser_defaults():
     for path in CONFIG_DIR.glob("*.yaml"):
         parser = _read_config(path.name)["parser"]
 
-        assert parser["text"]["chunk_size"] > 0
-        assert parser["text"]["chunk_overlap"] >= 0
-        assert parser["text"]["chunk_overlap"] < parser["text"]["chunk_size"]
-        assert parser["table"]["header_backward_chars"] >= 0
-        assert parser["table"]["footer_forward_chars"] >= 0
+        enabled = [name for name in ("mineru", "unstructured") if parser[name]["enable"]]
+        assert len(enabled) == 1
+        for name in ("mineru", "unstructured"):
+            assert parser[name]["text"]["chunk_size"] > 0
+            assert parser[name]["text"]["chunk_overlap"] >= 0
+            assert parser[name]["text"]["chunk_overlap"] < parser[name]["text"]["chunk_size"]
+            assert parser[name]["table"]["header_backward_chars"] >= 0
+            assert parser[name]["table"]["footer_forward_chars"] >= 0
 
 
 def test_profiles_define_store_type_from_filename():

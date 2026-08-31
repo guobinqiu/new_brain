@@ -8,24 +8,24 @@ from rag.parser.chunker import blocks_to_chunks, blocks_to_documents
 from rag.parser.normalizer import is_section_title_text
 from rag.parser.schema import Block, TableBlock, TextBlock
 from rag.parser.table_splitter import compact_cell_text, split_table
-from rag.schema import ParserConfig
+from rag.schema import MineruParserConfig
 
 
-def read_table_chunks(output_dir: Path, parser_config: ParserConfig) -> list[str]:
+def read_table_chunks(output_dir: Path, parser_config: MineruParserConfig) -> list[str]:
     chunks = _read_content_list(output_dir, parser_config)
     if chunks is not None:
         return chunks
     raise ValueError("table parser output json not found")
 
 
-def read_table_documents(output_dir: Path, filename: str, parser_config: ParserConfig) -> list[dict]:
+def read_table_documents(output_dir: Path, filename: str, parser_config: MineruParserConfig) -> list[dict]:
     documents = _read_content_list_documents(output_dir, filename, parser_config)
     if documents is not None:
         return documents
     raise ValueError("table parser output json not found")
 
 
-def read_table_blocks(output_dir: Path, parser_config: ParserConfig) -> list[Block]:
+def read_table_blocks(output_dir: Path, parser_config: MineruParserConfig) -> list[Block]:
     blocks = _read_content_list_blocks(output_dir, parser_config)
     if blocks is not None:
         return blocks
@@ -46,11 +46,11 @@ def html_table_to_rows(html: str) -> list[list[str]]:
     return rows
 
 
-def table_html_to_chunks(html: str, parser_config: ParserConfig, title: str = "") -> list[str]:
+def table_html_to_chunks(html: str, parser_config: MineruParserConfig, title: str = "") -> list[str]:
     return _table_rows_to_chunks(title, html_table_to_rows(html), parser_config)
 
 
-def table_html_to_blocks(html: str, parser_config: ParserConfig, title: str = "") -> list[Block]:
+def table_html_to_blocks(html: str, parser_config: MineruParserConfig, title: str = "") -> list[Block]:
     return _table_rows_to_blocks(title, html_table_to_rows(html), parser_config)
 
 
@@ -65,21 +65,21 @@ def clean_table_text(text: str) -> str:
     return re.sub(r"(?<=[\u4e00-\u9fff])[ \t]+(?=[\u4e00-\u9fff])", "", text)
 
 
-def _read_content_list(output_dir: Path, parser_config: ParserConfig) -> list[str] | None:
+def _read_content_list(output_dir: Path, parser_config: MineruParserConfig) -> list[str] | None:
     documents = _read_content_list_documents(output_dir, "", parser_config)
     if documents is None:
         return None
     return [document["content"] for document in documents]
 
 
-def _read_content_list_documents(output_dir: Path, filename: str, parser_config: ParserConfig) -> list[dict] | None:
+def _read_content_list_documents(output_dir: Path, filename: str, parser_config: MineruParserConfig) -> list[dict] | None:
     blocks = _read_content_list_blocks(output_dir, parser_config)
     if blocks is None:
         return None
     return blocks_to_documents(blocks, filename, parser_config)
 
 
-def _read_content_list_blocks(output_dir: Path, parser_config: ParserConfig) -> list[Block] | None:
+def _read_content_list_blocks(output_dir: Path, parser_config: MineruParserConfig) -> list[Block] | None:
     json_files = sorted(output_dir.rglob("*_content_list.json"))
     for path in json_files:
         try:
@@ -92,15 +92,15 @@ def _read_content_list_blocks(output_dir: Path, parser_config: ParserConfig) -> 
     return None
 
 
-def _content_list_to_chunks(data, parser_config: ParserConfig) -> list[str]:
+def _content_list_to_chunks(data, parser_config: MineruParserConfig) -> list[str]:
     return [document["content"] for document in _content_list_to_documents(data, "", parser_config)]
 
 
-def _content_list_to_documents(data, filename: str, parser_config: ParserConfig) -> list[dict]:
+def _content_list_to_documents(data, filename: str, parser_config: MineruParserConfig) -> list[dict]:
     return blocks_to_documents(_content_list_to_blocks(data, parser_config), filename, parser_config)
 
 
-def _content_list_to_blocks(data, parser_config: ParserConfig) -> list[Block]:
+def _content_list_to_blocks(data, parser_config: MineruParserConfig) -> list[Block]:
     if not isinstance(data, list):
         return []
     blocks = []
@@ -111,7 +111,7 @@ def _content_list_to_blocks(data, parser_config: ParserConfig) -> list[Block]:
     return blocks
 
 
-def _content_item_to_blocks(item: dict, parser_config: ParserConfig) -> list[Block]:
+def _content_item_to_blocks(item: dict, parser_config: MineruParserConfig) -> list[Block]:
     item_type = item.get("type")
     if item_type == "table":
         return _table_item_to_blocks(item, _text_value(item.get("table_caption")), parser_config)
@@ -125,7 +125,7 @@ def _content_item_to_blocks(item: dict, parser_config: ParserConfig) -> list[Blo
     return [TextBlock(text)]
 
 
-def _table_item_to_blocks(item: dict, caption: str, parser_config: ParserConfig) -> list[Block]:
+def _table_item_to_blocks(item: dict, caption: str, parser_config: MineruParserConfig) -> list[Block]:
     table_body = item.get("table_body") or item.get("html")
     if isinstance(table_body, str) and table_body.strip():
         return _table_rows_to_blocks(caption, html_table_to_rows(table_body), parser_config)
@@ -139,11 +139,11 @@ def _table_item_to_blocks(item: dict, caption: str, parser_config: ParserConfig)
     return _table_rows_to_blocks(caption, normalized_rows, parser_config)
 
 
-def _table_rows_to_chunks(title: str, rows: list[list[str]], parser_config: ParserConfig) -> list[str]:
+def _table_rows_to_chunks(title: str, rows: list[list[str]], parser_config: MineruParserConfig) -> list[str]:
     return blocks_to_chunks(_table_rows_to_blocks(title, rows, parser_config), parser_config)
 
 
-def _table_rows_to_blocks(title: str, rows: list[list[str]], parser_config: ParserConfig) -> list[Block]:
+def _table_rows_to_blocks(title: str, rows: list[list[str]], parser_config: MineruParserConfig) -> list[Block]:
     if not rows:
         return []
     blocks = []

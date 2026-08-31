@@ -5,7 +5,10 @@ from typing import Protocol
 
 from rag.ocr.base import OCR
 from rag.parser.schema import Block
-from rag.schema import ParserConfig
+from rag.schema import MineruParserConfig, UnstructuredParserConfig
+
+
+BackendParserConfig = MineruParserConfig | UnstructuredParserConfig
 
 
 class Parser(Protocol):
@@ -22,7 +25,7 @@ class Parser(Protocol):
 
 
 class BlockParser(ABC):
-    def __init__(self, parser_config: ParserConfig):
+    def __init__(self, parser_config: BackendParserConfig):
         self.parser_config = parser_config
 
     @abstractmethod

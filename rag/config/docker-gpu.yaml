@@ -40,12 +40,27 @@ embedding:
   sparse_batch_size: 8
   release_memory: after_call
 parser:
-  text:
-    chunk_size: 500
-    chunk_overlap: 80
-  table:
-    header_backward_chars: 160
-    footer_forward_chars: 160
+  mineru:
+    enable: true
+    text:
+      chunk_size: 500
+      chunk_overlap: 80
+    table:
+      header_backward_chars: 160
+      footer_forward_chars: 160
+  unstructured:
+    enable: false
+    strategy: hi_res
+    infer_table_structure: true
+    languages:
+      - chi_sim
+      - eng
+    text:
+      chunk_size: 500
+      chunk_overlap: 80
+    table:
+      header_backward_chars: 160
+      footer_forward_chars: 160
 rerank:
   bge_base:
     enable: false

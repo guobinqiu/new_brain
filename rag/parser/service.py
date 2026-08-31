@@ -1,15 +1,22 @@
 from rag.ocr.base import OCR
+from rag.parser.mineru_document import MineruDocumentParser
+from rag.parser.unstructured import UnstructuredDocumentParser
 from rag.schema import ParserConfig
-
-from rag.parser.document import DocumentParser
 
 
 class ParserService:
     def __init__(self, config: ParserConfig, ocr: OCR | None = None):
         self.config = config
         self.ocr = ocr
-        self.document = DocumentParser(config, ocr=ocr)
+        self.document = self._build_document_parser(config, ocr)
         self.ready = False
+
+    def _build_document_parser(self, config: ParserConfig, ocr: OCR | None):
+        if config.enabled_parser == "mineru":
+            return MineruDocumentParser(config.mineru, ocr=ocr)
+        if config.enabled_parser == "unstructured":
+            return UnstructuredDocumentParser(config.unstructured, ocr=ocr)
+        raise ValueError(f"unsupported parser: {config.enabled_parser}")
 
     def start(self) -> None:
         self.document.start()

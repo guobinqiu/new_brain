@@ -73,6 +73,30 @@ def _parse_file(filepath: str, original_filename: str | None = None, ocr=None, p
         parser_service.stop()
 
 
+def _mineru_parser(chunk_size: int = 500, chunk_overlap: int = 80, table=None):
+    from rag.schema import MineruParserConfig, ParserConfig, TableParserConfig, TextParserConfig
+
+    return ParserConfig(
+        mineru=MineruParserConfig(
+            text=TextParserConfig(chunk_size=chunk_size, chunk_overlap=chunk_overlap),
+            table=table or TableParserConfig(),
+        ),
+    )
+
+
+def _unstructured_parser(strategy="hi_res", infer_table_structure=True):
+    from rag.schema import MineruParserConfig, ParserConfig, UnstructuredParserConfig
+
+    return ParserConfig(
+        mineru=MineruParserConfig(enable=False),
+        unstructured=UnstructuredParserConfig(
+            enable=True,
+            strategy=strategy,
+            infer_table_structure=infer_table_structure,
+        ),
+    )
+
+
 # =============================================================================
 # 1. Parser Service Tests
 # =============================================================================
@@ -146,10 +170,10 @@ class TestParserService:
                 encoding="utf-8",
             )
 
-        monkeypatch.setattr(parser.mineru, "table_parser_available", lambda: True)
-        monkeypatch.setattr(parser.mineru, "load_table_parser", lambda: None)
-        monkeypatch.setattr(parser.mineru.tempfile, "TemporaryDirectory", lambda prefix: _TempDir(tmp_path / "mineru-output"))
-        monkeypatch.setattr(parser.mineru, "_mineru_do_parse", fake_do_parse)
+        monkeypatch.setattr(rag.parser.mineru, "table_parser_available", lambda: True)
+        monkeypatch.setattr(rag.parser.mineru, "load_table_parser", lambda: None)
+        monkeypatch.setattr(rag.parser.mineru.tempfile, "TemporaryDirectory", lambda prefix: _TempDir(tmp_path / "mineru-output"))
+        monkeypatch.setattr(rag.parser.mineru, "_mineru_do_parse", fake_do_parse)
 
         chunks = _parse_file(str(md_file))
 
@@ -212,10 +236,10 @@ class TestParserService:
                 encoding="utf-8",
             )
 
-        monkeypatch.setattr(parser.mineru, "table_parser_available", lambda: True)
-        monkeypatch.setattr(parser.mineru, "load_table_parser", lambda: None)
-        monkeypatch.setattr(parser.mineru.tempfile, "TemporaryDirectory", lambda prefix: _TempDir(tmp_path / "mineru-output"))
-        monkeypatch.setattr(parser.mineru, "_mineru_do_parse", fake_do_parse)
+        monkeypatch.setattr(rag.parser.mineru, "table_parser_available", lambda: True)
+        monkeypatch.setattr(rag.parser.mineru, "load_table_parser", lambda: None)
+        monkeypatch.setattr(rag.parser.mineru.tempfile, "TemporaryDirectory", lambda prefix: _TempDir(tmp_path / "mineru-output"))
+        monkeypatch.setattr(rag.parser.mineru, "_mineru_do_parse", fake_do_parse)
 
         chunks = _parse_file(str(docx_file))
 
@@ -252,10 +276,10 @@ class TestParserService:
                 payload = [{"type": "text", "text": "Word 图片文字"}]
             (output_dir / f"{len(calls)}_content_list.json").write_text(json.dumps(payload), encoding="utf-8")
 
-        monkeypatch.setattr(parser.mineru, "table_parser_available", lambda: True)
-        monkeypatch.setattr(parser.mineru, "load_table_parser", lambda: None)
-        monkeypatch.setattr(parser.mineru.tempfile, "TemporaryDirectory", lambda prefix: _TempDir(tmp_path / f"mineru-output-{len(calls) + 1}"))
-        monkeypatch.setattr(parser.mineru, "_mineru_do_parse", fake_do_parse)
+        monkeypatch.setattr(rag.parser.mineru, "table_parser_available", lambda: True)
+        monkeypatch.setattr(rag.parser.mineru, "load_table_parser", lambda: None)
+        monkeypatch.setattr(rag.parser.mineru.tempfile, "TemporaryDirectory", lambda prefix: _TempDir(tmp_path / f"mineru-output-{len(calls) + 1}"))
+        monkeypatch.setattr(rag.parser.mineru, "_mineru_do_parse", fake_do_parse)
 
         chunks = _parse_file(str(docx_file))
 
@@ -292,10 +316,10 @@ class TestParserService:
                 encoding="utf-8",
             )
 
-        monkeypatch.setattr(parser.mineru, "table_parser_available", lambda: True)
-        monkeypatch.setattr(parser.mineru, "load_table_parser", lambda: None)
-        monkeypatch.setattr(parser.mineru.tempfile, "TemporaryDirectory", lambda prefix: _TempDir(tmp_path / "mineru-output"))
-        monkeypatch.setattr(parser.mineru, "_mineru_do_parse", fake_do_parse)
+        monkeypatch.setattr(rag.parser.mineru, "table_parser_available", lambda: True)
+        monkeypatch.setattr(rag.parser.mineru, "load_table_parser", lambda: None)
+        monkeypatch.setattr(rag.parser.mineru.tempfile, "TemporaryDirectory", lambda prefix: _TempDir(tmp_path / "mineru-output"))
+        monkeypatch.setattr(rag.parser.mineru, "_mineru_do_parse", fake_do_parse)
 
         chunks = _parse_file(str(docx_file))
 
@@ -342,10 +366,10 @@ class TestParserService:
                 encoding="utf-8",
             )
 
-        monkeypatch.setattr(parser.mineru, "table_parser_available", lambda: True)
-        monkeypatch.setattr(parser.mineru, "load_table_parser", lambda: None)
-        monkeypatch.setattr(parser.mineru.tempfile, "TemporaryDirectory", lambda prefix: _TempDir(tmp_path / "mineru-output"))
-        monkeypatch.setattr(parser.mineru, "_mineru_do_parse", fake_do_parse)
+        monkeypatch.setattr(rag.parser.mineru, "table_parser_available", lambda: True)
+        monkeypatch.setattr(rag.parser.mineru, "load_table_parser", lambda: None)
+        monkeypatch.setattr(rag.parser.mineru.tempfile, "TemporaryDirectory", lambda prefix: _TempDir(tmp_path / "mineru-output"))
+        monkeypatch.setattr(rag.parser.mineru, "_mineru_do_parse", fake_do_parse)
 
         chunks = _parse_file(str(xlsx_file))
 
@@ -384,10 +408,10 @@ class TestParserService:
                 payload = [{"type": "text", "text": "Excel 图片文字"}]
             (output_dir / f"{len(calls)}_content_list.json").write_text(json.dumps(payload), encoding="utf-8")
 
-        monkeypatch.setattr(parser.mineru, "table_parser_available", lambda: True)
-        monkeypatch.setattr(parser.mineru, "load_table_parser", lambda: None)
-        monkeypatch.setattr(parser.mineru.tempfile, "TemporaryDirectory", lambda prefix: _TempDir(tmp_path / f"mineru-output-{len(calls) + 1}"))
-        monkeypatch.setattr(parser.mineru, "_mineru_do_parse", fake_do_parse)
+        monkeypatch.setattr(rag.parser.mineru, "table_parser_available", lambda: True)
+        monkeypatch.setattr(rag.parser.mineru, "load_table_parser", lambda: None)
+        monkeypatch.setattr(rag.parser.mineru.tempfile, "TemporaryDirectory", lambda prefix: _TempDir(tmp_path / f"mineru-output-{len(calls) + 1}"))
+        monkeypatch.setattr(rag.parser.mineru, "_mineru_do_parse", fake_do_parse)
 
         chunks = _parse_file(str(xlsx_file))
 
@@ -424,14 +448,139 @@ class TestParserService:
         with pytest.raises(ValueError, match="Invalid image file"):
             _parse_file(str(image_file), ocr=object())
 
-    def test_parser_service_uses_document_parser(self):
-        from rag.parser.document import DocumentParser
+    def test_parser_service_uses_mineru_document_parser(self):
+        from rag.parser.mineru_document import MineruDocumentParser
         from rag.parser.service import ParserService
         from rag.schema import ParserConfig
 
         parser_service = ParserService(ParserConfig())
 
-        assert isinstance(parser_service.document, DocumentParser)
+        assert isinstance(parser_service.document, MineruDocumentParser)
+
+    def test_parser_service_uses_unstructured_document_parser(self):
+        from rag.parser.service import ParserService
+        from rag.parser.unstructured import UnstructuredDocumentParser
+        parser_service = ParserService(_unstructured_parser())
+
+        assert isinstance(parser_service.document, UnstructuredDocumentParser)
+
+    def test_parse_txt_file_with_unstructured_parser(self, tmp_path, monkeypatch):
+        from rag.parser import unstructured as unstructured_parser
+        text_file = tmp_path / "note.txt"
+        text_file.write_text("第一段内容\n第二段内容", encoding="utf-8")
+
+        class FakeElement:
+            category = "NarrativeText"
+
+            def __init__(self, text):
+                self.text = text
+
+            def __str__(self):
+                return self.text
+
+        monkeypatch.setattr(unstructured_parser, "_partition_file", lambda filepath, config: [FakeElement("第一段内容"), FakeElement("第二段内容")])
+
+        chunks = _parse_file(str(text_file), parser=_unstructured_parser())
+
+        assert len(chunks) == 1
+        assert chunks[0]["content"] == "第一段内容\n第二段内容"
+        assert chunks[0]["metadata"]["filename"] == "note.txt"
+
+    def test_parse_pdf_embedded_image_with_unstructured_parser(self, tmp_path, monkeypatch):
+        import fitz
+        from PIL import Image
+        from rag.parser import unstructured as unstructured_parser
+        image_file = tmp_path / "chart.png"
+        Image.new("RGB", (30, 30), "white").save(str(image_file))
+        pdf_file = tmp_path / "image.pdf"
+        doc = fitz.open()
+        page = doc.new_page()
+        page.insert_text((72, 72), "PDF body")
+        page.insert_image(fitz.Rect(72, 100, 160, 188), filename=str(image_file))
+        doc.save(str(pdf_file))
+        doc.close()
+
+        class FakeElement:
+            category = "NarrativeText"
+
+            def __init__(self, text):
+                self.text = text
+
+            def __str__(self):
+                return self.text
+
+        def fake_partition(filepath, config):
+            if filepath.endswith(".pdf"):
+                return [FakeElement("PDF body")]
+            return [FakeElement("PDF 图片文字")]
+
+        monkeypatch.setattr(unstructured_parser, "_partition_file", fake_partition)
+
+        chunks = _parse_file(str(pdf_file), parser=_unstructured_parser())
+
+        content = "\n".join(chunk["content"] for chunk in chunks)
+        assert "PDF body" in content
+        assert "PDF 图片文字" in content
+
+    def test_parse_pdf_fast_without_table_inference_skips_embedded_images(self, tmp_path, monkeypatch):
+        from rag.parser import unstructured as unstructured_parser
+        pdf_file = tmp_path / "image.pdf"
+        pdf_file.write_bytes(
+            b"%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n"
+            b"2 0 obj<</Type/Pages/Count 0/Kids[]>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF"
+        )
+
+        class FakeElement:
+            category = "NarrativeText"
+
+            def __init__(self, text):
+                self.text = text
+
+            def __str__(self):
+                return self.text
+
+        calls = []
+
+        def fake_partition(filepath, config):
+            calls.append(filepath)
+            return [FakeElement("PDF body")]
+
+        monkeypatch.setattr(unstructured_parser, "_partition_file", fake_partition)
+
+        chunks = _parse_file(str(pdf_file), parser=_unstructured_parser(strategy="fast", infer_table_structure=False))
+
+        assert len(chunks) == 1
+        assert chunks[0]["content"] == "PDF body"
+        assert calls == [str(pdf_file)]
+
+    def test_parse_image_file_with_unstructured_parser_keeps_table_blocks(self, tmp_path, monkeypatch):
+        from PIL import Image
+        from rag.parser import unstructured as unstructured_parser
+        image_file = tmp_path / "table.png"
+        Image.new("RGB", (10, 10), "white").save(str(image_file))
+        calls = []
+
+        class FakeMetadata:
+            text_as_html = "<table><tr><td>指标</td><td>值</td></tr></table>"
+
+        class FakeTable:
+            category = "Table"
+            metadata = FakeMetadata()
+
+            def __str__(self):
+                return "指标 值"
+
+        def fake_partition(filepath, config):
+            calls.append((filepath, config.strategy, config.infer_table_structure, config.languages))
+            return [FakeTable()]
+
+        monkeypatch.setattr(unstructured_parser, "_partition_file", fake_partition)
+
+        chunks = _parse_file(str(image_file), parser=_unstructured_parser())
+
+        assert len(chunks) == 1
+        assert chunks[0]["content"] == "<table><tr><td>指标</td><td>值</td></tr></table>"
+        assert calls == [(str(image_file), "hi_res", True, ["chi_sim", "eng"])]
 
     def test_parse_image_file_uses_mineru(self, tmp_path, monkeypatch):
         import json
@@ -453,10 +602,10 @@ class TestParserService:
                 encoding="utf-8",
             )
 
-        monkeypatch.setattr(parser.mineru, "table_parser_available", lambda: True)
-        monkeypatch.setattr(parser.mineru, "load_table_parser", lambda: None)
-        monkeypatch.setattr(parser.mineru.tempfile, "TemporaryDirectory", lambda prefix: _TempDir(tmp_path / "mineru-output"))
-        monkeypatch.setattr(parser.mineru, "_mineru_do_parse", fake_do_parse)
+        monkeypatch.setattr(rag.parser.mineru, "table_parser_available", lambda: True)
+        monkeypatch.setattr(rag.parser.mineru, "load_table_parser", lambda: None)
+        monkeypatch.setattr(rag.parser.mineru.tempfile, "TemporaryDirectory", lambda prefix: _TempDir(tmp_path / "mineru-output"))
+        monkeypatch.setattr(rag.parser.mineru, "_mineru_do_parse", fake_do_parse)
 
         chunks = _parse_file(str(image_file))
 
@@ -493,10 +642,10 @@ class TestParserService:
                 payload = [{"type": "text", "text": "图片里的普通文字"}]
             (output_dir / f"{len(calls)}_content_list.json").write_text(json.dumps(payload), encoding="utf-8")
 
-        monkeypatch.setattr(parser.mineru, "table_parser_available", lambda: True)
-        monkeypatch.setattr(parser.mineru, "load_table_parser", lambda: None)
-        monkeypatch.setattr(parser.mineru.tempfile, "TemporaryDirectory", lambda prefix: _TempDir(tmp_path / f"mineru-output-{len(calls) + 1}"))
-        monkeypatch.setattr(parser.mineru, "_mineru_do_parse", fake_do_parse)
+        monkeypatch.setattr(rag.parser.mineru, "table_parser_available", lambda: True)
+        monkeypatch.setattr(rag.parser.mineru, "load_table_parser", lambda: None)
+        monkeypatch.setattr(rag.parser.mineru.tempfile, "TemporaryDirectory", lambda prefix: _TempDir(tmp_path / f"mineru-output-{len(calls) + 1}"))
+        monkeypatch.setattr(rag.parser.mineru, "_mineru_do_parse", fake_do_parse)
 
         chunks = _parse_file(str(pdf_file))
 
@@ -564,7 +713,7 @@ class TestParserService:
 
         chunks = _parse_file(
             str(src),
-            parser=ParserConfig(chunk_size=120, chunk_overlap=20),
+            parser=_mineru_parser(chunk_size=120, chunk_overlap=20),
         )
 
         assert len(chunks) > 1
@@ -669,14 +818,14 @@ class TestParserService:
             )
             (output_dir / "json-table.md").write_text("坏的 markdown", encoding="utf-8")
 
-        monkeypatch.setattr(parser.mineru, "table_parser_available", lambda: True)
-        monkeypatch.setattr(parser.mineru, "load_table_parser", lambda: None)
-        monkeypatch.setattr(parser.mineru.tempfile, "TemporaryDirectory", lambda prefix: _TempDir(tmp_path / "mineru-output"))
-        monkeypatch.setattr(parser.mineru, "_mineru_do_parse", fake_do_parse)
+        monkeypatch.setattr(rag.parser.mineru, "table_parser_available", lambda: True)
+        monkeypatch.setattr(rag.parser.mineru, "load_table_parser", lambda: None)
+        monkeypatch.setattr(rag.parser.mineru.tempfile, "TemporaryDirectory", lambda prefix: _TempDir(tmp_path / "mineru-output"))
+        monkeypatch.setattr(rag.parser.mineru, "_mineru_do_parse", fake_do_parse)
 
         chunks = _parse_file(
             str(pdf_file),
-            parser=ParserConfig(chunk_size=500, chunk_overlap=80),
+            parser=_mineru_parser(chunk_size=500, chunk_overlap=80),
         )
 
         combined = "\n".join(chunk["content"] for chunk in chunks)
@@ -718,14 +867,14 @@ class TestParserService:
                 encoding="utf-8",
             )
 
-        monkeypatch.setattr(parser.mineru, "table_parser_available", lambda: True)
-        monkeypatch.setattr(parser.mineru, "load_table_parser", lambda: None)
-        monkeypatch.setattr(parser.mineru.tempfile, "TemporaryDirectory", lambda prefix: _TempDir(tmp_path / "mineru-output"))
-        monkeypatch.setattr(parser.mineru, "_mineru_do_parse", fake_do_parse)
+        monkeypatch.setattr(rag.parser.mineru, "table_parser_available", lambda: True)
+        monkeypatch.setattr(rag.parser.mineru, "load_table_parser", lambda: None)
+        monkeypatch.setattr(rag.parser.mineru.tempfile, "TemporaryDirectory", lambda prefix: _TempDir(tmp_path / "mineru-output"))
+        monkeypatch.setattr(rag.parser.mineru, "_mineru_do_parse", fake_do_parse)
 
         chunks = _parse_file(
             str(pdf_file),
-            parser=ParserConfig(chunk_size=80, chunk_overlap=10),
+            parser=_mineru_parser(chunk_size=80, chunk_overlap=10),
         )
 
         table_chunks = [chunk for chunk in chunks if "| FAISS | V | X |" in chunk["content"]]
@@ -750,7 +899,7 @@ class TestParserService:
                 "<tr><td>Chroma</td><td>V</td><td>X</td><td>X</td><td>！基础支持</td></tr>"
                 "</table>"
             ),
-            ParserConfig(chunk_size=500, chunk_overlap=80),
+            _mineru_parser(chunk_size=500, chunk_overlap=80).mineru,
         )
 
         assert len(chunks) == 3
@@ -790,14 +939,14 @@ class TestParserService:
                 encoding="utf-8",
             )
 
-        monkeypatch.setattr(parser.mineru, "table_parser_available", lambda: True)
-        monkeypatch.setattr(parser.mineru, "load_table_parser", lambda: None)
-        monkeypatch.setattr(parser.mineru.tempfile, "TemporaryDirectory", lambda prefix: _TempDir(tmp_path / "mineru-output"))
-        monkeypatch.setattr(parser.mineru, "_mineru_do_parse", fake_do_parse)
+        monkeypatch.setattr(rag.parser.mineru, "table_parser_available", lambda: True)
+        monkeypatch.setattr(rag.parser.mineru, "load_table_parser", lambda: None)
+        monkeypatch.setattr(rag.parser.mineru.tempfile, "TemporaryDirectory", lambda prefix: _TempDir(tmp_path / "mineru-output"))
+        monkeypatch.setattr(rag.parser.mineru, "_mineru_do_parse", fake_do_parse)
 
         chunks = _parse_file(
             str(pdf_file),
-            parser=ParserConfig(chunk_size=80, chunk_overlap=10),
+            parser=_mineru_parser(chunk_size=80, chunk_overlap=10),
         )
 
         assert len(chunks) == 3
@@ -833,14 +982,14 @@ class TestParserService:
                 encoding="utf-8",
             )
 
-        monkeypatch.setattr(parser.mineru, "table_parser_available", lambda: True)
-        monkeypatch.setattr(parser.mineru, "load_table_parser", lambda: None)
-        monkeypatch.setattr(parser.mineru.tempfile, "TemporaryDirectory", lambda prefix: _TempDir(tmp_path / "mineru-output"))
-        monkeypatch.setattr(parser.mineru, "_mineru_do_parse", fake_do_parse)
+        monkeypatch.setattr(rag.parser.mineru, "table_parser_available", lambda: True)
+        monkeypatch.setattr(rag.parser.mineru, "load_table_parser", lambda: None)
+        monkeypatch.setattr(rag.parser.mineru.tempfile, "TemporaryDirectory", lambda prefix: _TempDir(tmp_path / "mineru-output"))
+        monkeypatch.setattr(rag.parser.mineru, "_mineru_do_parse", fake_do_parse)
 
         chunks = _parse_file(
             str(pdf_file),
-            parser=ParserConfig(chunk_size=100, chunk_overlap=10),
+            parser=_mineru_parser(chunk_size=100, chunk_overlap=10),
         )
 
         assert chunks[0]["content"] == "第一段正文\n第二段正文"
@@ -881,14 +1030,14 @@ class TestParserService:
                 encoding="utf-8",
             )
 
-        monkeypatch.setattr(parser.mineru, "table_parser_available", lambda: True)
-        monkeypatch.setattr(parser.mineru, "load_table_parser", lambda: None)
-        monkeypatch.setattr(parser.mineru.tempfile, "TemporaryDirectory", lambda prefix: _TempDir(tmp_path / "mineru-output"))
-        monkeypatch.setattr(parser.mineru, "_mineru_do_parse", fake_do_parse)
+        monkeypatch.setattr(rag.parser.mineru, "table_parser_available", lambda: True)
+        monkeypatch.setattr(rag.parser.mineru, "load_table_parser", lambda: None)
+        monkeypatch.setattr(rag.parser.mineru.tempfile, "TemporaryDirectory", lambda prefix: _TempDir(tmp_path / "mineru-output"))
+        monkeypatch.setattr(rag.parser.mineru, "_mineru_do_parse", fake_do_parse)
 
         chunks = _parse_file(
             str(pdf_file),
-            parser=ParserConfig(chunk_size=80, chunk_overlap=10),
+            parser=_mineru_parser(chunk_size=80, chunk_overlap=10),
         )
 
         assert chunks[0]["content"] == "| 库 | 规模 |\n| --- | --- |\n| Qdrant | 中 |"
@@ -930,14 +1079,14 @@ class TestParserService:
                 encoding="utf-8",
             )
 
-        monkeypatch.setattr(parser.mineru, "table_parser_available", lambda: True)
-        monkeypatch.setattr(parser.mineru, "load_table_parser", lambda: None)
-        monkeypatch.setattr(parser.mineru.tempfile, "TemporaryDirectory", lambda prefix: _TempDir(tmp_path / "mineru-output"))
-        monkeypatch.setattr(parser.mineru, "_mineru_do_parse", fake_do_parse)
+        monkeypatch.setattr(rag.parser.mineru, "table_parser_available", lambda: True)
+        monkeypatch.setattr(rag.parser.mineru, "load_table_parser", lambda: None)
+        monkeypatch.setattr(rag.parser.mineru.tempfile, "TemporaryDirectory", lambda prefix: _TempDir(tmp_path / "mineru-output"))
+        monkeypatch.setattr(rag.parser.mineru, "_mineru_do_parse", fake_do_parse)
 
         chunks = _parse_file(
             str(pdf_file),
-            parser=ParserConfig(chunk_size=80, chunk_overlap=10),
+            parser=_mineru_parser(chunk_size=80, chunk_overlap=10),
         )
 
         assert chunks[0]["content"] == "| 库 | 规模 |\n| --- | --- |\n| Qdrant | 中 |\n\n7. 架构类型对比"
@@ -969,10 +1118,10 @@ class TestParserService:
                 encoding="utf-8",
             )
 
-        monkeypatch.setattr(parser.mineru, "table_parser_available", lambda: True)
-        monkeypatch.setattr(parser.mineru, "load_table_parser", lambda: None)
-        monkeypatch.setattr(parser.mineru.tempfile, "TemporaryDirectory", lambda prefix: _TempDir(tmp_path / "mineru-output"))
-        monkeypatch.setattr(parser.mineru, "_mineru_do_parse", fake_do_parse)
+        monkeypatch.setattr(rag.parser.mineru, "table_parser_available", lambda: True)
+        monkeypatch.setattr(rag.parser.mineru, "load_table_parser", lambda: None)
+        monkeypatch.setattr(rag.parser.mineru.tempfile, "TemporaryDirectory", lambda prefix: _TempDir(tmp_path / "mineru-output"))
+        monkeypatch.setattr(rag.parser.mineru, "_mineru_do_parse", fake_do_parse)
 
         chunks = _parse_file(test_img_path)
         assert len(chunks) > 0

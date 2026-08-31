@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import os
 import threading
 import time
@@ -35,6 +36,7 @@ _ready = False
 
 _document_locks: defaultdict[str, threading.Lock] = defaultdict(threading.Lock)
 _document_locks_guard = threading.Lock()
+logger = logging.getLogger("rag.indexing")
 
 
 class QdrantStore:
@@ -380,10 +382,15 @@ def add_file_chunks(chunks: list[dict], file_id: str) -> int:
     _require_search_ready()
     with _document_lock(file_id):
         delete_file_chunks(file_id)
+        points = _to_points(chunks, file_id)
+        started = time.perf_counter()
+        logger.info("Qdrant upsert start", extra={"event": "qdrant_upsert_start", "file_id": file_id, "chunk_count": len(chunks), "point_count": len(points)})
         get_qdrant_client().upsert(
             collection_name=_chunks_collection(),
-            points=_to_points(chunks, file_id),
+            points=points,
         )
+        total_ms = round((time.perf_counter() - started) * 1000, 1)
+        logger.info("Qdrant upsert done", extra={"event": "qdrant_upsert_done", "file_id": file_id, "chunk_count": len(chunks), "point_count": len(points), "total_ms": total_ms})
     return len(chunks)
 
 
@@ -509,8 +516,19 @@ def _record_to_document(row) -> dict:
 
 def _to_points(chunks: list[dict], file_id: str) -> list[models.PointStruct]:
     contents = [chunk["content"] for chunk in chunks]
+    started = time.perf_counter()
+    logger.info("Dense embedding start", extra={"event": "dense_embedding_start", "file_id": file_id, "chunk_count": len(chunks)})
     dense_vectors = _get_dense().embed_documents(contents)
-    sparse_vectors = _sparse_vectors_for_documents(contents) if _sparse_uses_store() else [None] * len(chunks)
+    total_ms = round((time.perf_counter() - started) * 1000, 1)
+    logger.info("Dense embedding done", extra={"event": "dense_embedding_done", "file_id": file_id, "chunk_count": len(chunks), "total_ms": total_ms})
+    if _sparse_uses_store():
+        started = time.perf_counter()
+        logger.info("Sparse embedding start", extra={"event": "sparse_embedding_start", "file_id": file_id, "chunk_count": len(chunks)})
+        sparse_vectors = _sparse_vectors_for_documents(contents)
+        total_ms = round((time.perf_counter() - started) * 1000, 1)
+        logger.info("Sparse embedding done", extra={"event": "sparse_embedding_done", "file_id": file_id, "chunk_count": len(chunks), "total_ms": total_ms})
+    else:
+        sparse_vectors = [None] * len(chunks)
     points = []
     for chunk, dense_vector, sparse_vector in zip(chunks, dense_vectors, sparse_vectors):
         point_id = _point_id(chunk["id"])

@@ -9,7 +9,7 @@ from rag.paddle_runtime import prepare_paddle_runtime
 from rag.parser.schema import Block
 from rag.parser.table_transform import read_table_blocks, read_table_documents
 from rag.parser.validation import validate_pdf_file
-from rag.schema import ParserConfig
+from rag.schema import MineruParserConfig
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -30,7 +30,7 @@ def load_table_parser() -> None:
     ModelSingleton().get_model(lang="ch", formula_enable=True, table_enable=True)
 
 
-def parse_pdf_table(filepath: str, filename: str, parser_config: ParserConfig) -> list[dict]:
+def parse_pdf_table(filepath: str, filename: str, parser_config: MineruParserConfig) -> list[dict]:
     if not table_parser_available():
         raise ValueError("table parser is not installed")
     validate_pdf_file(filepath)
@@ -51,7 +51,7 @@ def parse_pdf_table(filepath: str, filename: str, parser_config: ParserConfig) -
     return chunks
 
 
-def parse_document_blocks(filepath: str, filename: str, file_type: str, parser_config: ParserConfig) -> list[Block]:
+def parse_document_blocks(filepath: str, filename: str, file_type: str, parser_config: MineruParserConfig) -> list[Block]:
     if not table_parser_available():
         raise ValueError("table parser is not installed")
 

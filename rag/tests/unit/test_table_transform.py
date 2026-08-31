@@ -1,11 +1,11 @@
 from rag.parser.chunker import blocks_to_documents, blocks_to_chunks
 from rag.parser.schema import TableBlock, TextBlock
 from rag.parser.table_transform import table_html_to_blocks
-from rag.schema import ParserConfig
+from rag.schema import MineruParserConfig, TableParserConfig, TextParserConfig
 
 
 def test_table_blocks_carry_context_without_changing_text_blocks():
-    config = ParserConfig(chunk_size=200, chunk_overlap=20)
+    config = MineruParserConfig(text=TextParserConfig(chunk_size=200, chunk_overlap=20))
     blocks = [
         TextBlock("前置说明文字很长"),
         *table_html_to_blocks(
@@ -28,7 +28,7 @@ def test_table_blocks_carry_context_without_changing_text_blocks():
 
 
 def test_table_documents_include_table_metadata():
-    config = ParserConfig(chunk_size=200, chunk_overlap=20)
+    config = MineruParserConfig(text=TextParserConfig(chunk_size=200, chunk_overlap=20))
     blocks = [
         TextBlock("表格标题"),
         *table_html_to_blocks(
@@ -45,7 +45,7 @@ def test_table_documents_include_table_metadata():
 
 
 def test_table_uses_next_section_title_as_footer_context():
-    config = ParserConfig(chunk_size=200, chunk_overlap=20)
+    config = MineruParserConfig(text=TextParserConfig(chunk_size=200, chunk_overlap=20))
     blocks = [
         TextBlock("1. 数据规模对比"),
         *table_html_to_blocks(
@@ -76,7 +76,7 @@ def test_table_uses_next_section_title_as_footer_context():
 def test_table_context_uses_configured_backward_and_forward_chars():
     from rag.parser.chunker import blocks_to_documents
     from rag.parser.schema import TableBlock, TextBlock
-    from rag.schema import ParserConfig, TableParserConfig
+    from rag.schema import MineruParserConfig, TableParserConfig
 
     chunks = blocks_to_documents(
         [
@@ -85,7 +85,7 @@ def test_table_context_uses_configured_backward_and_forward_chars():
             TextBlock("B" * 20 + "后文"),
         ],
         "report.md",
-        ParserConfig(table=TableParserConfig(header_backward_chars=6, footer_forward_chars=5)),
+        MineruParserConfig(table=TableParserConfig(header_backward_chars=6, footer_forward_chars=5)),
     )
 
     assert chunks[1]["content"] == "AAAAAA\n\n| 名称 | 大小 |\n| --- | --- |\n| bootstrap | 70MB |\n\nBBBBB"
@@ -98,7 +98,7 @@ def test_table_uses_first_single_cell_row_as_title():
         "<tr><td>向量库</td><td>安装难度</td><td>集群管理</td></tr>"
         "<tr><td>Qdrant</td><td>Docker</td><td>K8s</td></tr>"
         "</table>",
-        ParserConfig(),
+        MineruParserConfig(),
     )
 
     assert len(blocks) == 1

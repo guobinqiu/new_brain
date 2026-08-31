@@ -23,7 +23,7 @@ class TextBlockParser(BlockParser):
         text = clean_cjk_spaces(self._load_text(filepath, ext, filename))
         if not text.strip():
             raise ValueError(f"Empty file: {filename}")
-        chunks = split_text(text, self.parser_config.chunk_size, self.parser_config.chunk_overlap)
+        chunks = split_text(text, self.parser_config.text.chunk_size, self.parser_config.text.chunk_overlap)
         return [TextBlock(text) for text in chunks]
 
     def _load_text(self, filepath: str, ext: str, filename: str) -> str:

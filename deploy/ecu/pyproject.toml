@@ -28,6 +28,7 @@ dependencies = [
     "pillow>=12.3.0",
     "modelscope>=1.39.0",
     "mineru[core]>=3.4.0",
+    "unstructured[all-docs]>=0.18.0",
     "FlagEmbedding>=1.3.5",
     "opencv-python-headless>=4.10.0.84,<5.0.0",
     "dependency-injector>=4.48.0",
