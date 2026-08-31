@@ -38,7 +38,7 @@ search:
 embedding:
   dense_batch_size: 4
   sparse_batch_size: 4
-  release_memory: per_batch
+  release_memory: never
 parser:
   text:
     chunk_size: 500
