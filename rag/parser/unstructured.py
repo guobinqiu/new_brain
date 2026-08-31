@@ -11,6 +11,7 @@ from urllib.parse import unquote, urlparse
 from rag.ocr.base import OCR
 from rag.parser.chunker import blocks_to_documents
 from rag.parser.schema import Block, TableBlock, TextBlock
+from rag.parser.table_transform import table_html_to_blocks
 from rag.parser.validation import validate_docx_file, validate_image_file, validate_pdf_file, validate_xlsx_file
 from rag.schema import UnstructuredParserConfig
 
@@ -87,11 +88,6 @@ def _prepare_unstructured_runtime_config() -> None:
         constants.HF_HUB_CACHE = str(HF_CACHE_DIR)
         constants.HF_HUB_OFFLINE = True
         hub._is_offline_mode = True
-    table_model = _local_hf_snapshot(TABLE_STRUCTURE_MODEL_CACHE)
-    if table_model is not None:
-        from unstructured_inference.models import tables
-
-        tables.DEFAULT_MODEL = str(table_model)
     if not UNSTRUCTURED_MODEL_CONFIG.exists():
         return
     os.environ.setdefault("UNSTRUCTURED_DEFAULT_MODEL_NAME", "yolox")
@@ -107,7 +103,14 @@ def _load_unstructured_layout_model() -> None:
 def _load_unstructured_table_model() -> None:
     from unstructured_inference.models import tables
 
+    _configure_unstructured_table_model(tables)
     tables.load_agent()
+
+
+def _configure_unstructured_table_model(tables) -> None:
+    table_model = _local_hf_snapshot(TABLE_STRUCTURE_MODEL_CACHE)
+    if table_model is not None:
+        tables.DEFAULT_MODEL = str(table_model)
 
 
 def _local_hf_snapshot(cache_dir: Path) -> Path | None:
@@ -135,7 +138,7 @@ def _validate_file(filepath: str, ext: str) -> None:
 
 
 def _partition_blocks(filepath: str, config: UnstructuredParserConfig) -> list[Block]:
-    return _elements_to_blocks(_partition_file(filepath, config))
+    return _elements_to_blocks(_partition_file(filepath, config), config)
 
 
 def _partition_file(filepath: str, config: UnstructuredParserConfig):
@@ -231,25 +234,34 @@ def _image_file_blocks(filepath: Path, config: UnstructuredParserConfig) -> list
         return []
 
 
-def _elements_to_blocks(elements) -> list[Block]:
+def _elements_to_blocks(elements, config: UnstructuredParserConfig) -> list[Block]:
     blocks: list[Block] = []
     for element in elements:
         text = _element_text(element)
         if not text:
             continue
         if _is_table_element(element):
-            blocks.append(TableBlock(text))
+            text_as_html = _element_text_as_html(element)
+            if text_as_html:
+                blocks.extend(table_html_to_blocks(text_as_html, config))
+            else:
+                blocks.append(TableBlock(text))
         else:
             blocks.append(TextBlock(text))
     return blocks
 
 
 def _element_text(element) -> str:
+    text_as_html = _element_text_as_html(element)
+    if text_as_html and _is_table_element(element):
+        return text_as_html
+    return str(element).strip()
+
+
+def _element_text_as_html(element) -> str:
     metadata = getattr(element, "metadata", None)
     text_as_html = getattr(metadata, "text_as_html", None) if metadata is not None else None
-    if text_as_html and _is_table_element(element):
-        return str(text_as_html).strip()
-    return str(element).strip()
+    return str(text_as_html).strip() if text_as_html else ""
 
 
 def _is_table_element(element) -> bool:

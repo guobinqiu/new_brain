@@ -479,6 +479,9 @@ class TestParserService:
                 return self.text
 
         monkeypatch.setattr(unstructured_parser, "_partition_file", lambda filepath, config: [FakeElement("第一段内容"), FakeElement("第二段内容")])
+        monkeypatch.setattr(unstructured_parser, "_prepare_unstructured_runtime_config", lambda: None)
+        monkeypatch.setattr(unstructured_parser, "_load_unstructured_layout_model", lambda: None)
+        monkeypatch.setattr(unstructured_parser, "_load_unstructured_table_model", lambda: None)
 
         chunks = _parse_file(str(text_file), parser=_unstructured_parser())
 
@@ -561,7 +564,7 @@ class TestParserService:
         calls = []
 
         class FakeMetadata:
-            text_as_html = "<table><tr><td>指标</td><td>值</td></tr></table>"
+            text_as_html = "<table><tr><td>指标</td><td>值</td></tr><tr><td>Qdrant</td><td>过滤</td></tr></table>"
 
         class FakeTable:
             category = "Table"
@@ -575,11 +578,14 @@ class TestParserService:
             return [FakeTable()]
 
         monkeypatch.setattr(unstructured_parser, "_partition_file", fake_partition)
+        monkeypatch.setattr(unstructured_parser, "_prepare_unstructured_runtime_config", lambda: None)
+        monkeypatch.setattr(unstructured_parser, "_load_unstructured_layout_model", lambda: None)
+        monkeypatch.setattr(unstructured_parser, "_load_unstructured_table_model", lambda: None)
 
         chunks = _parse_file(str(image_file), parser=_unstructured_parser())
 
         assert len(chunks) == 1
-        assert chunks[0]["content"] == "<table><tr><td>指标</td><td>值</td></tr></table>"
+        assert chunks[0]["content"] == "| 指标 | 值 |\n| --- | --- |\n| Qdrant | 过滤 |"
         assert calls == [(str(image_file), "hi_res", True, ["chi_sim", "eng"])]
 
     def test_parse_image_file_uses_mineru(self, tmp_path, monkeypatch):
