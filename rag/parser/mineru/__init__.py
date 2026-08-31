@@ -6,13 +6,13 @@ from pathlib import Path
 
 import rag.device as device
 from rag.paddle_runtime import prepare_paddle_runtime
-from rag.parser.schema import Block
-from rag.parser.table_transform import read_table_blocks, read_table_documents
-from rag.parser.validation import validate_pdf_file
+from rag.parser.common.schema import Block
+from rag.parser.common.table_transform import read_table_blocks, read_table_documents
+from rag.parser.common.validation import validate_pdf_file
 from rag.schema import MineruParserConfig
 
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 MINERU_DIR = PROJECT_ROOT / "models" / "mineru"
 
 

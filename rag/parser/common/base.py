@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from typing import Protocol
 
 from rag.ocr.base import OCR
-from rag.parser.schema import Block
+from rag.parser.common.schema import Block
 from rag.schema import MineruParserConfig, UnstructuredParserConfig
 
 

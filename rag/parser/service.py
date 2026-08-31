@@ -1,5 +1,5 @@
 from rag.ocr.base import OCR
-from rag.parser.mineru_document import MineruDocumentParser
+from rag.parser.mineru.document import MineruDocumentParser
 from rag.parser.unstructured import UnstructuredDocumentParser
 from rag.schema import ParserConfig
 

@@ -1,6 +1,6 @@
 import re
 
-from rag.parser.schema import Block, TextBlock
+from rag.parser.common.schema import Block, TextBlock
 
 
 def normalize_blocks(blocks: list[Block]) -> list[Block]:

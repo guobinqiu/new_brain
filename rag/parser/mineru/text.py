@@ -2,9 +2,9 @@ import uuid
 
 from langchain_community.document_loaders import TextLoader
 from rag.ocr.base import OCR
-from rag.parser.base import BlockParser
-from rag.parser.schema import Block, TextBlock
-from rag.parser.text_splitter import clean_cjk_spaces, split_text
+from rag.parser.common.base import BlockParser
+from rag.parser.common.schema import Block, TextBlock
+from rag.parser.common.text_splitter import clean_cjk_spaces, split_text
 
 LOADERS = {
     ".txt": TextLoader,

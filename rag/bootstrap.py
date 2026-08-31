@@ -4,7 +4,7 @@ from rag.container import create_container
 from rag.database.base import Database
 from rag.dense.base import Dense
 from rag.loader import load_app_config
-from rag.parser.base import Parser
+from rag.parser.common.base import Parser
 from rag.schema import AppConfig
 from rag.ocr.base import OCR
 from rag.rerank.base import Rerank

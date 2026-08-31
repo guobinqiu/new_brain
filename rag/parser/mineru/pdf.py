@@ -3,10 +3,10 @@ from pathlib import Path
 
 from rag.ocr.base import OCR
 from rag.parser import mineru
-from rag.parser.base import BlockParser
-from rag.parser.image import ImageBlockParser
-from rag.parser.schema import Block, ImageBlock
-from rag.parser.validation import validate_pdf_file
+from rag.parser.common.base import BlockParser
+from rag.parser.mineru.image import ImageBlockParser
+from rag.parser.common.schema import Block, ImageBlock
+from rag.parser.common.validation import validate_pdf_file
 
 
 class PdfBlockParser(BlockParser):

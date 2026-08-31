@@ -1,6 +1,6 @@
-from rag.parser.chunker import blocks_to_documents, blocks_to_chunks
-from rag.parser.schema import TableBlock, TextBlock
-from rag.parser.table_transform import table_html_to_blocks
+from rag.parser.common.chunker import blocks_to_documents, blocks_to_chunks
+from rag.parser.common.schema import TableBlock, TextBlock
+from rag.parser.common.table_transform import table_html_to_blocks
 from rag.schema import MineruParserConfig, TableParserConfig, TextParserConfig
 
 
@@ -74,8 +74,8 @@ def test_table_uses_next_section_title_as_footer_context():
 
 
 def test_table_context_uses_configured_backward_and_forward_chars():
-    from rag.parser.chunker import blocks_to_documents
-    from rag.parser.schema import TableBlock, TextBlock
+    from rag.parser.common.chunker import blocks_to_documents
+    from rag.parser.common.schema import TableBlock, TextBlock
     from rag.schema import MineruParserConfig, TableParserConfig
 
     chunks = blocks_to_documents(

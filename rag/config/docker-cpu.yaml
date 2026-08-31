@@ -50,8 +50,8 @@ parser:
       footer_forward_chars: 160
   unstructured:
     enable: true
-    strategy: hi_res
-    infer_table_structure: true
+    strategy: fast
+    infer_table_structure: false
     languages:
       - chi_sim
       - eng

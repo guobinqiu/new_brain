@@ -4,14 +4,14 @@ import time
 
 from rag.ocr.base import OCR
 from rag.parser import mineru
-from rag.parser.base import BlockParser
-from rag.parser.chunker import blocks_to_documents
-from rag.parser.docx import DocxBlockParser
-from rag.parser.excel import ExcelBlockParser
-from rag.parser.image import ImageBlockParser
-from rag.parser.markdown import MarkdownBlockParser
-from rag.parser.pdf import PdfBlockParser
-from rag.parser.text import TextBlockParser
+from rag.parser.common.base import BlockParser
+from rag.parser.common.chunker import blocks_to_documents
+from rag.parser.mineru.docx import DocxBlockParser
+from rag.parser.mineru.excel import ExcelBlockParser
+from rag.parser.mineru.image import ImageBlockParser
+from rag.parser.mineru.markdown import MarkdownBlockParser
+from rag.parser.mineru.pdf import PdfBlockParser
+from rag.parser.mineru.text import TextBlockParser
 from rag.schema import MineruParserConfig
 
 

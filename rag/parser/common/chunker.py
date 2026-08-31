@@ -1,9 +1,9 @@
 import uuid
 from typing import Protocol
 
-from rag.parser.normalizer import normalize_blocks
-from rag.parser.schema import Block, TableBlock, TextBlock
-from rag.parser.text_splitter import split_text
+from rag.parser.common.normalizer import normalize_blocks
+from rag.parser.common.schema import Block, TableBlock, TextBlock
+from rag.parser.common.text_splitter import split_text
 from rag.schema import TableParserConfig, TextParserConfig
 
 

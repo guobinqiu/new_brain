@@ -6,9 +6,9 @@ from urllib.parse import unquote, urlparse
 
 from rag.ocr.base import OCR
 from rag.parser import mineru
-from rag.parser.base import BlockParser
-from rag.parser.schema import Block, ImageBlock
-from rag.parser.validation import validate_image_file
+from rag.parser.common.base import BlockParser
+from rag.parser.common.schema import Block, ImageBlock
+from rag.parser.common.validation import validate_image_file
 
 
 class ImageBlockParser(BlockParser):

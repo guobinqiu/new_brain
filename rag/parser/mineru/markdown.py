@@ -2,11 +2,11 @@ import html
 import re
 
 from rag.ocr.base import OCR
-from rag.parser.base import BlockParser
-from rag.parser.image import ImageBlockParser
-from rag.parser.schema import Block, TextBlock
-from rag.parser.table_transform import table_html_to_blocks
-from rag.parser.text_splitter import clean_cjk_spaces
+from rag.parser.common.base import BlockParser
+from rag.parser.mineru.image import ImageBlockParser
+from rag.parser.common.schema import Block, TextBlock
+from rag.parser.common.table_transform import table_html_to_blocks
+from rag.parser.common.text_splitter import clean_cjk_spaces
 
 
 class MarkdownBlockParser(BlockParser):

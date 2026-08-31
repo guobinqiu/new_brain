@@ -449,7 +449,7 @@ class TestParserService:
             _parse_file(str(image_file), ocr=object())
 
     def test_parser_service_uses_mineru_document_parser(self):
-        from rag.parser.mineru_document import MineruDocumentParser
+        from rag.parser.mineru.document import MineruDocumentParser
         from rag.parser.service import ParserService
         from rag.schema import ParserConfig
 
@@ -465,7 +465,8 @@ class TestParserService:
         assert isinstance(parser_service.document, UnstructuredDocumentParser)
 
     def test_parse_txt_file_with_unstructured_parser(self, tmp_path, monkeypatch):
-        from rag.parser import unstructured as unstructured_parser
+        from rag.parser.unstructured import blocks as unstructured_blocks
+        from rag.parser.unstructured import runtime as unstructured_runtime
         text_file = tmp_path / "note.txt"
         text_file.write_text("第一段内容\n第二段内容", encoding="utf-8")
 
@@ -478,10 +479,10 @@ class TestParserService:
             def __str__(self):
                 return self.text
 
-        monkeypatch.setattr(unstructured_parser, "_partition_file", lambda filepath, config: [FakeElement("第一段内容"), FakeElement("第二段内容")])
-        monkeypatch.setattr(unstructured_parser, "_prepare_unstructured_runtime_config", lambda: None)
-        monkeypatch.setattr(unstructured_parser, "_load_unstructured_layout_model", lambda: None)
-        monkeypatch.setattr(unstructured_parser, "_load_unstructured_table_model", lambda: None)
+        monkeypatch.setattr(unstructured_blocks, "partition_file", lambda filepath, config: [FakeElement("第一段内容"), FakeElement("第二段内容")])
+        monkeypatch.setattr(unstructured_runtime, "prepare_unstructured_runtime_config", lambda: None)
+        monkeypatch.setattr(unstructured_runtime, "load_unstructured_layout_model", lambda: None)
+        monkeypatch.setattr(unstructured_runtime, "load_unstructured_table_model", lambda: None)
 
         chunks = _parse_file(str(text_file), parser=_unstructured_parser())
 
@@ -492,7 +493,8 @@ class TestParserService:
     def test_parse_pdf_embedded_image_with_unstructured_parser(self, tmp_path, monkeypatch):
         import fitz
         from PIL import Image
-        from rag.parser import unstructured as unstructured_parser
+        from rag.parser.unstructured import blocks as unstructured_blocks
+        from rag.parser.unstructured import runtime as unstructured_runtime
         image_file = tmp_path / "chart.png"
         Image.new("RGB", (30, 30), "white").save(str(image_file))
         pdf_file = tmp_path / "image.pdf"
@@ -517,7 +519,10 @@ class TestParserService:
                 return [FakeElement("PDF body")]
             return [FakeElement("PDF 图片文字")]
 
-        monkeypatch.setattr(unstructured_parser, "_partition_file", fake_partition)
+        monkeypatch.setattr(unstructured_blocks, "partition_file", fake_partition)
+        monkeypatch.setattr(unstructured_runtime, "prepare_unstructured_runtime_config", lambda: None)
+        monkeypatch.setattr(unstructured_runtime, "load_unstructured_layout_model", lambda: None)
+        monkeypatch.setattr(unstructured_runtime, "load_unstructured_table_model", lambda: None)
 
         chunks = _parse_file(str(pdf_file), parser=_unstructured_parser())
 
@@ -526,7 +531,8 @@ class TestParserService:
         assert "PDF 图片文字" in content
 
     def test_parse_pdf_fast_without_table_inference_skips_embedded_images(self, tmp_path, monkeypatch):
-        from rag.parser import unstructured as unstructured_parser
+        from rag.parser.unstructured import blocks as unstructured_blocks
+        from rag.parser.unstructured import runtime as unstructured_runtime
         pdf_file = tmp_path / "image.pdf"
         pdf_file.write_bytes(
             b"%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n"
@@ -548,7 +554,7 @@ class TestParserService:
             calls.append(filepath)
             return [FakeElement("PDF body")]
 
-        monkeypatch.setattr(unstructured_parser, "_partition_file", fake_partition)
+        monkeypatch.setattr(unstructured_blocks, "partition_file", fake_partition)
 
         chunks = _parse_file(str(pdf_file), parser=_unstructured_parser(strategy="fast", infer_table_structure=False))
 
@@ -558,7 +564,8 @@ class TestParserService:
 
     def test_parse_image_file_with_unstructured_parser_keeps_table_blocks(self, tmp_path, monkeypatch):
         from PIL import Image
-        from rag.parser import unstructured as unstructured_parser
+        from rag.parser.unstructured import blocks as unstructured_blocks
+        from rag.parser.unstructured import runtime as unstructured_runtime
         image_file = tmp_path / "table.png"
         Image.new("RGB", (10, 10), "white").save(str(image_file))
         calls = []
@@ -577,10 +584,10 @@ class TestParserService:
             calls.append((filepath, config.strategy, config.infer_table_structure, config.languages))
             return [FakeTable()]
 
-        monkeypatch.setattr(unstructured_parser, "_partition_file", fake_partition)
-        monkeypatch.setattr(unstructured_parser, "_prepare_unstructured_runtime_config", lambda: None)
-        monkeypatch.setattr(unstructured_parser, "_load_unstructured_layout_model", lambda: None)
-        monkeypatch.setattr(unstructured_parser, "_load_unstructured_table_model", lambda: None)
+        monkeypatch.setattr(unstructured_blocks, "partition_file", fake_partition)
+        monkeypatch.setattr(unstructured_runtime, "prepare_unstructured_runtime_config", lambda: None)
+        monkeypatch.setattr(unstructured_runtime, "load_unstructured_layout_model", lambda: None)
+        monkeypatch.setattr(unstructured_runtime, "load_unstructured_table_model", lambda: None)
 
         chunks = _parse_file(str(image_file), parser=_unstructured_parser())
 
@@ -697,7 +704,7 @@ class TestParserService:
 
     def test_chunk_overlap(self, tmp_path):
         """Consecutive chunks have overlapping text (~50 chars of overlap)."""
-        from rag.parser.text import chunk_text
+        from rag.parser.mineru.text import chunk_text
 
         # Create a long enough text so we get at least 2 chunks
         text = "这是一个测试段落。" * 200
@@ -726,7 +733,7 @@ class TestParserService:
         assert max(len(chunk["content"]) for chunk in chunks) <= 120
 
     def test_split_table_keeps_small_table_whole(self):
-        from rag.parser.table_splitter import split_table
+        from rag.parser.common.table_splitter import split_table
 
         chunks = split_table(
             title="表格：指标",
@@ -741,7 +748,7 @@ class TestParserService:
         assert chunks[0]["metadata"] == {}
 
     def test_split_table_keeps_large_table_whole(self):
-        from rag.parser.table_splitter import split_table
+        from rag.parser.common.table_splitter import split_table
 
         chunks = split_table(
             title="表格：指标",
@@ -756,7 +763,7 @@ class TestParserService:
         assert "2026" in chunks[0]["content"]
 
     def test_split_table_keeps_single_long_row(self):
-        from rag.parser.table_splitter import split_table
+        from rag.parser.common.table_splitter import split_table
 
         chunks = split_table(
             title="表格：指标",
@@ -770,7 +777,7 @@ class TestParserService:
         assert chunks[0]["metadata"] == {}
 
     def test_split_table_keeps_all_rows_in_one_chunk(self):
-        from rag.parser.table_splitter import split_table
+        from rag.parser.common.table_splitter import split_table
 
         chunks = split_table(
             title="表格：指标",
@@ -784,7 +791,7 @@ class TestParserService:
         assert "2026" in chunks[0]["content"]
 
     def test_split_table_keeps_rows_after_size_limit_in_same_chunk(self):
-        from rag.parser.table_splitter import split_table
+        from rag.parser.common.table_splitter import split_table
 
         chunks = split_table(
             title="表格",
@@ -891,7 +898,7 @@ class TestParserService:
         assert "| Weaviate | V | V强支持 |" in table_chunks[0]["content"]
 
     def test_table_parser_splits_merged_tables_inside_html_table(self):
-        from rag.parser.table_transform import table_html_to_chunks
+        from rag.parser.common.table_transform import table_html_to_chunks
         from rag.schema import ParserConfig
 
         chunks = table_html_to_chunks(

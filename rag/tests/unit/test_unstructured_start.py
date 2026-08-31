@@ -6,14 +6,14 @@ pytestmark = pytest.mark.unit
 
 
 def test_unstructured_start_loads_hi_res_and_table_models(monkeypatch):
-    from rag.parser import unstructured
+    from rag.parser.unstructured import runtime
     from rag.parser.unstructured import UnstructuredDocumentParser
     from rag.schema import UnstructuredParserConfig
 
     calls = []
-    monkeypatch.setattr(unstructured, "_prepare_unstructured_runtime_config", lambda: calls.append("config"))
-    monkeypatch.setattr(unstructured, "_load_unstructured_layout_model", lambda: calls.append("layout"), raising=False)
-    monkeypatch.setattr(unstructured, "_load_unstructured_table_model", lambda: calls.append("table"), raising=False)
+    monkeypatch.setattr(runtime, "prepare_unstructured_runtime_config", lambda: calls.append("config"))
+    monkeypatch.setattr(runtime, "load_unstructured_layout_model", lambda: calls.append("layout"), raising=False)
+    monkeypatch.setattr(runtime, "load_unstructured_table_model", lambda: calls.append("table"), raising=False)
 
     parser = UnstructuredDocumentParser(UnstructuredParserConfig(strategy="hi_res", infer_table_structure=True))
     parser.start()
@@ -23,14 +23,14 @@ def test_unstructured_start_loads_hi_res_and_table_models(monkeypatch):
 
 
 def test_unstructured_start_skips_model_load_for_fast_without_tables(monkeypatch):
-    from rag.parser import unstructured
+    from rag.parser.unstructured import runtime
     from rag.parser.unstructured import UnstructuredDocumentParser
     from rag.schema import UnstructuredParserConfig
 
     calls = []
-    monkeypatch.setattr(unstructured, "_prepare_unstructured_runtime_config", lambda: calls.append("config"))
-    monkeypatch.setattr(unstructured, "_load_unstructured_layout_model", lambda: calls.append("layout"), raising=False)
-    monkeypatch.setattr(unstructured, "_load_unstructured_table_model", lambda: calls.append("table"), raising=False)
+    monkeypatch.setattr(runtime, "prepare_unstructured_runtime_config", lambda: calls.append("config"))
+    monkeypatch.setattr(runtime, "load_unstructured_layout_model", lambda: calls.append("layout"), raising=False)
+    monkeypatch.setattr(runtime, "load_unstructured_table_model", lambda: calls.append("table"), raising=False)
 
     parser = UnstructuredDocumentParser(UnstructuredParserConfig(strategy="fast", infer_table_structure=False))
     parser.start()
@@ -40,17 +40,17 @@ def test_unstructured_start_skips_model_load_for_fast_without_tables(monkeypatch
 
 
 def test_unstructured_start_keeps_not_ready_when_model_load_fails(monkeypatch):
-    from rag.parser import unstructured
+    from rag.parser.unstructured import runtime
     from rag.parser.unstructured import UnstructuredDocumentParser
     from rag.schema import UnstructuredParserConfig
 
-    monkeypatch.setattr(unstructured, "_prepare_unstructured_runtime_config", lambda: None)
+    monkeypatch.setattr(runtime, "prepare_unstructured_runtime_config", lambda: None)
 
     def fail():
         raise RuntimeError("layout missing")
 
-    monkeypatch.setattr(unstructured, "_load_unstructured_layout_model", fail, raising=False)
-    monkeypatch.setattr(unstructured, "_load_unstructured_table_model", lambda: None, raising=False)
+    monkeypatch.setattr(runtime, "load_unstructured_layout_model", fail, raising=False)
+    monkeypatch.setattr(runtime, "load_unstructured_table_model", lambda: None, raising=False)
 
     parser = UnstructuredDocumentParser(UnstructuredParserConfig(strategy="hi_res", infer_table_structure=False))
 
@@ -61,7 +61,7 @@ def test_unstructured_start_keeps_not_ready_when_model_load_fails(monkeypatch):
 
 
 def test_unstructured_runtime_config_uses_local_hf_cache(monkeypatch, tmp_path):
-    from rag.parser import unstructured
+    from rag.parser.unstructured import runtime
 
     model_config = tmp_path / "models" / "unstructured" / "yolox.json"
     model_config.parent.mkdir(parents=True)
@@ -69,16 +69,16 @@ def test_unstructured_runtime_config_uses_local_hf_cache(monkeypatch, tmp_path):
     hf_cache = tmp_path / "models" / "huggingface" / "hub"
     hf_cache.mkdir(parents=True)
 
-    monkeypatch.setattr(unstructured, "UNSTRUCTURED_MODEL_CONFIG", model_config)
-    monkeypatch.setattr(unstructured, "HF_CACHE_DIR", hf_cache, raising=False)
-    monkeypatch.setattr(unstructured, "TABLE_STRUCTURE_MODEL_CACHE", tmp_path / "missing-table-model", raising=False)
+    monkeypatch.setattr(runtime, "UNSTRUCTURED_MODEL_CONFIG", model_config)
+    monkeypatch.setattr(runtime, "HF_CACHE_DIR", hf_cache, raising=False)
+    monkeypatch.setattr(runtime, "TABLE_STRUCTURE_MODEL_CACHE", tmp_path / "missing-table-model", raising=False)
     monkeypatch.delenv("UNSTRUCTURED_DEFAULT_MODEL_NAME", raising=False)
     monkeypatch.delenv("UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH", raising=False)
     monkeypatch.delenv("HF_HOME", raising=False)
     monkeypatch.delenv("HUGGINGFACE_HUB_CACHE", raising=False)
     monkeypatch.delenv("HF_HUB_OFFLINE", raising=False)
 
-    unstructured._prepare_unstructured_runtime_config()
+    runtime.prepare_unstructured_runtime_config()
 
     assert os.environ["UNSTRUCTURED_DEFAULT_MODEL_NAME"] == "yolox"
     assert os.environ["UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH"] == str(model_config)
@@ -99,7 +99,7 @@ def test_unstructured_table_load_uses_local_table_snapshot(monkeypatch, tmp_path
     import sys
     import types
 
-    from rag.parser import unstructured
+    from rag.parser.unstructured import runtime
 
     table_cache = tmp_path / "models--microsoft--table-transformer-structure-recognition"
     snapshot = table_cache / "snapshots" / "abc123"
@@ -115,9 +115,19 @@ def test_unstructured_table_load_uses_local_table_snapshot(monkeypatch, tmp_path
     package.models = models
     monkeypatch.setitem(sys.modules, "unstructured_inference", package)
     monkeypatch.setitem(sys.modules, "unstructured_inference.models", models)
-    monkeypatch.setattr(unstructured, "TABLE_STRUCTURE_MODEL_CACHE", table_cache, raising=False)
+    monkeypatch.setattr(runtime, "TABLE_STRUCTURE_MODEL_CACHE", table_cache, raising=False)
 
-    unstructured._load_unstructured_table_model()
+    runtime.load_unstructured_table_model()
 
     assert tables.DEFAULT_MODEL == str(snapshot)
     assert calls == ["load_agent"]
+
+
+def test_unstructured_model_dirs_use_project_root():
+    from pathlib import Path
+
+    from rag.parser.unstructured import runtime
+
+    project_root = Path(__file__).resolve().parents[3]
+    assert runtime.UNSTRUCTURED_DIR == project_root / "models" / "unstructured"
+    assert runtime.HF_CACHE_DIR == project_root / "models" / "huggingface" / "hub"

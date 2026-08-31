@@ -27,3 +27,9 @@ def test_prepare_mineru_runtime_config_uses_current_models_dir(tmp_path, monkeyp
     assert json.loads(runtime_config.read_text(encoding="utf-8"))["models-dir"]["pipeline"] == str(pipeline_dir)
     assert json.loads(source_config.read_text(encoding="utf-8"))["models-dir"]["pipeline"] == "/stale/container/path"
     assert os.environ["PADDLE_PDX_CACHE_HOME"].endswith("models/PaddlePaddle/PaddleOCR")
+
+
+def test_mineru_models_dir_uses_project_root():
+    from rag.parser import mineru
+
+    assert mineru.MINERU_DIR == Path(__file__).resolve().parents[3] / "models" / "mineru"

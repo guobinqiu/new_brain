@@ -4,10 +4,10 @@ from html import unescape
 from html.parser import HTMLParser
 from pathlib import Path
 
-from rag.parser.chunker import blocks_to_chunks, blocks_to_documents
-from rag.parser.normalizer import is_section_title_text
-from rag.parser.schema import Block, TableBlock, TextBlock
-from rag.parser.table_splitter import compact_cell_text, split_table
+from rag.parser.common.chunker import blocks_to_chunks, blocks_to_documents
+from rag.parser.common.normalizer import is_section_title_text
+from rag.parser.common.schema import Block, TableBlock, TextBlock
+from rag.parser.common.table_splitter import compact_cell_text, split_table
 from rag.schema import MineruParserConfig
 
 
