@@ -73,6 +73,10 @@ def _prepare_unstructured_runtime_config() -> None:
     if HF_CACHE_DIR.exists():
         os.environ.setdefault("HF_HOME", str(HF_CACHE_DIR.parent))
         os.environ.setdefault("HUGGINGFACE_HUB_CACHE", str(HF_CACHE_DIR))
+        from huggingface_hub import constants
+
+        constants.HF_HOME = str(HF_CACHE_DIR.parent)
+        constants.HF_HUB_CACHE = str(HF_CACHE_DIR)
     if UNSTRUCTURED_MODEL_CONFIG.exists():
         os.environ.setdefault("UNSTRUCTURED_DEFAULT_MODEL_NAME", "yolox")
         os.environ.setdefault("UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH", str(UNSTRUCTURED_MODEL_CONFIG))
