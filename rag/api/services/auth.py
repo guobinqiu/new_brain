@@ -2,7 +2,7 @@ from fastapi import Header, HTTPException, Request
 
 from rag.api.runtime import runtime
 from rag.api.schemas import LoginRequest
-from auth import Principal, authenticate_client_signature, authenticate_password, issue_token, principal_from_authorization
+from rag.auth import Principal, authenticate_client_signature, authenticate_password, issue_token, principal_from_authorization
 
 
 def require_jwt(authorization: str | None = Header(None)) -> Principal:

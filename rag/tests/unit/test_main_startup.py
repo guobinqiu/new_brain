@@ -6,7 +6,7 @@ pytestmark = pytest.mark.unit
 
 
 def test_lifespan_keeps_process_healthy_when_application_start_fails(monkeypatch):
-    from auth import Principal, issue_token
+    from rag.auth import Principal, issue_token
     import main
     from rag.api.runtime import runtime
 

@@ -11,7 +11,7 @@ def test_index_object_indexes_presigned_object_synchronously(monkeypatch):
     from rag.api.runtime import runtime
     from rag.api.services import files as service
     from rag.api.schemas import ObjectIndexRequest
-    from auth import Principal
+    from rag.auth import Principal
 
     calls = []
 
@@ -83,7 +83,7 @@ def test_create_index_job_enqueues_async_job(monkeypatch):
     from rag.api.runtime import runtime
     from rag.api.services import files as service
     from rag.api.schemas import AdminIndexJobRequest
-    from auth import Principal
+    from rag.auth import Principal
 
     enqueued = []
 
@@ -167,7 +167,7 @@ def test_create_index_job_returns_429_when_queue_rejects(monkeypatch):
     from rag.api.runtime import runtime
     from rag.api.services import files as service
     from rag.api.schemas import AdminIndexJobRequest
-    from auth import Principal
+    from rag.auth import Principal
     from rag.index.queue import IndexQueueRejected
 
     calls = []
@@ -295,7 +295,7 @@ def testupload_file_to_storage_puts_object_in_bucket(monkeypatch):
 
 def test_client_delete_file_removes_index_only(monkeypatch):
     from rag.api.services import files as service
-    from auth import Principal
+    from rag.auth import Principal
 
     calls = []
 

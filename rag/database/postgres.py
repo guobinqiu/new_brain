@@ -7,8 +7,8 @@ from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
 from rag.database.base import FilePage, FileRecord
-from auth.registry import AppCredential
-from auth import validate_app_id
+from rag.auth import AppCredential
+from rag.auth import validate_app_id
 
 CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS app_files (

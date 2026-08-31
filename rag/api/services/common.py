@@ -6,8 +6,8 @@ from typing import Any
 from fastapi import HTTPException
 
 from rag.api.runtime import runtime
-from auth import Principal
-from auth import validate_app_id
+from rag.auth import Principal
+from rag.auth import validate_app_id
 
 
 def require_ready():

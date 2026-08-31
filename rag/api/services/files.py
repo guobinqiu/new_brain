@@ -12,8 +12,8 @@ from minio import Minio
 from rag.api.runtime import runtime
 from rag.api.schemas import AdminIndexJobRequest, ChunksQueryRequest, ObjectIndexRequest, PresignRequest
 from rag.api.services.common import database_principal, iso_datetime, require_app_database, require_ready, scoped_store, store_context
-from auth import Principal
-from auth import validate_app_id
+from rag.auth import Principal
+from rag.auth import validate_app_id
 from rag.index import create_file_id, enqueue_index_job, index_presigned_object
 from rag.index.queue import IndexQueueRejected
 from rag.index.service import SUPPORTED_FILE_EXTENSIONS, parse_s3_url

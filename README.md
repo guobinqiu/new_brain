@@ -50,6 +50,8 @@ cp deploy/.env.example deploy/.env
 just svc up
 ```
 
+`svc` 只包含 PostgreSQL、Qdrant、MinIO、Loki 和 Promtail，不启动 nginx。
+
 单独启停服务：
 
 ```bash
@@ -57,8 +59,8 @@ just postgres up
 just qdrant up
 just minio up
 just loki up
-just nginx up
 just promtail up
+just nginx up
 ```
 
 CPU 应用节点：
@@ -95,6 +97,7 @@ just svc down
 just rag down
 just llm down
 just webui down
+just nginx down
 ```
 
 重启：
@@ -104,6 +107,7 @@ just svc restart
 just rag restart
 just llm restart
 just webui restart
+just nginx restart
 ```
 
 ## API

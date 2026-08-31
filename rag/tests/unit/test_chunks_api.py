@@ -4,7 +4,7 @@ from rag.api.schemas import ChunksQueryRequest
 
 
 def test_chunks_filters_by_file_ids(monkeypatch):
-    from auth import Principal
+    from rag.auth import Principal
 
     class Store:
         def ensure_app_collection(self, app_id):
@@ -32,7 +32,7 @@ def test_chunks_filters_by_file_ids(monkeypatch):
 
 
 def test_admin_chunks_can_select_app_collection(monkeypatch):
-    from auth import Principal
+    from rag.auth import Principal
 
     calls = []
 
@@ -80,7 +80,7 @@ def test_admin_chunks_can_select_app_collection(monkeypatch):
 
 
 def test_chunks_query_accepts_file_ids_in_body(monkeypatch):
-    from auth import Principal
+    from rag.auth import Principal
 
     class Store:
         def ensure_app_collection(self, app_id):
@@ -105,7 +105,7 @@ def test_chunks_query_accepts_file_ids_in_body(monkeypatch):
     assert page["chunks"][0]["file_id"] == "file-a"
 
 def test_chunks_returns_file_id_without_transform(monkeypatch):
-    from auth import Principal
+    from rag.auth import Principal
 
     class Store:
         def ensure_app_collection(self, app_id):

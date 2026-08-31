@@ -38,7 +38,7 @@ async def test_rag_prefetch_calls_client_with_query(monkeypatch):
 
     monkeypatch.setattr("llm.src.rag.client.get_rag_client", lambda: _C())
 
-    from auth import AppCredential
+    from llm.src.api.auth import AppCredential
     import llm.src.api.auth as auth_mod
 
     monkeypatch.setattr(
@@ -67,7 +67,7 @@ async def test_rag_prefetch_empty_on_exception(monkeypatch):
 
     monkeypatch.setattr("llm.src.rag.client.get_rag_client", lambda: _BadClient())
 
-    from auth import AppCredential
+    from llm.src.api.auth import AppCredential
     import llm.src.api.auth as auth_mod
 
     monkeypatch.setattr(

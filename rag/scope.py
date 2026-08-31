@@ -3,7 +3,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from contextvars import ContextVar
 
-from auth import validate_app_id
+from rag.auth import validate_app_id
 
 
 _current_app_id: ContextVar[str | None] = ContextVar("current_app_id", default=None)

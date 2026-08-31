@@ -98,7 +98,6 @@ services:
       - "6000:6000"
     volumes:
       - ../../rag:/app/rag
-      - ../../auth:/app/auth:ro
       - ../../models:/app/models
       - ../../chroma_data:/app/chroma_data
       - ../../milvus_data/lite:/app/milvus_data/lite
@@ -134,7 +133,6 @@ services:
       - ../../llm/src:/app/llm/src
       - ../../llm/tests:/app/llm/tests
       - ../../rag:/app/rag:ro
-      - ../../auth:/app/auth:ro
     logging: *json-logging
     restart: unless-stopped
 

@@ -5,8 +5,8 @@ import secrets
 
 from typing import Protocol
 
-from auth.registry import AppCredential
-from auth import validate_app_id
+from rag.auth import AppCredential
+from rag.auth import validate_app_id
 
 
 @dataclass(frozen=True)

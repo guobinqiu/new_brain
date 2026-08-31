@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 import httpx
 
 from llm.src.infra.logger import get_logger
-from auth import sign_request
+from llm.src.api.auth import sign_request
 from llm.src.infra.retry import rag_retry
 from llm.src.rag.schemas import Document, SearchRequest
 

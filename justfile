@@ -1,5 +1,5 @@
 svc action="up" target="cpu":
-	@just _services {{target}} {{action}} postgres qdrant minio loki nginx promtail
+	@just _services {{target}} {{action}} postgres qdrant minio loki promtail
 
 rag action="up" target="cpu":
 	@just _services {{target}} {{action}} rag

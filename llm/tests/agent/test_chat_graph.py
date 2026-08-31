@@ -48,7 +48,7 @@ async def test_chat_graph_prefetch_then_llm_ends(monkeypatch):
 
     monkeypatch.setattr("llm.src.rag.client.get_rag_client", lambda: _FakeClient())
 
-    from auth import AppCredential
+    from llm.src.api.auth import AppCredential
     import llm.src.api.auth as auth_mod
 
     monkeypatch.setattr(
@@ -118,7 +118,7 @@ async def test_rag_prefetch_injects_context(monkeypatch):
 
     monkeypatch.setattr("llm.src.rag.client.get_rag_client", lambda: _C())
 
-    from auth import AppCredential
+    from llm.src.api.auth import AppCredential
     import llm.src.api.auth as auth_mod
 
     monkeypatch.setattr(

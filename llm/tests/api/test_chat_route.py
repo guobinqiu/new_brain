@@ -13,7 +13,7 @@ import time
 
 import pytest
 
-from auth import AppCredential, sign_request
+from llm.src.api.auth import AppCredential, sign_request
 
 
 def _try_load_app():
@@ -45,7 +45,7 @@ def client(monkeypatch):
     async def _get_app(app_id: str):
         return AppCredential(app_id=app_id, access_key="test_access", secret_key="test_secret")
 
-    monkeypatch.setattr("api.auth._get_app", _get_app)
+    monkeypatch.setattr("llm.src.api.auth._get_app", _get_app)
     return TestClient(_try_load_app())
 
 
@@ -106,7 +106,7 @@ def test_chat_stream_returns_event_stream_content_type(monkeypatch, client):
     async def _get_graph(*a, **k):
         return _Graph()
 
-    for module_name in ("agent.registry", "api.routes.chat"):
+    for module_name in ("llm.src.agent.registry", "llm.src.api.routes.chat"):
         try:
             monkeypatch.setattr(f"{module_name}.get_graph", _get_graph)
         except Exception:  # noqa: S110 — 多路径 monkeypatch 探测，模块无目标属性是预期
@@ -131,7 +131,7 @@ def test_chat_stream_sets_required_sse_headers(monkeypatch, client):
     async def _get_graph(*a, **k):
         return _Graph()
 
-    for module_name in ("agent.registry", "api.routes.chat"):
+    for module_name in ("llm.src.agent.registry", "llm.src.api.routes.chat"):
         try:
             monkeypatch.setattr(f"{module_name}.get_graph", _get_graph)
         except Exception:  # noqa: S110 — 多路径 monkeypatch 探测，模块无目标属性是预期
@@ -180,7 +180,7 @@ def test_chat_stream_emits_token_done_events(monkeypatch, client):
     async def _get_graph(*a, **k):
         return _Graph()
 
-    for module_name in ("agent.registry", "api.routes.chat"):
+    for module_name in ("llm.src.agent.registry", "llm.src.api.routes.chat"):
         try:
             monkeypatch.setattr(f"{module_name}.get_graph", _get_graph)
         except Exception:  # noqa: S110 — 多路径 monkeypatch 探测，模块无目标属性是预期
@@ -212,7 +212,7 @@ def test_chat_stream_handles_error_emits_error_event(monkeypatch, client):
     async def _get_graph(*a, **k):
         return _FailGraph()
 
-    for module_name in ("agent.registry", "api.routes.chat"):
+    for module_name in ("llm.src.agent.registry", "llm.src.api.routes.chat"):
         try:
             monkeypatch.setattr(f"{module_name}.get_graph", _get_graph)
         except Exception:  # noqa: S110 — 多路径 monkeypatch 探测，模块无目标属性是预期

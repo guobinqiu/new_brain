@@ -15,8 +15,8 @@ pytestmark = pytest.mark.unit
 
 
 def test_app_registry_creates_persistent_credentials_and_authenticates(monkeypatch, tmp_path):
-    from auth import authenticate_client_signature
-    from auth.registry import AppRegistry
+    from rag.auth import authenticate_client_signature
+    from rag.auth import AppRegistry
     from rag.schema import AuthConfig, AdminAuthConfig
 
     path = tmp_path / "apps.json"
@@ -57,7 +57,7 @@ def test_app_registry_creates_persistent_credentials_and_authenticates(monkeypat
 
 
 def test_create_app_api_generates_credentials(monkeypatch, tmp_path):
-    from auth import Principal, issue_token
+    from rag.auth import Principal, issue_token
     from rag.database.base import FakeDatabase
     from rag.schema import AuthConfig, AdminAuthConfig
     import main
@@ -107,7 +107,7 @@ def test_create_app_api_generates_credentials(monkeypatch, tmp_path):
 
 
 def test_create_app_api_returns_duplicate_error(monkeypatch, tmp_path):
-    from auth import Principal, issue_token
+    from rag.auth import Principal, issue_token
     from rag.database.base import FakeDatabase
     from rag.schema import AuthConfig, AdminAuthConfig
     import main
@@ -148,7 +148,7 @@ def test_create_app_api_returns_duplicate_error(monkeypatch, tmp_path):
 
 
 def test_delete_app_api_removes_credentials(monkeypatch, tmp_path):
-    from auth import Principal, issue_token
+    from rag.auth import Principal, issue_token
     from rag.database.base import FakeDatabase
     from rag.schema import AuthConfig, AdminAuthConfig
     import main
@@ -195,7 +195,7 @@ def test_delete_app_api_removes_credentials(monkeypatch, tmp_path):
 
 
 def test_app_database_status_and_empty_delete(monkeypatch, tmp_path):
-    from auth import Principal, issue_token
+    from rag.auth import Principal, issue_token
     from rag.schema import AuthConfig, AdminAuthConfig
     import main
 
@@ -256,7 +256,7 @@ def test_app_database_status_and_empty_delete(monkeypatch, tmp_path):
 
 
 def test_app_database_delete_allows_non_empty_database(monkeypatch, tmp_path):
-    from auth import Principal, issue_token
+    from rag.auth import Principal, issue_token
     from rag.schema import AuthConfig, AdminAuthConfig
     import main
 
