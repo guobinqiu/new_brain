@@ -114,6 +114,7 @@ source = hf_hub_download("unstructuredio/yolo_x_layout", "yolox_l0.05.onnx")
 if Path(source).resolve() != layout_model.resolve():
     shutil.copyfile(source, layout_model)
 snapshot_download("microsoft/table-transformer-structure-recognition")
+snapshot_download("timm/resnet18.a1_in1k")
 config = {
     "model_path": str(layout_model),
     "label_map": {
