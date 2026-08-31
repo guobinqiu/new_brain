@@ -78,16 +78,24 @@ def components() -> list[dict[str, Any]]:
             "status": required_component_status(runtime.application.ocr, error=runtime.application.component_errors.get("ocr")),
             "model": component_model(runtime.application.config.ocr),
         },
-        {
-            "name": "Parser",
-            "status": parser_status(),
-            "model": "mineru",
-        },
+        parser_component(),
         {
             "name": "database",
             "status": required_component_status(runtime.application.database, error=runtime.application.component_errors.get("database")),
         },
     ]
+
+
+def parser_component() -> dict[str, Any]:
+    parser = runtime.application.config.parser
+    component = {
+        "name": "Parser",
+        "status": parser_status(),
+        "model": parser.enabled_parser,
+    }
+    if parser.enabled_parser == "unstructured":
+        component["mode"] = parser.unstructured.strategy
+    return component
 
 
 def parser_status() -> str:
