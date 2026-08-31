@@ -89,7 +89,6 @@ PY
 
 download_unstructured() {
   local dir="$MODELS_DIR/unstructured"
-  local hf_dir="$MODELS_DIR/huggingface"
   local layout_model="$dir/yolox_l0.05.onnx"
   local model_config="$dir/yolox.json"
 
@@ -98,22 +97,19 @@ download_unstructured() {
 
   "$RAG_VENV/bin/python" -m spacy download en_core_web_sm
 
-  HF_HOME="$hf_dir" \
-  HUGGINGFACE_HUB_CACHE="$hf_dir/hub" \
   "$RAG_VENV/bin/python" - "$layout_model" "$model_config" <<'PY'
 import json
 import shutil
 import sys
 from pathlib import Path
 
-from huggingface_hub import hf_hub_download, snapshot_download
+from huggingface_hub import hf_hub_download
 
 layout_model = Path(sys.argv[1])
 model_config = Path(sys.argv[2])
 source = hf_hub_download("unstructuredio/yolo_x_layout", "yolox_l0.05.onnx")
 if Path(source).resolve() != layout_model.resolve():
     shutil.copyfile(source, layout_model)
-snapshot_download("microsoft/table-transformer-structure-recognition")
 config = {
     "model_path": str(layout_model),
     "label_map": {

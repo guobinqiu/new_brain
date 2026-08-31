@@ -21,7 +21,6 @@ logger = logging.getLogger("rag.parser")
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 UNSTRUCTURED_DIR = PROJECT_ROOT / "models" / "unstructured"
 UNSTRUCTURED_MODEL_CONFIG = UNSTRUCTURED_DIR / "yolox.json"
-HF_CACHE_DIR = PROJECT_ROOT / "models" / "huggingface" / "hub"
 
 
 class UnstructuredDocumentParser:
@@ -69,12 +68,10 @@ _ARCHIVE_IMAGE_PREFIXES = {
 
 
 def _prepare_unstructured_runtime_config() -> None:
-    if HF_CACHE_DIR.exists():
-        os.environ.setdefault("HF_HOME", str(HF_CACHE_DIR.parent))
-        os.environ.setdefault("HUGGINGFACE_HUB_CACHE", str(HF_CACHE_DIR))
-    if UNSTRUCTURED_MODEL_CONFIG.exists():
-        os.environ.setdefault("UNSTRUCTURED_DEFAULT_MODEL_NAME", "yolox")
-        os.environ.setdefault("UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH", str(UNSTRUCTURED_MODEL_CONFIG))
+    if not UNSTRUCTURED_MODEL_CONFIG.exists():
+        return
+    os.environ.setdefault("UNSTRUCTURED_DEFAULT_MODEL_NAME", "yolox")
+    os.environ.setdefault("UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH", str(UNSTRUCTURED_MODEL_CONFIG))
 
 
 def _validate_file(filepath: str, ext: str) -> None:
