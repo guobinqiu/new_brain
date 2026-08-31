@@ -43,6 +43,7 @@ import { useRoute } from 'vue-router'
 import { useActiveAppStore } from '../stores/activeApp'
 import { useAppsStore } from '../stores/apps'
 import { useLlmChatStore } from '../stores/llmChat'
+import { hmacSha256Hex, sha256Hex } from '../utils/hmac'
 import { errorMessage, showToast } from '../utils/toast'
 
 const API_PATH = '/api/open/llm/chat/stream'
@@ -65,32 +66,12 @@ function newConversation() {
   llmChatStore.newConversation(currentAppId.value)
 }
 
-async function sha256Hex(text) {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))
-  return hex(digest)
-}
-
-async function hmacHex(secret, text) {
-  const key = await crypto.subtle.importKey(
-    'raw',
-    new TextEncoder().encode(secret),
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign'],
-  )
-  return hex(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(text)))
-}
-
-function hex(buffer) {
-  return Array.from(new Uint8Array(buffer), byte => byte.toString(16).padStart(2, '0')).join('')
-}
-
 async function signedHeaders(body) {
   const app = currentApp.value
   const ts = String(Math.floor(Date.now() / 1000))
-  const bodyHash = await sha256Hex(body)
+  const bodyHash = sha256Hex(body)
   const canonical = ['POST', API_PATH, ts, bodyHash, app.app_id].join('\n')
-  const signature = await hmacHex(app.secret_key, canonical)
+  const signature = hmacSha256Hex(app.secret_key, canonical)
   return {
     'Content-Type': 'application/json',
     'X-App-Id': app.app_id,
