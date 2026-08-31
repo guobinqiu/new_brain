@@ -21,6 +21,8 @@ logger = logging.getLogger("rag.parser")
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 UNSTRUCTURED_DIR = PROJECT_ROOT / "models" / "unstructured"
 UNSTRUCTURED_MODEL_CONFIG = UNSTRUCTURED_DIR / "yolox.json"
+HF_CACHE_DIR = PROJECT_ROOT / "models" / "huggingface" / "hub"
+TABLE_STRUCTURE_MODEL_CACHE = HF_CACHE_DIR / "models--microsoft--table-transformer-structure-recognition"
 
 
 class UnstructuredDocumentParser:
@@ -31,7 +33,12 @@ class UnstructuredDocumentParser:
         self.ocr = ocr
 
     def start(self) -> None:
+        self.ready = False
         _prepare_unstructured_runtime_config()
+        if self.config.strategy == "hi_res":
+            _load_unstructured_layout_model()
+        if self.config.infer_table_structure:
+            _load_unstructured_table_model()
         self.ready = True
 
     def stop(self) -> None:
@@ -68,10 +75,52 @@ _ARCHIVE_IMAGE_PREFIXES = {
 
 
 def _prepare_unstructured_runtime_config() -> None:
+    if HF_CACHE_DIR.exists():
+        os.environ.setdefault("HF_HOME", str(HF_CACHE_DIR.parent))
+        os.environ.setdefault("HUGGINGFACE_HUB_CACHE", str(HF_CACHE_DIR))
+        os.environ.setdefault("HF_HUB_OFFLINE", "1")
+        os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+        from huggingface_hub import constants
+        from transformers.utils import hub
+
+        constants.HF_HOME = str(HF_CACHE_DIR.parent)
+        constants.HF_HUB_CACHE = str(HF_CACHE_DIR)
+        constants.HF_HUB_OFFLINE = True
+        hub._is_offline_mode = True
+    table_model = _local_hf_snapshot(TABLE_STRUCTURE_MODEL_CACHE)
+    if table_model is not None:
+        from unstructured_inference.models import tables
+
+        tables.DEFAULT_MODEL = str(table_model)
     if not UNSTRUCTURED_MODEL_CONFIG.exists():
         return
     os.environ.setdefault("UNSTRUCTURED_DEFAULT_MODEL_NAME", "yolox")
     os.environ.setdefault("UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH", str(UNSTRUCTURED_MODEL_CONFIG))
+
+
+def _load_unstructured_layout_model() -> None:
+    from unstructured_inference.models.base import get_model
+
+    get_model()
+
+
+def _load_unstructured_table_model() -> None:
+    from unstructured_inference.models import tables
+
+    tables.load_agent()
+
+
+def _local_hf_snapshot(cache_dir: Path) -> Path | None:
+    snapshots_dir = cache_dir / "snapshots"
+    ref = cache_dir / "refs" / "main"
+    if ref.exists():
+        snapshot = snapshots_dir / ref.read_text(encoding="utf-8").strip()
+        if snapshot.exists():
+            return snapshot
+    if not snapshots_dir.exists():
+        return None
+    snapshots = sorted(path for path in snapshots_dir.iterdir() if path.is_dir())
+    return snapshots[-1] if snapshots else None
 
 
 def _validate_file(filepath: str, ext: str) -> None:
