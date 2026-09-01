@@ -7,13 +7,13 @@ pytestmark = pytest.mark.unit
 def _config_file(tmp_path, store_key: str = "qdrant", sparse_key: str = "bm25", sparse_extra: str = "  tokenizer: jieba\n", ocr_key: str = "rapid", ocr_model_name: str = "rapidocr"):
     store_settings = {
         "qdrant": """
-  url: http://localhost:6333
+    url: http://localhost:6333
 """,
         "chroma": """
-  persist_dir: ./chroma_data
+    persist_dir: ./chroma_data
 """,
         "milvus": """
-  uri: http://localhost:19530
+    uri: http://localhost:19530
 """,
     }[store_key]
     path = tmp_path / "profile.yaml"
@@ -29,7 +29,9 @@ sparse:
   type: {sparse_key}
 {sparse_extra.rstrip()}
 store:
-  type: {store_key}
+  {store_key}:
+    enable: true
+    type: {store_key}
 {store_settings.rstrip()}
 search:
   default_mode: hybrid
@@ -66,7 +68,7 @@ def test_container_maps_sparse_config_to_injected_tokenizer(tmp_path):
 def test_container_selects_chroma_store(tmp_path):
     from rag.container import create_container
     from rag.loader import load_config_file
-    from store.chroma import ChromaStore
+    from rag.store.chroma import ChromaStore
 
     config = load_config_file(_config_file(tmp_path, store_key="chroma"))
     container = create_container(config)
@@ -80,7 +82,7 @@ def test_container_selects_chroma_store(tmp_path):
 def test_container_selects_milvus_store(tmp_path):
     from rag.container import create_container
     from rag.loader import load_config_file
-    from store.milvus import MilvusStore
+    from rag.store.milvus import MilvusStore
 
     config = load_config_file(_config_file(tmp_path, store_key="milvus"))
     container = create_container(config)

@@ -5,7 +5,11 @@
 首次部署先从模板生成本机配置：
 
 ```bash
-cp deploy/.env.example deploy/.env
+cp deploy/.env.example deploy/cpu/.env
+# 或
+cp deploy/.env.example deploy/gpu/.env
+# 或
+cp deploy/.env.example deploy/ecu/.env
 ```
 
 准备模型：
@@ -20,6 +24,12 @@ just models all
 just svc up
 ```
 
+可选启动 Milvus：
+
+```bash
+just milvus up
+```
+
 启动服务：
 
 ```bash
@@ -28,7 +38,7 @@ just llm up
 just webui up
 ```
 
-启动 nginx：
+启动 nginx（本地一般不用）：
 
 ```bash
 just nginx up
@@ -49,6 +59,7 @@ just nginx down
 just webui down
 just llm down
 just rag down
+just milvus down
 just svc down
 ```
 

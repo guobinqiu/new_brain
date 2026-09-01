@@ -38,6 +38,7 @@ dist/
 
 # 环境与 IDE
 deploy/.env
+deploy/*/.env
 .DS_Store
 .idea/
 .vscode/

@@ -1149,7 +1149,7 @@ GET /api/traces
 
 ## 配置与数据目录
 
-`deploy/.env.example` 是版本化配置模板；每个部署节点复制为本机 `deploy/.env` 后再按节点修改。Docker 部署只读取本机 `deploy/.env`。
+`deploy/.env.example` 是版本化配置模板；每个部署节点复制为对应环境目录下的 `.env` 后再按节点修改。Docker 部署读取 `deploy/cpu/.env`、`deploy/gpu/.env` 或 `deploy/ecu/.env`。
 
 共享依赖节点示例：
 
@@ -1165,7 +1165,7 @@ LOKI_URL=http://19.16.1.233:3100
 应用节点示例：
 
 ```dotenv
-CONFIG_FILE=docker-cpu.yaml
+CONFIG_FILE=rag/config/qdrant-bgebase.yaml
 RAG_NODE_ID=node-90
 RAG_PEERS=http://19.16.1.233:6000,http://19.16.1.90:6000
 DATABASE_URL=postgresql://rag:rag@19.16.1.233:5432/rag
@@ -1174,7 +1174,7 @@ S3_ENDPOINT_URL=http://19.16.1.233:9000
 LOKI_URL=http://19.16.1.233:3100
 ```
 
-这些依赖地址必须指向 deps 所在节点，可以是任意服务器 IP 或域名。GPU 节点把 `CONFIG_FILE` 改为 `docker-gpu.yaml`。
+这些依赖地址必须指向 deps 所在节点，可以是任意服务器 IP 或域名。GPU 节点使用 `deploy/gpu/.env`，并把 `CONFIG_FILE` 配为 `rag/config/qdrant-bgem3-rerank.yaml`。
 
 新增数据目录：
 
@@ -1186,8 +1186,8 @@ loki_data/
 
 ## 运行约束
 
-svc compose 运行共享依赖；rag compose 运行同构应用节点。所有 rag 节点都运行 backend、frontend、nginx 和 Promtail。rag 节点通过 `deploy/.env` 里的 `DATABASE_URL`、`QDRANT_URL`、`S3_ENDPOINT_URL`、`LOKI_URL` 显式连接依赖节点。
+svc compose 运行共享依赖；rag compose 运行同构应用节点。所有 rag 节点都运行 backend、frontend、nginx 和 Promtail。rag 节点通过对应环境目录 `.env` 里的 `DATABASE_URL`、`QDRANT_URL`、`S3_ENDPOINT_URL`、`LOKI_URL` 显式连接依赖节点。
 
-节点拓扑由环境变量静态配置。新增或删除节点需要更新各节点 `deploy/.env` 中的 `RAG_PEERS`，然后重启 backend / nginx / promtail 相关服务。
+节点拓扑由环境变量静态配置。新增或删除节点需要更新各节点环境 `.env` 中的 `RAG_PEERS`，然后重启 backend / nginx / promtail 相关服务。
 
 Loki 为单实例部署。主节点不可用时，集中日志查询不可用；各节点本地 Docker `json-file` 日志仍可通过宿主机查看。

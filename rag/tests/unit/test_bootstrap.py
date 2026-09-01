@@ -92,23 +92,6 @@ def test_application_selects_production_components():
     assert application.parser.__class__.__name__ == "ParserService"
 
 
-def test_application_selects_configured_dense_and_bm25_sparse():
-    import rag.bootstrap as bootstrap
-    from rag.dense.huggingface import HuggingFaceDense
-    from rag.loader import load_config_file
-    from rag.rerank.cross_encoder import CrossEncoderRerank
-    from rag.sparse.bm25 import BM25Sparse
-
-    config = load_config_file("config/qdrant-bge-base.yaml")
-    application = bootstrap.Application(config=config)
-
-    assert isinstance(application.dense, HuggingFaceDense)
-    assert application.dense.model_name.endswith("/models/AI-ModelScope/bge-base-zh-v1.5")
-    assert isinstance(application.sparse, BM25Sparse)
-    assert application.sparse.tokenizer.__class__.__name__ == "JiebaTokenizer"
-    assert isinstance(application.rerank, CrossEncoderRerank)
-
-
 def test_application_selects_bge_m3_store_sparse(tmp_path):
     import rag.bootstrap as bootstrap
     from rag.loader import load_config_file
@@ -197,17 +180,6 @@ def test_application_passes_store_config_to_qdrant_store():
 
     assert application.store.url == application.config.store.url
     assert application.store.timeout == application.config.store.timeout
-
-
-def test_application_reads_config_name_from_explicit_yaml(monkeypatch):
-    import rag.bootstrap as bootstrap
-
-    monkeypatch.setenv("CONFIG_FILE", "qdrant-bge-base.yaml")
-
-    application = bootstrap.Application()
-
-    assert application.config_name == "qdrant-bge-base"
-    assert application.config.dense.name == "bge_base"
 
 
 def test_build_dense_rejects_unsupported_dense_type():

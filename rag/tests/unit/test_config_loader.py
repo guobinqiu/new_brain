@@ -9,28 +9,13 @@ pytestmark = pytest.mark.unit
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
-def test_load_app_config_loads_local_config(monkeypatch):
+def test_load_app_config_requires_config_file(monkeypatch):
     from rag.loader import load_app_config
 
     monkeypatch.delenv("CONFIG_FILE", raising=False)
 
-    config = load_app_config()
-
-    assert config.name == "local"
-    assert config.store.type == "qdrant"
-    assert config.store.url == "http://localhost:6333"
-    assert config.logging.level == "INFO"
-    assert config.logging.file == "logs/rag.log"
-    assert config.logging.max_bytes == 10485760
-    assert config.logging.backup_count == 5
-    assert config.logging.search_trace is True
-    assert config.dense.import_path == "dense.huggingface.HuggingFaceDense"
-    assert config.sparse.import_path == "sparse.bm25.BM25Sparse"
-    assert config.store.import_path == "store.qdrant.QdrantStore"
-    assert config.api.rate_limit == "120/minute"
-    assert config.api.rate_limit_index == "10/minute"
-    assert config.rerank is None
-    assert config.ocr.import_path == "ocr.paddle.PaddleOCR"
+    with pytest.raises(RuntimeError, match="CONFIG_FILE is required"):
+        load_app_config()
 
 
 def test_load_app_config_can_use_explicit_yaml(monkeypatch, tmp_path):
@@ -262,6 +247,49 @@ ocr: test_ocr
     assert config.parser.unstructured.text.chunk_overlap == 32
 
 
+def test_load_app_config_selects_enabled_store_component(monkeypatch, tmp_path):
+    from rag.loader import load_app_config
+
+    path = tmp_path / "store_components.yaml"
+    path.write_text(
+        """
+database:
+  type: postgres
+  url: postgresql://rag:rag@localhost:5432/rag
+dense: test_dense
+sparse:
+  type: bm25
+  tokenizer: jieba
+store:
+  qdrant:
+    enable: false
+    type: qdrant
+    url: http://localhost:6333
+    import_path: store.qdrant.QdrantStore
+  milvus_lite:
+    enable: true
+    type: milvus_lite
+    uri: milvus_data/lite/test.db
+    import_path: store.milvus.MilvusStore
+search:
+  default_mode: hybrid
+rerank: test_rerank
+ocr: test_ocr
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CONFIG_FILE", str(path))
+
+    config = load_app_config()
+
+    assert config.store.type == "milvus_lite"
+    assert config.store.uri == "milvus_data/lite/test.db"
+    assert config.available_components["store"] == [
+        {"name": "qdrant", "model_name": None, "active": False},
+        {"name": "milvus_lite", "model_name": None, "active": True},
+    ]
+
+
 def test_load_app_config_supports_single_vector_sparse(monkeypatch, tmp_path):
     from rag.loader import load_app_config
 
@@ -404,23 +432,20 @@ ocr:
     assert config.rerank is None
 
 
-def test_load_app_config_can_use_config_filename(monkeypatch):
+def test_load_app_config_can_use_project_relative_config_path(monkeypatch):
     from rag.loader import load_app_config
 
-    monkeypatch.setenv("CONFIG_FILE", "local.yaml")
+    monkeypatch.setenv("CONFIG_FILE", "rag/config/qdrant-bgebase.yaml")
 
     config = load_app_config()
 
-    assert config.name == "local"
-    assert config.dense.model_path == str(PROJECT_ROOT / "models" / "AI-ModelScope" / "bge-base-zh-v1.5")
     assert config.store.type == "qdrant"
-    assert config.store.url == "http://localhost:6333"
 
 
 def test_load_app_config_applies_runtime_url_overrides(monkeypatch):
     from rag.loader import load_app_config
 
-    monkeypatch.setenv("CONFIG_FILE", "docker-cpu.yaml")
+    monkeypatch.setenv("CONFIG_FILE", "rag/config/qdrant-bgebase.yaml")
     monkeypatch.setenv("DATABASE_URL", "postgresql://rag:rag@19.16.1.233:5432/rag")
     monkeypatch.setenv("QDRANT_URL", "http://19.16.1.233:6333")
 
@@ -428,29 +453,6 @@ def test_load_app_config_applies_runtime_url_overrides(monkeypatch):
 
     assert config.database.url == "postgresql://rag:rag@19.16.1.233:5432/rag"
     assert config.store.url == "http://19.16.1.233:6333"
-
-
-def test_load_app_config_supports_qdrant_profile(monkeypatch):
-    from rag.loader import load_app_config
-
-    monkeypatch.setenv("CONFIG_FILE", "qdrant-bge-base.yaml")
-
-    config = load_app_config()
-
-    assert config.name == "qdrant-bge-base"
-    assert config.store.type == "qdrant"
-
-
-def test_load_app_config_supports_chroma_store(monkeypatch):
-    from rag.loader import load_app_config
-
-    monkeypatch.setenv("CONFIG_FILE", "chroma-bge-base.yaml")
-
-    config = load_app_config()
-
-    assert config.name == "chroma-bge-base"
-    assert config.store.type == "chroma"
-    assert config.store.persist_dir == "chroma_data"
 
 
 def test_load_app_config_rejects_chroma_bge_m3_sparse(tmp_path):
@@ -471,9 +473,11 @@ sparse:
   model_name: bge-m3
   import_path: sparse.qdrant_bge_m3.QdrantBGEM3Sparse
 store:
-  type: chroma
-  persist_dir: chroma_data
-  import_path: store.chroma.ChromaStore
+  chroma:
+    enable: true
+    type: chroma
+    persist_dir: chroma_data
+    import_path: store.chroma.ChromaStore
 search:
   default_mode: hybrid
 rerank:
@@ -492,14 +496,37 @@ ocr:
         load_config_file(path)
 
 
-def test_load_app_config_supports_milvus_store(monkeypatch):
+def test_load_app_config_supports_milvus_store(monkeypatch, tmp_path):
     from rag.loader import load_app_config
 
-    monkeypatch.setenv("CONFIG_FILE", "milvus-bge-base.yaml")
+    path = tmp_path / "milvus.yaml"
+    path.write_text(
+        """
+database:
+  type: postgres
+  url: postgresql://rag:rag@localhost:5432/rag
+dense: test_dense
+sparse:
+  type: bm25
+  tokenizer: jieba
+store:
+  milvus:
+    enable: true
+    type: milvus
+    uri: http://localhost:19530
+    import_path: store.milvus.MilvusStore
+search:
+  default_mode: hybrid
+rerank: test_rerank
+ocr: test_ocr
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CONFIG_FILE", str(path))
 
     config = load_app_config()
 
-    assert config.name == "milvus-bge-base"
+    assert config.name == "milvus"
     assert config.store.type == "milvus"
     assert config.store.uri == "http://localhost:19530"
 
@@ -507,7 +534,7 @@ def test_load_app_config_supports_milvus_store(monkeypatch):
 def test_load_app_config_keeps_app_bm25_sparse_without_model_path(monkeypatch):
     from rag.loader import load_app_config
 
-    monkeypatch.setenv("CONFIG_FILE", "local.yaml")
+    monkeypatch.setenv("CONFIG_FILE", "rag/config/qdrant-bgebase.yaml")
 
     config = load_app_config()
 
@@ -515,10 +542,34 @@ def test_load_app_config_keeps_app_bm25_sparse_without_model_path(monkeypatch):
     assert config.sparse.name == "bm25"
 
 
-def test_load_app_config_supports_milvus_builtin_bm25_sparse(monkeypatch):
+def test_load_app_config_supports_milvus_builtin_bm25_sparse(monkeypatch, tmp_path):
     from rag.loader import load_app_config
 
-    monkeypatch.setenv("CONFIG_FILE", "milvus-builtin-bm25.yaml")
+    path = tmp_path / "milvus_bm25.yaml"
+    path.write_text(
+        """
+database:
+  type: postgres
+  url: postgresql://rag:rag@localhost:5432/rag
+dense: test_dense
+sparse:
+  type: milvus_bm25
+  tokenizer: jieba
+  import_path: sparse.milvus_bm25.MilvusBM25Sparse
+store:
+  milvus:
+    enable: true
+    type: milvus
+    uri: http://localhost:19530
+    import_path: store.milvus.MilvusStore
+search:
+  default_mode: hybrid
+rerank: test_rerank
+ocr: test_ocr
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CONFIG_FILE", str(path))
 
     config = load_app_config()
 

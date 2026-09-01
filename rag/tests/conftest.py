@@ -12,7 +12,7 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-os.environ.setdefault("CONFIG_FILE", str(BACKEND_DIR / "config" / "local.yaml"))
+os.environ.setdefault("CONFIG_FILE", str(BACKEND_DIR / "config" / "qdrant-bgebase.yaml"))
 TEST_APP_ID = "test_imsdom"
 
 
@@ -43,7 +43,7 @@ def store_test_env(request, tmp_path):
     _drop_qdrant_collection(cf.QDRANT_URL, app_chunks_collection)
     test_config_path = tmp_path / "qdrant_test.yaml"
     test_config_path.write_text(
-        (BACKEND_DIR / "config" / "local.yaml")
+        (BACKEND_DIR / "config" / "qdrant-bgebase.yaml")
         .read_text(encoding="utf-8")
         .replace("auth:\n  admin:", f"auth:\n  registry_file: {tmp_path / 'apps.json'}\n  admin:"),
         encoding="utf-8",

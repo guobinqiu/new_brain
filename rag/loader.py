@@ -12,12 +12,13 @@ CONFIG_DIR = Path(__file__).resolve().parent / "config"
 BACKEND_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = BACKEND_DIR.parent
 MODELS_DIR = PROJECT_ROOT / "models"
-DEFAULT_CONFIG_FILE = "local.yaml"
 CONFIG_FILE_ENV = "CONFIG_FILE"
 
 
 def load_app_config() -> AppConfig:
-    config_path = os.getenv(CONFIG_FILE_ENV, DEFAULT_CONFIG_FILE)
+    config_path = os.getenv(CONFIG_FILE_ENV)
+    if not config_path:
+        raise RuntimeError(f"{CONFIG_FILE_ENV} is required")
     return load_config_file(_resolve_config_path(config_path))
 
 
@@ -39,9 +40,9 @@ def _resolve_config_path(value: str) -> Path:
     config_path = Path(value)
     if config_path.is_absolute() or config_path.exists():
         return config_path
-    if config_path.parts and config_path.parts[0] == "config":
-        return BACKEND_DIR / config_path
-    return CONFIG_DIR / config_path
+    if config_path.parts and config_path.parts[0] == "rag":
+        return PROJECT_ROOT / config_path
+    raise FileNotFoundError(value)
 
 
 def _apply_runtime_overrides(raw: dict) -> None:
@@ -117,6 +118,7 @@ def _select_enabled_components(raw: dict) -> None:
 
 def _available_components(raw: dict) -> dict[str, list[dict[str, object]]]:
     return {
+        "store": _component_options(raw.get("store")),
         "rerank": _component_options(raw.get("rerank")),
         "ocr": _component_options(raw.get("ocr")),
     }
