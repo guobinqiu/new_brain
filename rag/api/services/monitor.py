@@ -81,7 +81,7 @@ def components() -> list[dict[str, Any]]:
         },
         {
             "name": "OCR",
-            "status": required_component_status(runtime.application.ocr, error=runtime.application.component_errors.get("ocr")),
+            "status": component_status(runtime.application.ocr, enabled=runtime.application.config.ocr is not None, error=runtime.application.component_errors.get("ocr")),
             "model": component_model(runtime.application.config.ocr),
         },
         parser_component(),

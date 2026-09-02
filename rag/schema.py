@@ -52,8 +52,8 @@ class SearchConfig:
     default_mode: str = "hybrid"
     top_k: int = 5
     fetch_k: int = 20
-    dense_weight: float = 0.5
-    sparse_weight: float = 0.5
+    dense_weight: float = 0.7
+    sparse_weight: float = 0.3
     rrf_k: int = 60
 
 
@@ -172,7 +172,7 @@ class AppConfig:
     database: DatabaseConfig
     search: SearchConfig
     rerank: RerankConfig | None
-    ocr: OCRConfig
+    ocr: OCRConfig | None
     auth: AuthConfig
     embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
     parser: ParserConfig = field(default_factory=ParserConfig)
@@ -202,13 +202,14 @@ def parse_app_config(raw: dict[str, Any]) -> AppConfig:
     sparse_config = _parse_sparse_backend(sparse, "sparse") if sparse is not None else None
     sparse_name = sparse_config.name if sparse_config is not None else None
     rerank_name = _component_name(rerank, "rerank") if rerank is not None else None
-    ocr_name = _component_name(ocr, "ocr")
+    ocr_name = _component_name(ocr, "ocr") if ocr is not None else None
     _validate_supported("dense", dense_name, {"test_dense", "bge_base", "bge_base_zh_v15", "bge_m3", "dense/huggingface"})
     if sparse_name is not None:
         _validate_supported("sparse", sparse_name, {"simple_bm25", "bge_m3", "milvus_bm25", "opensearch_bm25", "sparse/qdrant_bge_m3", "sparse/milvus_bge_m3", "sparse/milvus_bm25", "sparse/opensearch_bm25"})
     if rerank_name is not None:
         _validate_supported("rerank", rerank_name, {"test_rerank", "bge_base", "bge_large", "bge_m3", "bge_reranker_base", "bge_reranker_large", "bge_reranker_v2_m3", "rerank/cross_encoder"})
-    _validate_supported("ocr", ocr_name, {"test_ocr", "rapid", "paddle", "rapidocr", "paddleocr", "tesseract", "ocr/rapid", "ocr/paddle", "ocr/tesseract"})
+    if ocr_name is not None:
+        _validate_supported("ocr", ocr_name, {"test_ocr", "rapid", "paddle", "rapidocr", "paddleocr", "tesseract", "ocr/rapid", "ocr/paddle", "ocr/tesseract"})
     _validate_supported("store.type", store_type, {"qdrant", "chroma", "milvus", "milvus_lite", "store/qdrant", "store/chroma", "store/milvus"})
     database_name = database.get("type") or database.get("name")
     if database_name is None:
@@ -280,8 +281,8 @@ def parse_app_config(raw: dict[str, Any]) -> AppConfig:
             default_mode=search.get("default_mode", "hybrid"),
             top_k=int(search.get("top_k", 5)),
             fetch_k=int(search.get("fetch_k", 20)),
-            dense_weight=float(search.get("dense_weight", 0.5)),
-            sparse_weight=float(search.get("sparse_weight", 0.5)),
+            dense_weight=float(search.get("dense_weight", 0.7)),
+            sparse_weight=float(search.get("sparse_weight", 0.3)),
             rrf_k=int(search.get("rrf_k", 60)),
         ),
         embedding=EmbeddingConfig(
@@ -319,7 +320,7 @@ def parse_app_config(raw: dict[str, Any]) -> AppConfig:
             model_path=_required(ocr, "model_path", "ocr"),
             model_name=ocr.get("model_name"),
             import_path=ocr.get("import_path"),
-        ),
+        ) if ocr is not None else None,
     )
 
 

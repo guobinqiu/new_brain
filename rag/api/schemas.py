@@ -83,3 +83,21 @@ class ChunksQueryRequest(BaseModel):
         if self.file_ids is not None and len(self.file_ids) > 1000:
             raise ValueError("file_ids exceeds max limit: 1000")
         return self
+
+
+class DebugEncodeRequest(BaseModel):
+    query: str = Field(..., min_length=1)
+
+
+class DebugSearchRequest(BaseModel):
+    query: str = Field(..., min_length=1)
+    top_k: int = Field(20, ge=1, le=100)
+    file_ids: list[str] | None = None
+
+    @model_validator(mode="after")
+    def validate_file_ids(self):
+        if self.file_ids is not None and len(self.file_ids) == 0:
+            raise ValueError("file_ids cannot be empty")
+        if self.file_ids is not None and len(self.file_ids) > 1000:
+            raise ValueError("file_ids exceeds max limit: 1000")
+        return self

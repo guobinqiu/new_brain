@@ -35,7 +35,7 @@ class Application:
         self.store = store or self.container.store(dense=self.dense, sparse=self.sparse)
         self.search = search or self.container.search(store=self.store, sparse=self.sparse)
         self.rerank = rerank or (self.container.rerank() if self.config.rerank is not None else None)
-        self.ocr = ocr or self.container.ocr()
+        self.ocr = ocr if ocr is not None else (self.container.ocr() if self.config.ocr is not None else None)
         self.parser = parser or self.container.parser(ocr=self.ocr)
         self.database = database or self.container.database()
         self.search_trace = None
@@ -53,7 +53,8 @@ class Application:
             self._start_component("sparse", self.sparse)
         if self.rerank is not None:
             self._start_component("rerank", self.rerank)
-        self._start_component("ocr", self.ocr)
+        if self.ocr is not None:
+            self._start_component("ocr", self.ocr)
         self._start_component("parser", self.parser)
         self.models_loaded = True
 
@@ -73,7 +74,8 @@ class Application:
 
     def stop(self):
         self.parser.stop()
-        self.ocr.stop()
+        if self.ocr is not None:
+            self.ocr.stop()
         if self.rerank is not None:
             self.rerank.stop()
         self.search.stop()

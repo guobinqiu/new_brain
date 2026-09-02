@@ -16,7 +16,7 @@ auth:
     password: admin123
 store:
   qdrant:
-    enable: true
+    enable: false
     type: qdrant
     timeout: 30
     import_path: store.qdrant.QdrantStore
@@ -26,19 +26,19 @@ store:
     persist_dir: chroma_data
     import_path: store.chroma.ChromaStore
   milvus:
-    enable: false
+    enable: true
     type: milvus
     timeout: 30
     import_path: store.milvus.MilvusStore
   milvus_lite:
     enable: false
     type: milvus_lite
-    uri: milvus_data/lite/gpu.db
+    uri: milvus_data/lite/cpu.db
     timeout: 30
     import_path: store.milvus.MilvusStore
 dense:
-  name: bge_m3
-  model_name: bge-m3
+  name: bge_base
+  model_name: bge-base-zh-v1.5
   import_path: dense.huggingface.HuggingFaceDense
 sparse:
   simple_bm25:
@@ -46,7 +46,7 @@ sparse:
     tokenizer: jieba
     import_path: sparse.simple_bm25.SimpleBM25Sparse
   bge_m3:
-    enable: true
+    enable: false
     model_name: bge-m3
     import_path: sparse.qdrant_bge_m3.QdrantBGEM3Sparse
   opensearch_bm25:
@@ -63,12 +63,12 @@ search:
   sparse_weight: 0.3
   rrf_k: 60
 embedding:
-  dense_batch_size: 16
-  sparse_batch_size: 8
-  release_memory: after_call
+  dense_batch_size: 8
+  sparse_batch_size: 4
+  release_memory: never
 parser:
   mineru:
-    enable: true
+    enable: false
     text:
       chunk_size: 500
       chunk_overlap: 80
@@ -76,9 +76,9 @@ parser:
       header_backward_chars: 160
       footer_forward_chars: 160
   unstructured:
-    enable: false
-    strategy: hi_res
-    infer_table_structure: true
+    enable: true
+    strategy: fast
+    infer_table_structure: false
     languages:
       - chi_sim
       - eng
@@ -98,7 +98,7 @@ rerank:
     model_name: bge-reranker-large
     import_path: rerank.cross_encoder.CrossEncoderRerank
   bge_m3:
-    enable: true
+    enable: false
     model_name: bge-reranker-v2-m3
     import_path: rerank.cross_encoder.CrossEncoderRerank
 ocr:

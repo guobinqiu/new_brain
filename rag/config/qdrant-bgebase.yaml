@@ -50,7 +50,7 @@ sparse:
     model_name: bge-m3
     import_path: sparse.qdrant_bge_m3.QdrantBGEM3Sparse
   opensearch_bm25:
-    enable: true
+    enable: false
     timeout: 10
     username: admin
     password: Admin@123
@@ -59,8 +59,8 @@ search:
   default_mode: hybrid
   top_k: 5
   fetch_k: 20
-  dense_weight: 0.5
-  sparse_weight: 0.5
+  dense_weight: 0.7
+  sparse_weight: 0.3
   rrf_k: 60
 embedding:
   dense_batch_size: 8
@@ -107,7 +107,7 @@ ocr:
     model_name: rapidocr
     import_path: ocr.rapid.RapidOCR
   paddle:
-    enable: true
+    enable: false
     model_name: paddleocr
     import_path: ocr.paddle.PaddleOCR
   tesseract:

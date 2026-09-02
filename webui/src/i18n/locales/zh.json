@@ -16,7 +16,8 @@
     "logs": "日志",
     "config": "配置",
     "apps": "应用",
-    "llm": "对话"
+    "llm": "对话",
+    "debug": "调试"
   },
   "auth": {
     "title": "登录",
@@ -111,6 +112,12 @@
     "query": "查询",
     "fileIds": "文件 ID 列表",
     "fileIdsPlaceholder": "英文逗号分隔多个 file_id",
+    "debugQueryPlaceholder": "输入原始文本，转换或查询向量",
+    "encodeDense": "转换语义",
+    "encodeSparse": "转换关键词",
+    "queryDense": "查询语义",
+    "querySparse": "查询关键词",
+    "score": "分数",
     "chunkId": "分块 ID",
     "fileId": "文件 ID",
     "s3Url": "S3 地址",
@@ -129,6 +136,14 @@
     "sparseVectorTitle": "Sparse Vector",
     "vectorDimension": "维度：{count}",
     "sparseVectorNonZero": "非零项：{count}"
+  },
+  "debug": {
+    "placeholder": "输入原始文本，转换向量或查询索引",
+    "topK": "TopK",
+    "encodeDense": "转换语义",
+    "queryDense": "查询语义",
+    "encodeSparse": "转换关键词",
+    "querySparse": "查询关键词"
   },
   "trace": {
     "title": "查询链路",

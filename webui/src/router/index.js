@@ -5,6 +5,7 @@ import DatabaseView from '../views/DatabaseView.vue'
 import UploadView from '../views/UploadView.vue'
 import SearchView from '../views/SearchView.vue'
 import LlmView from '../views/LlmView.vue'
+import DebugView from '../views/DebugView.vue'
 import MonitorView from '../views/MonitorView.vue'
 import TracesView from '../views/TracesView.vue'
 import LogsView from '../views/LogsView.vue'
@@ -19,11 +20,13 @@ const router = createRouter({
     { path: '/apps/:app_id/upload', component: UploadView },
     { path: '/apps/:app_id/search', component: SearchView },
     { path: '/apps/:app_id/llm', component: LlmView },
+    { path: '/apps/:app_id/debug', component: DebugView },
     { path: '/apps/:app_id/trace', component: TracesView },
     { path: '/database', component: DatabaseView },
     { path: '/upload', component: UploadView },
     { path: '/search', component: SearchView },
     { path: '/llm', component: LlmView },
+    { path: '/debug', component: DebugView },
     { path: '/monitor', component: MonitorView },
     { path: '/trace', component: TracesView },
     { path: '/logs', component: LogsView },

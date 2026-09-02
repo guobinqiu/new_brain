@@ -16,7 +16,8 @@
     "logs": "Logs",
     "config": "Config",
     "apps": "Apps",
-    "llm": "Chat"
+    "llm": "Chat",
+    "debug": "Debug"
   },
   "auth": {
     "title": "Sign in",
@@ -111,6 +112,12 @@
     "query": "Query",
     "fileIds": "File IDs",
     "fileIdsPlaceholder": "Separate file_id values with commas",
+    "debugQueryPlaceholder": "Enter raw text to encode or query vectors",
+    "encodeDense": "Encode dense",
+    "encodeSparse": "Encode sparse",
+    "queryDense": "Query dense",
+    "querySparse": "Query sparse",
+    "score": "Score",
     "chunkId": "Chunk ID",
     "fileId": "File ID",
     "s3Url": "S3 URL",
@@ -129,6 +136,14 @@
     "sparseVectorTitle": "Sparse Vector",
     "vectorDimension": "Dimensions: {count}",
     "sparseVectorNonZero": "Non-zero values: {count}"
+  },
+  "debug": {
+    "placeholder": "Enter raw text to encode vectors or query indexes",
+    "topK": "TopK",
+    "encodeDense": "Encode dense",
+    "queryDense": "Query dense",
+    "encodeSparse": "Encode sparse",
+    "querySparse": "Query sparse"
   },
   "trace": {
     "title": "Trace",

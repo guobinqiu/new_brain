@@ -112,7 +112,7 @@ def _select_enabled_components(raw: dict) -> None:
             for name, config in section.items()
             if isinstance(config, dict) and bool(config.get("enable"))
         ]
-        if section_name in ("sparse", "rerank") and not enabled:
+        if section_name in ("sparse", "rerank", "ocr") and not enabled:
             raw[section_name] = None
             continue
         if len(enabled) != 1:

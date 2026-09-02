@@ -16,7 +16,7 @@ auth:
     password: admin123
 store:
   qdrant:
-    enable: true
+    enable: false
     type: qdrant
     timeout: 30
     import_path: store.qdrant.QdrantStore
@@ -26,7 +26,7 @@ store:
     persist_dir: chroma_data
     import_path: store.chroma.ChromaStore
   milvus:
-    enable: false
+    enable: true
     type: milvus
     timeout: 30
     import_path: store.milvus.MilvusStore
@@ -48,7 +48,7 @@ sparse:
   bge_m3:
     enable: true
     model_name: bge-m3
-    import_path: sparse.qdrant_bge_m3.QdrantBGEM3Sparse
+    import_path: sparse.milvus_bge_m3.MilvusBGEM3Sparse
   opensearch_bm25:
     enable: false
     timeout: 10

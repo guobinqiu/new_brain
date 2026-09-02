@@ -65,6 +65,8 @@ class FakeMilvusClient:
 
     def query(self, collection_name, **kwargs):
         self.queries.append((collection_name, kwargs))
+        if kwargs.get("output_fields") == ["count(*)"]:
+            return [{"count(*)": 2}]
         if kwargs.get("output_fields") == ["pk"]:
             return [{"pk": "pk1"}]
         if hasattr(self, "query_rows"):
@@ -294,6 +296,40 @@ def test_milvus_search_and_query_use_configured_timeout(monkeypatch):
     assert client.queries[0][1]["timeout"] == 30
 
 
+def test_milvus_get_total_chunks_uses_count_query_with_non_empty_filter(monkeypatch):
+    from rag.scope import app_collection
+    from rag.store import milvus
+
+    client = FakeMilvusClient("http://localhost:19530", timeout=30)
+    monkeypatch.setattr(milvus, "_client", client)
+    monkeypatch.setattr(milvus, "_timeout", 30)
+
+    with app_collection("imsdom"):
+        total = milvus.get_total_chunks()
+
+    assert total == 2
+    assert client.queries[0][0] == "imsdom_chunks"
+    assert client.queries[0][1]["filter"] == 'pk != ""'
+    assert client.queries[0][1]["output_fields"] == ["count(*)"]
+    assert "limit" not in client.queries[0][1]
+
+
+def test_milvus_get_total_chunks_with_file_ids_uses_file_filter(monkeypatch):
+    from rag.scope import app_collection
+    from rag.store import milvus
+
+    client = FakeMilvusClient("http://localhost:19530", timeout=30)
+    monkeypatch.setattr(milvus, "_client", client)
+    monkeypatch.setattr(milvus, "_timeout", 30)
+
+    with app_collection("imsdom"):
+        total = milvus.get_total_chunks(["file-a"])
+
+    assert total == 2
+    assert client.queries[0][1]["filter"] == "file_id in ['file-a']"
+    assert client.queries[0][1]["output_fields"] == ["count(*)"]
+
+
 def test_milvus_list_chunks_uses_keyset_cursor(monkeypatch):
     from rag.scope import app_collection
     from rag.store import milvus
@@ -320,9 +356,9 @@ def test_milvus_list_chunks_uses_keyset_cursor(monkeypatch):
     assert client.queries[0][1]["filter"] == "file_id in ['file-a']"
     assert client.queries[0][1]["limit"] == 2
     assert client.queries[0][1]["order_by"] == [
-        {"field": "file_id", "order": "asc"},
-        {"field": "chunk_index", "order": "asc"},
-        {"field": "pk", "order": "asc"},
+        "file_id:asc",
+        "chunk_index:asc",
+        "pk:asc",
     ]
     assert "offset" not in client.queries[0][1]
     assert "chunk_index > 0" in client.queries[1][1]["filter"]

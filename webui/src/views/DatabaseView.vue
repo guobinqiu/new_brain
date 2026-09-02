@@ -77,21 +77,9 @@
               </div>
             </template>
           </el-table-column>
-          <el-table-column v-if="activeDataSource === 'vector' && (denseVectorAvailable || sparseVectorAvailable)" :label="t('common.actions')" width="150" fixed="right">
-            <template #default="{ row }">
-              <div class="vector-actions">
-                <el-button v-if="denseVectorAvailable" size="small" @click.stop="showVector(row, 'dense')">{{ t('database.denseVector') }}</el-button>
-                <el-button v-if="sparseVectorAvailable" size="small" @click.stop="showVector(row, 'sparse')">{{ t('database.sparseVector') }}</el-button>
-              </div>
-            </template>
-          </el-table-column>
         </el-table>
       </template>
     </div>
-    <el-dialog v-model="vectorDialogVisible" :title="vectorDialogTitle" width="720px">
-      <div v-if="vectorDialogMeta" class="vector-meta">{{ vectorDialogMeta }}</div>
-      <pre class="vector-body">{{ vectorDialogBody }}</pre>
-    </el-dialog>
   </main>
 </template>
 
@@ -129,16 +117,10 @@ const sparseChunksLoading = ref(false)
 const sparseChunksLoaded = ref(false)
 const databaseInitializing = ref(false)
 const chunksTableRef = ref(null)
-const vectorDialogVisible = ref(false)
-const vectorDialogTitle = ref('')
-const vectorDialogBody = ref('')
-const vectorDialogMeta = ref('')
 const capabilities = ref({})
 
 const activeChunks = computed(() => activeDataSource.value === 'vector' ? chunks.value : sparseChunks.value)
 const activeChunksLoading = computed(() => activeDataSource.value === 'vector' ? chunksLoading.value : sparseChunksLoading.value)
-const denseVectorAvailable = computed(() => capabilities.value.dense_vector === true)
-const sparseVectorAvailable = computed(() => capabilities.value.sparse_vector === true)
 const searchIndexAvailable = computed(() => capabilities.value.search_index === true)
 
 async function fetchConfig() {
@@ -301,29 +283,6 @@ function onChunksScroll(event) {
   }
 }
 
-async function showVector(row, type) {
-  if (!currentAppId.value || !row?.id) return
-  try {
-    const res = await axios.get(`${API}/apps/${currentAppId.value}/chunks/${row.id}/${type}-vector`)
-    vectorDialogTitle.value = type === 'dense' ? t('database.denseVectorTitle') : t('database.sparseVectorTitle')
-    vectorDialogMeta.value = vectorMeta(res.data.vector, type)
-    vectorDialogBody.value = JSON.stringify(res.data.vector, null, 2)
-    vectorDialogVisible.value = true
-  } catch (err) {
-    showToast('error', errorMessage(err))
-  }
-}
-
-function vectorMeta(vector, type) {
-  if (type === 'dense' && Array.isArray(vector)) {
-    return t('database.vectorDimension', { count: vector.length })
-  }
-  if (type === 'sparse' && vector?.indices && Array.isArray(vector.indices)) {
-    return t('database.sparseVectorNonZero', { count: vector.indices.length })
-  }
-  return ''
-}
-
 onMounted(async () => {
   await fetchConfig()
   await fetchDatabaseStatus()
@@ -355,31 +314,4 @@ function onVisibilityChange() {
 </script>
 
 <style scoped>
-.vector-actions {
-  display: flex;
-  gap: 8px;
-}
-
-.vector-actions .el-button + .el-button {
-  margin-left: 0;
-}
-
-.vector-body {
-  max-height: 520px;
-  overflow: auto;
-  padding: 12px;
-  border-radius: 6px;
-  background: var(--el-fill-color-light);
-  color: var(--el-text-color-primary);
-  font-size: 12px;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  word-break: break-all;
-}
-
-.vector-meta {
-  margin-bottom: 10px;
-  color: var(--el-text-color-secondary);
-  font-size: 13px;
-}
 </style>

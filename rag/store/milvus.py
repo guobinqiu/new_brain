@@ -534,7 +534,15 @@ def delete_file_chunks(file_id: str) -> int:
 
 
 def get_total_chunks(file_ids: list[str] | None = None) -> int:
-    return len(get_search_documents(build_file_filter(file_ids)))
+    rows = get_milvus_client().query(
+        collection_name=_chunks_collection(),
+        filter=build_count_filter(file_ids),
+        output_fields=["count(*)"],
+        timeout=_timeout,
+    )
+    if not rows:
+        return 0
+    return int(rows[0].get("count(*)") or 0)
 
 
 def get_search_documents(metadata_filter: str) -> list[dict]:
@@ -609,11 +617,17 @@ def build_file_filter(file_ids: list[str] | None = None) -> str:
     return _file_payload_filter(file_ids)
 
 
-def _chunk_order_by() -> list[dict[str, str]]:
+def build_count_filter(file_ids: list[str] | None = None) -> str:
+    if file_ids is None:
+        return 'pk != ""'
+    return build_file_filter(file_ids)
+
+
+def _chunk_order_by() -> list[str]:
     return [
-        {"field": "file_id", "order": "asc"},
-        {"field": "chunk_index", "order": "asc"},
-        {"field": "pk", "order": "asc"},
+        "file_id:asc",
+        "chunk_index:asc",
+        "pk:asc",
     ]
 
 

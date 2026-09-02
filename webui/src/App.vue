@@ -59,6 +59,7 @@
               <el-menu-item :index="`/apps/${app.app_id}/upload`">{{ t('nav.upload') }}</el-menu-item>
               <el-menu-item :index="`/apps/${app.app_id}/search`">{{ t('nav.search') }}</el-menu-item>
               <el-menu-item :index="`/apps/${app.app_id}/llm`">{{ t('nav.llm') }}</el-menu-item>
+              <el-menu-item :index="`/apps/${app.app_id}/debug`">{{ t('nav.debug') }}</el-menu-item>
               <el-menu-item :index="`/apps/${app.app_id}/trace`">{{ t('nav.trace') }}</el-menu-item>
             </el-sub-menu>
             <el-menu-item index="/monitor">{{ t('nav.monitor') }}</el-menu-item>
@@ -68,7 +69,7 @@
         </aside>
 
         <section class="console-main">
-          <div v-if="appId" class="app-context">
+          <div v-if="appId && routeAppPage !== 'debug'" class="app-context">
             <span>{{ t('apps.current') }}</span>
             <strong>{{ appId }}</strong>
           </div>
@@ -112,7 +113,7 @@ const { apps } = storeToRefs(appsStore)
 const lang = computed(() => locale.value)
 const epLocale = computed(() => (locale.value === 'zh' ? zhCn : en))
 
-const SUB_PAGES = ['database', 'upload', 'search', 'llm', 'trace']
+const SUB_PAGES = ['database', 'upload', 'search', 'llm', 'debug', 'trace']
 
 const routerViewKey = computed(() => (appId.value ? `${appId.value}${route.path}` : route.path))
 const routeAppPage = computed(() => route.path.split('/')[3] || '')
@@ -216,6 +217,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helv
 
 .search-view,
 .llm-view,
+.debug-view,
 .upload-view,
 .monitor-view,
 .logs-view,
