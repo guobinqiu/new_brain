@@ -1,6 +1,5 @@
 database:
   type: postgres
-  url: postgresql://rag:rag@postgres:5432/rag
   pool_size: 5
   import_path: database.postgres.PostgresDatabase
 logging:
@@ -19,7 +18,6 @@ store:
   qdrant:
     enable: true
     type: qdrant
-    url: http://qdrant:6333
     timeout: 30
     import_path: store.qdrant.QdrantStore
   chroma:
@@ -30,7 +28,6 @@ store:
   milvus:
     enable: false
     type: milvus
-    uri: http://milvus:19530
     timeout: 30
     import_path: store.milvus.MilvusStore
   milvus_lite:
@@ -44,9 +41,20 @@ dense:
   model_name: bge-base-zh-v1.5
   import_path: dense.huggingface.HuggingFaceDense
 sparse:
-  type: bm25
-  tokenizer: jieba
-  import_path: sparse.bm25.BM25Sparse
+  simple_bm25:
+    enable: false
+    tokenizer: jieba
+    import_path: sparse.simple_bm25.SimpleBM25Sparse
+  bge_m3:
+    enable: false
+    model_name: bge-m3
+    import_path: sparse.qdrant_bge_m3.QdrantBGEM3Sparse
+  opensearch_bm25:
+    enable: true
+    timeout: 10
+    username: admin
+    password: Admin@123
+    import_path: sparse.opensearch_bm25.OpenSearchBM25Sparse
 search:
   default_mode: hybrid
   top_k: 5

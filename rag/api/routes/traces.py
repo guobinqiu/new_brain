@@ -7,7 +7,7 @@ from rag.api.services import traces as service
 router = APIRouter()
 
 
-@router.get("/api/traces")
+@router.get("/api/open/rag/traces")
 async def traces(
     app_id: str | None = None,
     start: str | None = None,

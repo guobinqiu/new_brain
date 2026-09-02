@@ -10,7 +10,7 @@ def _base_raw(url=None):
     return {
         "database": {"type": "postgres", "url": url or "postgresql://rag:rag@localhost:5432/rag", "pool_size": 3},
         "dense": {"name": "test_dense", "model_path": "/tmp/dense"},
-        "sparse": {"type": "bm25", "tokenizer": "jieba"},
+        "sparse": {"type": "simple_bm25", "tokenizer": "jieba"},
         "store": {"type": "qdrant", "url": "http://localhost:6333"},
         "search": {},
         "rerank": None,

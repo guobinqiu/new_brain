@@ -59,7 +59,7 @@ function componentModelText(item) {
 
 async function fetchMonitor() {
   try {
-    const res = await axios.get('/api/nodes/monitor')
+    const res = await axios.get('/api/open/rag/nodes/monitor')
     nodes.value = res.data?.nodes || []
   } catch (err) { console.error(err) }
 }

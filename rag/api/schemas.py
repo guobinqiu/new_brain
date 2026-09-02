@@ -21,6 +21,8 @@ class SearchRequest(BaseModel):
     def validate_fetch_k(self):
         if self.fetch_k < self.top_k:
             raise ValueError("fetch_k must be greater than or equal to top_k")
+        if self.dense_weight + self.sparse_weight > 1:
+            raise ValueError("search weights must be less than or equal to 1")
         if self.file_ids is not None and len(self.file_ids) == 0:
             raise ValueError("file_ids cannot be empty")
         if self.file_ids is not None and len(self.file_ids) > 1000:
@@ -81,4 +83,3 @@ class ChunksQueryRequest(BaseModel):
         if self.file_ids is not None and len(self.file_ids) > 1000:
             raise ValueError("file_ids exceeds max limit: 1000")
         return self
-

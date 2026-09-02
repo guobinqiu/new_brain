@@ -214,7 +214,7 @@ def test_response_has_no_score_field_dependency():
 
 
 def test_document_parses_simplified_qdrant_open_search_result():
-    """Document 应兼容 qdrant `/api/open/search` 的简化 result 结构。"""
+    """Document 应兼容 qdrant `/api/open/rag/search` 的简化 result 结构。"""
     Document = _try_import_symbol("rag.schemas", "Document")
     if Document is None:
         pytest.fail("rag.schemas.Document not implemented — RED")

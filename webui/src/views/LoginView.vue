@@ -25,7 +25,7 @@ import axios from '../utils/api'
 import { useAuthStore } from '../stores/auth'
 import { errorMessage } from '../utils/toast'
 
-const API = '/api'
+const API = '/api/open/rag'
 const router = useRouter()
 const { t } = useI18n()
 const authStore = useAuthStore()

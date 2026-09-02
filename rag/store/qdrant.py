@@ -21,7 +21,7 @@ from qdrant_client import QdrantClient
 from qdrant_client.http.exceptions import UnexpectedResponse
 from qdrant_client.http import models
 from rag.sparse.base import Sparse
-from rag.scope import app_collection, collection_name_for_app, current_collection
+from rag.scope import app_collection, collection_name_for_app, current_app_id, current_collection
 from rag.store.startup import run_with_startup_retry
 
 
@@ -82,6 +82,18 @@ class QdrantStore:
 
     def list_chunks(self, file_ids: list[str] | None = None, limit: int = 50, cursor: str | None = None) -> dict:
         return list_chunks(file_ids=file_ids, limit=limit, cursor=cursor)
+
+    def get_dense_vector(self, chunk_id: str) -> list[float] | None:
+        return get_dense_vector(chunk_id)
+
+    def get_sparse_vector(self, chunk_id: str) -> dict | None:
+        return get_sparse_vector(chunk_id)
+
+    def supports_dense_vector(self) -> bool:
+        return True
+
+    def supports_sparse_vector(self, sparse: Sparse | None = None) -> bool:
+        return _sparse_uses_store(sparse)
 
     def ensure_app_collection(self, app_id: str) -> str:
         _configure_store(self.url, self.timeout)
@@ -381,16 +393,17 @@ def add_file_chunks(chunks: list[dict], file_id: str) -> int:
         raise ValueError("file_id is required")
     _require_search_ready()
     with _document_lock(file_id):
+        app_id = current_app_id()
         delete_file_chunks(file_id)
         points = _to_points(chunks, file_id)
         started = time.perf_counter()
-        logger.info("Qdrant upsert start", extra={"event": "qdrant_upsert_start", "file_id": file_id, "chunk_count": len(chunks), "point_count": len(points)})
+        logger.info("Qdrant upsert start", extra={"event": "qdrant_upsert_start", "stage": "index", "backend": "qdrant", "retriever": "vector", "app_id": app_id, "file_id": file_id, "chunk_count": len(chunks), "point_count": len(points)})
         get_qdrant_client().upsert(
             collection_name=_chunks_collection(),
             points=points,
         )
         total_ms = round((time.perf_counter() - started) * 1000, 1)
-        logger.info("Qdrant upsert done", extra={"event": "qdrant_upsert_done", "file_id": file_id, "chunk_count": len(chunks), "point_count": len(points), "total_ms": total_ms})
+        logger.info("Qdrant upsert done", extra={"event": "qdrant_upsert_done", "stage": "index", "backend": "qdrant", "retriever": "vector", "app_id": app_id, "file_id": file_id, "chunk_count": len(chunks), "point_count": len(points), "total_ms": total_ms, "status": "ok"})
     return len(chunks)
 
 
@@ -451,6 +464,42 @@ def list_chunks(file_ids: list[str] | None = None, limit: int = 50, cursor: str 
         "next_cursor": _encode_chunk_cursor(page_rows[-1]) if len(rows) > limit and page_rows else None,
         "has_more": len(rows) > limit,
     }
+
+
+def get_dense_vector(chunk_id: str) -> list[float] | None:
+    vectors = _get_point_vectors(chunk_id)
+    if vectors is None:
+        return None
+    dense = vectors.get("dense") if isinstance(vectors, dict) else vectors
+    return list(dense) if dense is not None else None
+
+
+def get_sparse_vector(chunk_id: str) -> dict | None:
+    vectors = _get_point_vectors(chunk_id)
+    if not isinstance(vectors, dict):
+        return None
+    sparse = vectors.get("sparse")
+    if sparse is None:
+        return None
+    indices = getattr(sparse, "indices", None)
+    values = getattr(sparse, "values", None)
+    if indices is None and isinstance(sparse, dict):
+        indices = sparse.get("indices")
+        values = sparse.get("values")
+    return {"indices": list(indices or []), "values": list(values or [])}
+
+
+def _get_point_vectors(chunk_id: str):
+    _require_search_ready()
+    rows = get_qdrant_client().retrieve(
+        collection_name=_chunks_collection(),
+        ids=[_point_id(chunk_id)],
+        with_payload=False,
+        with_vectors=True,
+    )
+    if not rows:
+        return None
+    return getattr(rows[0], "vector", None)
 
 
 def build_file_filter(file_ids: list[str] | None = None) -> models.Filter | None:
@@ -515,18 +564,19 @@ def _record_to_document(row) -> dict:
 
 
 def _to_points(chunks: list[dict], file_id: str) -> list[models.PointStruct]:
+    app_id = current_app_id()
     contents = [chunk["content"] for chunk in chunks]
     started = time.perf_counter()
-    logger.info("Dense embedding start", extra={"event": "dense_embedding_start", "file_id": file_id, "chunk_count": len(chunks)})
+    logger.info("Dense embedding start", extra={"event": "dense_embedding_start", "stage": "embedding", "backend": "model", "retriever": "dense", "app_id": app_id, "file_id": file_id, "chunk_count": len(chunks)})
     dense_vectors = _get_dense().embed_documents(contents)
     total_ms = round((time.perf_counter() - started) * 1000, 1)
-    logger.info("Dense embedding done", extra={"event": "dense_embedding_done", "file_id": file_id, "chunk_count": len(chunks), "total_ms": total_ms})
+    logger.info("Dense embedding done", extra={"event": "dense_embedding_done", "stage": "embedding", "backend": "model", "retriever": "dense", "app_id": app_id, "file_id": file_id, "chunk_count": len(chunks), "total_ms": total_ms, "status": "ok"})
     if _sparse_uses_store():
         started = time.perf_counter()
-        logger.info("Sparse embedding start", extra={"event": "sparse_embedding_start", "file_id": file_id, "chunk_count": len(chunks)})
+        logger.info("Sparse embedding start", extra={"event": "sparse_embedding_start", "stage": "embedding", "backend": "model", "retriever": "sparse_vector", "app_id": app_id, "file_id": file_id, "chunk_count": len(chunks)})
         sparse_vectors = _sparse_vectors_for_documents(contents)
         total_ms = round((time.perf_counter() - started) * 1000, 1)
-        logger.info("Sparse embedding done", extra={"event": "sparse_embedding_done", "file_id": file_id, "chunk_count": len(chunks), "total_ms": total_ms})
+        logger.info("Sparse embedding done", extra={"event": "sparse_embedding_done", "stage": "embedding", "backend": "model", "retriever": "sparse_vector", "app_id": app_id, "file_id": file_id, "chunk_count": len(chunks), "total_ms": total_ms, "status": "ok"})
     else:
         sparse_vectors = [None] * len(chunks)
     points = []

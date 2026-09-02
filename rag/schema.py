@@ -18,6 +18,11 @@ class SparseBackendConfig:
     model_path: str | None = None
     model_name: str | None = None
     tokenizer: str | None = None
+    url: str | None = None
+    index_prefix: str = ""
+    timeout: int = 10
+    username: str | None = None
+    password: str | None = None
     import_path: str | None = None
 
 
@@ -162,7 +167,7 @@ class OCRConfig:
 @dataclass(frozen=True)
 class AppConfig:
     dense: DenseConfig
-    sparse: SparseConfig
+    sparse: SparseConfig | None
     store: StoreConfig
     database: DatabaseConfig
     search: SearchConfig
@@ -179,7 +184,7 @@ class AppConfig:
 
 def parse_app_config(raw: dict[str, Any]) -> AppConfig:
     dense = raw.get("dense") or {}
-    sparse = raw.get("sparse") or {}
+    sparse = raw.get("sparse")
     store = raw.get("store") or {}
     database = raw.get("database") or {}
     search = raw.get("search") or {}
@@ -194,12 +199,13 @@ def parse_app_config(raw: dict[str, Any]) -> AppConfig:
 
     store_type = _required(store, "type", "store")
     dense_name = _component_name(dense, "dense")
-    sparse_config = _parse_sparse_backend(sparse, "sparse")
-    sparse_name = sparse_config.name
+    sparse_config = _parse_sparse_backend(sparse, "sparse") if sparse is not None else None
+    sparse_name = sparse_config.name if sparse_config is not None else None
     rerank_name = _component_name(rerank, "rerank") if rerank is not None else None
     ocr_name = _component_name(ocr, "ocr")
     _validate_supported("dense", dense_name, {"test_dense", "bge_base", "bge_base_zh_v15", "bge_m3", "dense/huggingface"})
-    _validate_supported("sparse", sparse_name, {"bm25", "bge_m3", "milvus_bm25", "sparse/bm25", "sparse/qdrant_bge_m3", "sparse/milvus_bge_m3", "sparse/milvus_bm25"})
+    if sparse_name is not None:
+        _validate_supported("sparse", sparse_name, {"simple_bm25", "bge_m3", "milvus_bm25", "opensearch_bm25", "sparse/qdrant_bge_m3", "sparse/milvus_bge_m3", "sparse/milvus_bm25", "sparse/opensearch_bm25"})
     if rerank_name is not None:
         _validate_supported("rerank", rerank_name, {"test_rerank", "bge_base", "bge_large", "bge_m3", "bge_reranker_base", "bge_reranker_large", "bge_reranker_v2_m3", "rerank/cross_encoder"})
     _validate_supported("ocr", ocr_name, {"test_ocr", "rapid", "paddle", "rapidocr", "paddleocr", "tesseract", "ocr/rapid", "ocr/paddle", "ocr/tesseract"})
@@ -212,21 +218,28 @@ def parse_app_config(raw: dict[str, Any]) -> AppConfig:
     _validate_supported("search.default_mode", search.get("default_mode", "hybrid"), {"dense", "sparse", "hybrid"})
     _validate_supported("embedding.release_memory", embedding.get("release_memory", "per_batch"), {"per_batch", "after_call", "never"})
     parser_config = _parse_parser_config(parser)
+    if sparse_config is not None and sparse_config.name in ("opensearch_bm25", "sparse/opensearch_bm25"):
+        _required(sparse_config.__dict__, "url", "sparse")
     if store_type in ("qdrant", "store/qdrant"):
         _required(store, "url", "store")
     if store_type in ("chroma", "store/chroma"):
         _required(store, "persist_dir", "store")
     if store_type in ("milvus", "milvus_lite", "store/milvus"):
         _required(store, "uri", "store")
-    if store_type in ("chroma", "store/chroma") and sparse_config.name in ("bge_m3", "milvus_bm25", "sparse/qdrant_bge_m3", "sparse/milvus_bge_m3", "sparse/milvus_bm25"):
+    if store_type in ("chroma", "store/chroma") and sparse_config is not None and sparse_config.name in ("bge_m3", "milvus_bm25", "sparse/qdrant_bge_m3", "sparse/milvus_bge_m3", "sparse/milvus_bm25"):
         raise ValueError("Chroma 不支持 bge_m3 sparse")
-    sparse_model_path = _required(sparse_config.__dict__, "model_path", "sparse") if sparse_config.name in ("bge_m3", "sparse/qdrant_bge_m3", "sparse/milvus_bge_m3") else None
+    sparse_model_path = _required(sparse_config.__dict__, "model_path", "sparse") if sparse_config is not None and sparse_config.name in ("bge_m3", "sparse/qdrant_bge_m3", "sparse/milvus_bge_m3") else None
     if sparse_model_path is not None:
         sparse_config = SparseBackendConfig(
             name=sparse_config.name,
             model_path=sparse_model_path,
             model_name=sparse_config.model_name,
             tokenizer=sparse_config.tokenizer,
+            url=sparse_config.url,
+            index_prefix=sparse_config.index_prefix,
+            timeout=sparse_config.timeout,
+            username=sparse_config.username,
+            password=sparse_config.password,
             import_path=sparse_config.import_path,
         )
 
@@ -242,8 +255,13 @@ def parse_app_config(raw: dict[str, Any]) -> AppConfig:
             model_path=sparse_config.model_path,
             model_name=sparse_config.model_name,
             tokenizer=sparse_config.tokenizer,
+            url=sparse_config.url,
+            index_prefix=sparse_config.index_prefix,
+            timeout=sparse_config.timeout,
+            username=sparse_config.username,
+            password=sparse_config.password,
             import_path=sparse_config.import_path,
-        ),
+        ) if sparse_config is not None else None,
         store=StoreConfig(
             type=store_type,
             url=store.get("url"),
@@ -391,6 +409,11 @@ def _parse_sparse_backend(value: Any, section_name: str) -> SparseBackendConfig:
         model_path=value.get("model_path"),
         model_name=value.get("model_name"),
         tokenizer=value.get("tokenizer"),
+        url=value.get("url"),
+        index_prefix=str(value.get("index_prefix", "")),
+        timeout=int(value.get("timeout", 10)),
+        username=value.get("username"),
+        password=value.get("password"),
         import_path=value.get("import_path"),
     )
 

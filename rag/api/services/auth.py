@@ -15,6 +15,12 @@ async def require_aksk(request: Request) -> Principal:
     return authenticate_client_signature(runtime.application.config.auth, request, await request.body(), runtime.application.database.get_app)
 
 
+async def require_principal(request: Request, authorization: str | None = Header(None)) -> Principal:
+    if authorization:
+        return require_jwt(authorization)
+    return await require_aksk(request)
+
+
 def login(req: LoginRequest):
     principal = authenticate_password(runtime.application.config.auth, req.username, req.password)
     return {

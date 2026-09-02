@@ -4,6 +4,7 @@ from typing import Any
 
 from rag.api.runtime import runtime
 from rag.api.services.common import component_config, component_model, component_status, now_iso, required_component_status
+from rag.api.services.config import capabilities as index_capabilities
 from rag.api.services.config import profile
 from rag.nodes import fetch_peers, local_result, node_id, parse_peers
 
@@ -16,7 +17,7 @@ async def nodes_monitor(authorization: str | None, _):
     peers = parse_peers(os.getenv("RAG_PEERS"))
     if not peers:
         return {"nodes": [asdict(local_result(monitor_payload()))], "generated_at": now_iso()}
-    rows = await fetch_peers(peers, "/api/monitor", authorization)
+    rows = await fetch_peers(peers, "/api/open/rag/monitor", authorization)
     return {"nodes": [asdict(row) for row in rows], "generated_at": now_iso()}
 
 
@@ -32,13 +33,18 @@ def monitor_payload() -> dict[str, Any]:
 
 
 def capabilities() -> dict[str, Any]:
-    return {
-        "search_modes": ["dense", "sparse", "hybrid"],
+    search_modes = ["dense"]
+    if runtime.application.config.sparse is not None:
+        search_modes.extend(["sparse", "hybrid"])
+    data = {
+        "search_modes": search_modes,
         "rerank": runtime.application.rerank is not None,
         "ocr": runtime.application.ocr is not None,
         "config_write": False,
         "restart": False,
     }
+    data.update(index_capabilities())
+    return data
 
 
 def index_contract() -> dict[str, Any]:
@@ -65,7 +71,7 @@ def components() -> list[dict[str, Any]]:
         },
         {
             "name": "Sparse",
-            "status": required_component_status(runtime.application.sparse, error=sparse_error),
+            "status": component_status(runtime.application.sparse, enabled=runtime.application.config.sparse is not None, error=sparse_error),
             "model": component_model(runtime.application.config.sparse),
         },
         {

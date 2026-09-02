@@ -60,7 +60,7 @@ function defaultRange() {
 
 async function loadFilters() {
   const [monitorRes, containerValues] = await Promise.all([
-    axios.get('/api/nodes/monitor'),
+    axios.get('/api/open/rag/nodes/monitor'),
     fetchLabelValues('container'),
   ])
   nodes.value = (monitorRes.data?.nodes || []).map(node => node.node_id)

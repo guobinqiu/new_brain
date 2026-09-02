@@ -34,14 +34,14 @@ def test_app_registry_creates_persistent_credentials_and_authenticates(monkeypat
     body = json.dumps({"query": "hello", "mode": "sparse"}, separators=(",", ":")).encode("utf-8")
     timestamp = str(int(time.time()))
     body_sha256 = hashlib.sha256(body).hexdigest()
-    string_to_sign = "\n".join(["POST", "/api/open/search", timestamp, body_sha256, "tenant_a"])
+    string_to_sign = "\n".join(["POST", "/api/open/rag/search", timestamp, body_sha256, "tenant_a"])
     signature = hmac.new(credential.secret_key.encode("utf-8"), string_to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
 
     class Request:
         method = "POST"
 
         class url:
-            path = "/api/open/search"
+            path = "/api/open/rag/search"
 
         headers = {
             "x-app-id": "tenant_a",
@@ -87,7 +87,7 @@ def test_create_app_api_generates_credentials(monkeypatch, tmp_path):
 
     with TestClient(main.app) as client:
         response = client.post(
-            "/api/apps",
+            "/api/open/rag/apps",
             json={"app_id": "tenant_a"},
             headers={"Authorization": f"Bearer {token}"},
         )
@@ -98,7 +98,7 @@ def test_create_app_api_generates_credentials(monkeypatch, tmp_path):
     assert body["access_key"]
     assert body["secret_key"]
 
-    list_response = client.get("/api/apps", headers={"Authorization": f"Bearer {token}"})
+    list_response = client.get("/api/open/rag/apps", headers={"Authorization": f"Bearer {token}"})
 
     assert list_response.status_code == 200
     apps = list_response.json()["apps"]
@@ -138,7 +138,7 @@ def test_create_app_api_returns_duplicate_error(monkeypatch, tmp_path):
 
     with TestClient(main.app) as client:
         response = client.post(
-            "/api/apps",
+            "/api/open/rag/apps",
             json={"app_id": "tenant_a"},
             headers={"Authorization": f"Bearer {token}"},
         )
@@ -187,7 +187,7 @@ def test_delete_app_api_removes_credentials(monkeypatch, tmp_path):
     token = issue_token(auth_config, Principal(type="admin", app_id="admin"))
 
     with TestClient(main.app) as client:
-        response = client.delete("/api/apps/tenant_a", headers={"Authorization": f"Bearer {token}"})
+        response = client.delete("/api/open/rag/apps/tenant_a", headers={"Authorization": f"Bearer {token}"})
 
     assert response.status_code == 200
     assert response.json() == {"deleted": True}
@@ -245,14 +245,107 @@ def test_app_database_status_and_empty_delete(monkeypatch, tmp_path):
     token = issue_token(auth_config, Principal(type="admin", app_id="admin"))
 
     with TestClient(main.app) as client:
-        status = client.get("/api/apps/tenant_a/database", headers={"Authorization": f"Bearer {token}"})
-        deleted = client.delete("/api/apps/tenant_a/database", headers={"Authorization": f"Bearer {token}"})
+        status = client.get("/api/open/rag/apps/tenant_a/database", headers={"Authorization": f"Bearer {token}"})
+        deleted = client.delete("/api/open/rag/apps/tenant_a/database", headers={"Authorization": f"Bearer {token}"})
 
     assert status.status_code == 200
     assert status.json() == {"app_id": "tenant_a", "exists": True, "chunk_count": 0, "empty": True}
     assert deleted.status_code == 200
     assert deleted.json() == {"app_id": "tenant_a", "deleted": True}
     assert application.database.purged == ["tenant_a"]
+
+
+def test_app_database_initialize_creates_sparse_collection(monkeypatch, tmp_path):
+    from rag.auth import Principal, issue_token
+    from rag.schema import AuthConfig, AdminAuthConfig
+    import main
+
+    auth_config = AuthConfig(
+        admin=AdminAuthConfig(username="admin", password="admin123"),
+        registry_file=str(tmp_path / "apps.json"),
+    )
+    config = replace(runtime.application.config, auth=auth_config)
+    calls = []
+
+    class Store:
+        def ensure_app_collection(self, app_id):
+            calls.append(("store", app_id))
+            return app_id
+
+    class Sparse:
+        def ensure_app_collection(self, app_id):
+            calls.append(("sparse", app_id))
+            return app_id
+
+    class Application:
+        def __init__(self):
+            self.config = config
+            self.ready = True
+            self.store = Store()
+            self.sparse = Sparse()
+
+        def start(self):
+            pass
+
+        def stop(self):
+            pass
+
+    monkeypatch.setattr(runtime, "application", Application())
+    monkeypatch.setattr(runtime, "startup_in_background", False)
+    token = issue_token(auth_config, Principal(type="admin", app_id="admin"))
+
+    with TestClient(main.app) as client:
+        response = client.post("/api/open/rag/apps/tenant_a/database", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 200
+    assert calls == [("store", "tenant_a"), ("sparse", "tenant_a")]
+
+
+def test_app_database_status_requires_sparse_collection_when_available(monkeypatch, tmp_path):
+    from rag.auth import Principal, issue_token
+    from rag.schema import AuthConfig, AdminAuthConfig
+    import main
+
+    auth_config = AuthConfig(
+        admin=AdminAuthConfig(username="admin", password="admin123"),
+        registry_file=str(tmp_path / "apps.json"),
+    )
+    config = replace(runtime.application.config, auth=auth_config)
+
+    class Store:
+        def app_collection_exists(self, app_id):
+            return True
+
+        def get_total_chunks(self, file_ids=None):
+            return 0
+
+    class Sparse:
+        def app_collection_exists(self, app_id):
+            return False
+
+    class Application:
+        def __init__(self):
+            self.config = config
+            self.ready = True
+            self.store = Store()
+            self.sparse = Sparse()
+
+        def start(self):
+            pass
+
+        def stop(self):
+            pass
+
+    monkeypatch.setattr(runtime, "application", Application())
+    monkeypatch.setattr(runtime, "startup_in_background", False)
+    monkeypatch.setattr(service, "scoped_store", lambda principal: runtime.application.store)
+    token = issue_token(auth_config, Principal(type="admin", app_id="admin"))
+
+    with TestClient(main.app) as client:
+        response = client.get("/api/open/rag/apps/tenant_a/database", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 200
+    assert response.json() == {"app_id": "tenant_a", "exists": False, "chunk_count": 0, "empty": True}
 
 
 def test_app_database_delete_allows_non_empty_database(monkeypatch, tmp_path):
@@ -300,7 +393,7 @@ def test_app_database_delete_allows_non_empty_database(monkeypatch, tmp_path):
     token = issue_token(auth_config, Principal(type="admin", app_id="admin"))
 
     with TestClient(main.app) as client:
-        response = client.delete("/api/apps/tenant_a/database", headers={"Authorization": f"Bearer {token}"})
+        response = client.delete("/api/open/rag/apps/tenant_a/database", headers={"Authorization": f"Bearer {token}"})
 
     assert response.status_code == 200
     assert response.json() == {"app_id": "tenant_a", "deleted": True}

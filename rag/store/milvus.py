@@ -69,6 +69,18 @@ class MilvusStore:
     def list_chunks(self, file_ids: list[str] | None = None, limit: int = 50, cursor: str | None = None) -> dict:
         return list_chunks(file_ids=file_ids, limit=limit, cursor=cursor)
 
+    def get_dense_vector(self, chunk_id: str) -> list[float] | None:
+        return get_dense_vector(chunk_id)
+
+    def get_sparse_vector(self, chunk_id: str) -> dict | None:
+        return get_sparse_vector(chunk_id)
+
+    def supports_dense_vector(self) -> bool:
+        return True
+
+    def supports_sparse_vector(self, sparse: Sparse | None = None) -> bool:
+        return _sparse_uses_store(sparse)
+
     def ensure_app_collection(self, app_id: str) -> str:
         _configure_store(self.uri, self.timeout)
         return ensure_app_collection(app_id)
@@ -554,6 +566,39 @@ def list_chunks(file_ids: list[str] | None = None, limit: int = 50, cursor: str 
         "next_cursor": _encode_chunk_cursor(page_rows[-1]) if len(rows) > limit and page_rows else None,
         "has_more": len(rows) > limit,
     }
+
+
+def get_dense_vector(chunk_id: str) -> list[float] | None:
+    rows = _query_chunk_vectors(chunk_id, [_dense_vector_field()])
+    if not rows:
+        return None
+    vector = rows[0].get(_dense_vector_field())
+    return list(vector) if vector is not None else None
+
+
+def get_sparse_vector(chunk_id: str) -> dict | None:
+    if not _sparse_uses_store():
+        raise NotImplementedError("sparse vector is not supported by current store")
+    rows = _query_chunk_vectors(chunk_id, ["sparse"])
+    if not rows:
+        return None
+    sparse = rows[0].get("sparse")
+    if sparse is None:
+        return None
+    if isinstance(sparse, dict) and "indices" in sparse and "values" in sparse:
+        return {"indices": list(sparse["indices"]), "values": list(sparse["values"])}
+    return {"values": sparse}
+
+
+def _query_chunk_vectors(chunk_id: str, fields: list[str]) -> list[dict]:
+    _require_search_ready()
+    return get_milvus_client().query(
+        collection_name=_chunks_collection(),
+        filter=f'pk == "{chunk_id}"',
+        output_fields=fields,
+        timeout=_timeout,
+        limit=1,
+    )
 
 
 def build_file_filter(file_ids: list[str] | None = None) -> str:

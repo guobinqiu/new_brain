@@ -6,8 +6,8 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/api/open/llm': process.env.VITE_LLM_API_TARGET || 'http://127.0.0.1:6001',
-      '/api': process.env.VITE_API_TARGET || 'http://127.0.0.1:6000'
+      '/api/open/llm': 'http://llm:6001',
+      '/api/open/rag': 'http://rag:6000'
     }
   }
 })

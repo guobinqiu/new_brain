@@ -55,7 +55,12 @@
     "balance": "平衡",
     "elapsed": "耗时",
     "noResults": "未找到匹配结果",
-    "noResultsHint": "试试其他搜索模式或调整 Sparse / Dense 平衡"
+    "noResultsHint": "试试其他搜索模式或调整语义 / 关键词平衡",
+    "modeValues": {
+      "dense": "语义",
+      "sparse": "关键词",
+      "hybrid": "混合"
+    }
   },
   "upload": {
     "choose": "选择文档",
@@ -91,7 +96,12 @@
   "database": {
     "title": "数据库",
     "location": "地址/路径",
-    "chunks": "向量数据",
+    "chunks": "向量库",
+    "indexData": "索引数据",
+    "vectorData": "向量库",
+    "sparseData": "全文索引",
+    "vectorStore": "向量库",
+    "searchIndex": "全文索引",
     "app": "应用",
     "initialize": "初始化数据库",
     "initialized": "{appId} 数据库已初始化",
@@ -108,7 +118,17 @@
     "createdAt": "创建时间",
     "chunkIndex": "分块序号",
     "content": "内容",
-    "empty": "暂无向量数据"
+    "empty": "暂无向量库数据",
+    "vectorEmpty": "暂无向量库数据",
+    "sparseEmpty": "暂无全文索引数据",
+    "searchIndexEmpty": "暂无全文索引数据",
+    "searchIndexDisabled": "当前未启用 OpenSearch 全文索引",
+    "denseVector": "Dense",
+    "sparseVector": "Sparse",
+    "denseVectorTitle": "Dense Vector",
+    "sparseVectorTitle": "Sparse Vector",
+    "vectorDimension": "维度：{count}",
+    "sparseVectorNonZero": "非零项：{count}"
   },
   "trace": {
     "title": "查询链路",

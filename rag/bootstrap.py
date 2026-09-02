@@ -31,7 +31,7 @@ class Application:
         self.config_name = self.config.name
         self.container = create_container(self.config)
         self.dense = dense or self.container.dense()
-        self.sparse = sparse or self.container.sparse()
+        self.sparse = sparse if sparse is not None else (self.container.sparse() if self.config.sparse is not None else None)
         self.store = store or self.container.store(dense=self.dense, sparse=self.sparse)
         self.search = search or self.container.search(store=self.store, sparse=self.sparse)
         self.rerank = rerank or (self.container.rerank() if self.config.rerank is not None else None)
@@ -49,7 +49,8 @@ class Application:
 
     def load_models(self):
         self._start_component("dense", self.dense)
-        self._start_component("sparse", self.sparse)
+        if self.sparse is not None:
+            self._start_component("sparse", self.sparse)
         if self.rerank is not None:
             self._start_component("rerank", self.rerank)
         self._start_component("ocr", self.ocr)
@@ -78,7 +79,8 @@ class Application:
         self.search.stop()
         self.store.stop()
         self.database.stop()
-        self.sparse.stop()
+        if self.sparse is not None:
+            self.sparse.stop()
         self.dense.stop()
         self.models_loaded = False
         self.ready = False

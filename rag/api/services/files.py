@@ -156,6 +156,65 @@ def chunks(req: ChunksQueryRequest, principal: Principal):
     }
 
 
+def sparse_chunks(req: ChunksQueryRequest, principal: Principal):
+    require_ready()
+    try:
+        effective_principal = database_principal(principal, req.app_id)
+        sparse = runtime.application.sparse
+        if sparse is None or not hasattr(sparse, "list_chunks"):
+            return {"chunks": [], "next_cursor": None, "has_more": False}
+        with store_context(effective_principal):
+            page = sparse.list_chunks(file_ids=req.file_ids, limit=req.limit, cursor=req.cursor)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "chunks": [chunk_record(document) for document in page["documents"]],
+        "next_cursor": page["next_cursor"],
+        "has_more": page["has_more"],
+    }
+
+
+def dense_vector(app_id: str, chunk_id: str, principal: Principal):
+    return _chunk_vector(app_id, chunk_id, principal, vector_type="dense")
+
+
+def sparse_vector(app_id: str, chunk_id: str, principal: Principal):
+    sparse = runtime.application.sparse
+    store = runtime.application.store
+    if (
+        sparse is None
+        or not _supports(sparse, "supports_sparse_vector")
+        or not _supports(store, "supports_sparse_vector", sparse)
+    ):
+        raise HTTPException(status_code=400, detail="sparse vector is not supported by current sparse backend")
+    return _chunk_vector(app_id, chunk_id, principal, vector_type="sparse")
+
+
+def _supports(component: Any, method_name: str, *args) -> bool:
+    method = getattr(component, method_name, None)
+    if not callable(method):
+        return False
+    return bool(method(*args))
+
+
+def _chunk_vector(app_id: str, chunk_id: str, principal: Principal, *, vector_type: str):
+    require_ready()
+    effective_principal = database_principal(principal, app_id)
+    store = runtime.application.store
+    method_name = f"get_{vector_type}_vector"
+    method = getattr(store, method_name, None)
+    if not callable(method):
+        raise HTTPException(status_code=400, detail=f"{vector_type} vector is not supported by current store")
+    try:
+        with store_context(effective_principal):
+            vector = method(chunk_id)
+    except NotImplementedError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if vector is None:
+        raise HTTPException(status_code=404, detail="chunk not found")
+    return {"chunk_id": chunk_id, "type": vector_type, "vector": vector}
+
+
 def client_delete_file(file_id: str, principal: Principal):
     return delete_index_file(file_id, principal)
 
@@ -163,6 +222,8 @@ def client_delete_file(file_id: str, principal: Principal):
 def delete_file(file_id: str, app_id: str | None, principal: Principal):
     effective_principal = database_principal(principal, app_id)
     result = delete_index_file(file_id, effective_principal)
+    if principal.type == "app":
+        return result
     try:
         delete_storage_file(effective_principal.app_id, file_id)
     except Exception as exc:
@@ -192,6 +253,10 @@ def delete_index_file(file_id: str, principal: Principal) -> dict[str, Any]:
     require_ready()
     store = scoped_store(principal)
     deleted_chunks = store.delete_file_chunks(file_id)
+    sparse = getattr(runtime.application, "sparse", None)
+    if sparse is not None and hasattr(sparse, "delete_file_chunks"):
+        with store_context(principal):
+            sparse.delete_file_chunks(file_id)
     runtime.application.database.soft_delete_file(principal.app_id, file_id)
     return {"deleted_chunks": deleted_chunks}
 

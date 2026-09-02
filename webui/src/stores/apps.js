@@ -8,7 +8,7 @@ export const useAppsStore = defineStore('apps', () => {
 
   async function fetchApps() {
     try {
-      const res = await axios.get('/api/apps')
+      const res = await axios.get('/api/open/rag/apps')
       apps.value = res.data.apps || []
       const activeAppStore = useActiveAppStore()
       if (activeAppStore.appId && !apps.value.some(app => app.app_id === activeAppStore.appId)) {

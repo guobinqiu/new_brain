@@ -139,7 +139,7 @@ async def test_client_signature_header_matches_sign_function(install_mock_transp
     expected_sig = sign(
         sent_req.content,
         method="POST",
-        path="/api/open/search",
+        path="/api/open/rag/search",
         ts=ts,
         app_id="agent_1",
         secret="mySecret",
@@ -149,7 +149,7 @@ async def test_client_signature_header_matches_sign_function(install_mock_transp
 
 @pytest.mark.asyncio
 async def test_client_url_is_base_url_plus_search_path(install_mock_transport):
-    """URL 必须是 base_url + '/api/open/search'，不拼 query。"""
+    """URL 必须是 base_url + '/api/open/rag/search'，不拼 query。"""
     captured: list[httpx.Request] = []
 
     async def handler(request: httpx.Request) -> httpx.Response:
@@ -170,9 +170,9 @@ async def test_client_url_is_base_url_plus_search_path(install_mock_transport):
         await client.aclose()
 
     url = str(captured[0].url)
-    assert url.endswith("/api/open/search")
+    assert url.endswith("/api/open/rag/search")
     # base_url 尾部斜杠应被 rstrip
-    assert "rag.local:8000/api/open/search" in url
+    assert "rag.local:8000/api/open/rag/search" in url
 
 
 # ──────────────────────────── 重试策略 ────────────────────────────
@@ -466,7 +466,7 @@ async def test_result_documents_parsed_as_pydantic(install_mock_transport):
 
 @pytest.mark.asyncio
 async def test_result_documents_parse_simplified_qdrant_api_response(install_mock_transport):
-    """真实 qdrant `/api/open/search` 返回简化 result 时不应被跳过。"""
+    """真实 qdrant `/api/open/rag/search` 返回简化 result 时不应被跳过。"""
 
     async def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(

@@ -1,15 +1,11 @@
 # RAG Knowledge Search
 
-## Docker 启动
+## 启动
 
 首次部署先从模板生成本机配置：
 
 ```bash
-cp deploy/.env.example deploy/cpu/.env
-# 或
-cp deploy/.env.example deploy/gpu/.env
-# 或
-cp deploy/.env.example deploy/ecu/.env
+cp deploy/.env.example deploy/.env
 ```
 
 准备模型：
@@ -18,49 +14,44 @@ cp deploy/.env.example deploy/ecu/.env
 just models all
 ```
 
-启动共享依赖：
+本地开发启动：
 
 ```bash
 just svc up
-```
-
-可选启动 Milvus：
-
-```bash
-just milvus up
-```
-
-启动服务：
-
-```bash
 just rag up
 just llm up
 just webui up
 ```
 
-启动 nginx（本地一般不用）：
+生产主节点启动：
 
 ```bash
-just nginx up
+just webui build
+just svc up gpu
+just rag up gpu
+just llm up gpu
+just nginx up gpu
 ```
 
-构建：
+生产不启动 webui，只 build webui/dist，由 nginx 服务静态文件。
+
+生产从节点启动：
 
 ```bash
-just rag build cpu
-just rag build gpu
-just llm build
+just rag up gpu
+just llm up gpu
+just promtail up gpu
 ```
 
-停止：
+从节点 `deploy/.env` 里的共享服务地址指向主节点：
 
-```bash
-just nginx down
-just webui down
-just llm down
-just rag down
-just milvus down
-just svc down
+```env
+DATABASE_URL=postgresql://rag:rag@<主节点IP>:5432/rag
+QDRANT_URL=http://<主节点IP>:6333
+OPENSEARCH_URL=http://<主节点IP>:9200
+S3_ENDPOINT_URL=http://<主节点IP>:9000
+LOKI_URL=http://<主节点IP>:3100
+RAG_PEERS=http://<主节点IP>:6000,http://<从节点IP>:6000
 ```
 
 ## API
@@ -69,12 +60,12 @@ just svc down
 
 总览：
 
-| 方法     | 路径                        | 说明                                       |
-| -------- | --------------------------- | ------------------------------------------ |
-| `POST`   | `/api/open/files`           | 同步索引对象存储文件，完成后返回 `file_id` |
-| `POST`   | `/api/open/search`          | 按 `query` 和可选 `file_ids` 搜索知识库    |
-| `POST`   | `/api/open/llm/chat/stream` | 流式 RAG 问答                              |
-| `DELETE` | `/api/open/files/{file_id}` | 删除当前应用向量库中的索引文件             |
+| 方法     | 路径                            | 说明                                       |
+| -------- | ------------------------------- | ------------------------------------------ |
+| `POST`   | `/api/open/rag/files`           | 同步索引对象存储文件，完成后返回 `file_id` |
+| `POST`   | `/api/open/rag/search`          | 按 `query` 和可选 `file_ids` 搜索知识库    |
+| `POST`   | `/api/open/llm/chat/stream`     | 流式 RAG 问答                              |
+| `DELETE` | `/api/open/rag/files/{file_id}` | 删除当前应用向量库中的索引文件             |
 
 索引接口接收 `presigned_url`、`s3_url`、可选 `filename` 和可选 `file_id`。上游传 `file_id` 时服务端原样保存，推荐使用 UUID；不传时由 RAG 生成 UUID。搜索时不传 `file_ids` 表示全库搜索。
 
@@ -93,7 +84,7 @@ just svc down
 
 签名算法见 [API 文档](docs/api.md)。
 
-### POST /api/open/files
+### POST /api/open/rag/files
 
 同步索引对象存储文件。接口返回时，文件已经完成下载、解析、embedding 并写入向量库。
 
@@ -125,7 +116,7 @@ just svc down
 }
 ```
 
-### POST /api/open/search
+### POST /api/open/rag/search
 
 按问题搜索知识库。`file_ids` 可省略，省略时搜索当前 `app_id` 对应 app 的整个 collection。
 
@@ -139,7 +130,7 @@ just svc down
 | `fetch_k`       | integer  | 否   | 检索候选数量，不传使用服务默认值                     |
 | `rerank`        | boolean  | 否   | 是否启用重排，不传使用服务默认值                     |
 | `dense_weight`  | number   | 否   | hybrid 模式 dense 权重，不传使用服务默认值           |
-| `sparse_weight` | number   | 否   | hybrid 模式 sparse 权重，不传使用服务默认值          |
+| `sparse_weight` | number   | 否   | hybrid 模式第二路召回权重，不传使用服务默认值        |
 | `rrf_k`         | integer  | 否   | RRF 融合参数，不传使用服务默认值                     |
 | `file_ids`      | string[] | 否   | 文件 ID 过滤；不传表示搜索当前 app 的整个 collection |
 

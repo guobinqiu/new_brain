@@ -48,18 +48,18 @@ class BenchmarkBatch:
 
 
 BACKEND_COMBOS = [
-    BackendCombo("qdrant", "qdrant", {"url": "http://localhost:6333"}, "bge-base", "bm25", "app", "bm25"),
-    BackendCombo("qdrant", "qdrant", {"url": "http://localhost:6333"}, "bge-m3", "bm25", "app", "bm25"),
+    BackendCombo("qdrant", "qdrant", {"url": "http://localhost:6333"}, "bge-base", "simple_bm25", "app", "simple_bm25"),
+    BackendCombo("qdrant", "qdrant", {"url": "http://localhost:6333"}, "bge-m3", "simple_bm25", "app", "simple_bm25"),
     BackendCombo("qdrant", "qdrant", {"url": "http://localhost:6333"}, "bge-m3", "bge-m3", "vector", "bge_m3"),
-    BackendCombo("chroma", "chroma", {"persist_dir": "chroma_data"}, "bge-base", "bm25", "app", "bm25"),
-    BackendCombo("chroma", "chroma", {"persist_dir": "chroma_data"}, "bge-m3", "bm25", "app", "bm25"),
-    BackendCombo("milvus-standalone", "milvus", {"uri": "http://localhost:19530"}, "bge-base", "bm25", "app", "bm25"),
-    BackendCombo("milvus-standalone", "milvus", {"uri": "http://localhost:19530"}, "bge-m3", "bm25", "app", "bm25"),
+    BackendCombo("chroma", "chroma", {"persist_dir": "chroma_data"}, "bge-base", "simple_bm25", "app", "simple_bm25"),
+    BackendCombo("chroma", "chroma", {"persist_dir": "chroma_data"}, "bge-m3", "simple_bm25", "app", "simple_bm25"),
+    BackendCombo("milvus-standalone", "milvus", {"uri": "http://localhost:19530"}, "bge-base", "simple_bm25", "app", "simple_bm25"),
+    BackendCombo("milvus-standalone", "milvus", {"uri": "http://localhost:19530"}, "bge-m3", "simple_bm25", "app", "simple_bm25"),
     BackendCombo("milvus-standalone", "milvus", {"uri": "http://localhost:19530"}, "bge-m3", "bge-m3", "vector", "bge_m3"),
     BackendCombo("milvus-standalone", "milvus", {"uri": "http://localhost:19530"}, "bge-base", "bm25", "vector", "milvus_bm25"),
     BackendCombo("milvus-standalone", "milvus", {"uri": "http://localhost:19530"}, "bge-m3", "bm25", "vector", "milvus_bm25"),
-    BackendCombo("milvus-lite", "milvus_lite", {"uri": "milvus_data/lite/lite.db"}, "bge-base", "bm25", "app", "bm25"),
-    BackendCombo("milvus-lite", "milvus_lite", {"uri": "milvus_data/lite/lite.db"}, "bge-m3", "bm25", "app", "bm25"),
+    BackendCombo("milvus-lite", "milvus_lite", {"uri": "milvus_data/lite/lite.db"}, "bge-base", "simple_bm25", "app", "simple_bm25"),
+    BackendCombo("milvus-lite", "milvus_lite", {"uri": "milvus_data/lite/lite.db"}, "bge-m3", "simple_bm25", "app", "simple_bm25"),
     BackendCombo("milvus-lite", "milvus_lite", {"uri": "milvus_data/lite/lite.db"}, "bge-m3", "bge-m3", "vector", "bge_m3"),
     BackendCombo("milvus-lite", "milvus_lite", {"uri": "milvus_data/lite/lite.db"}, "bge-base", "bm25", "vector", "milvus_bm25"),
     BackendCombo("milvus-lite", "milvus_lite", {"uri": "milvus_data/lite/lite.db"}, "bge-m3", "bm25", "vector", "milvus_bm25"),
@@ -216,15 +216,15 @@ def _config_for(batch: BenchmarkBatch, tmp_path: Path) -> dict[str, Any]:
         "type": combo.sparse_key,
         "import_path": _sparse_import_path(combo.store_key, combo.sparse_key),
     }
-    if combo.sparse == "bm25":
+    if combo.sparse == "simple_bm25":
         sparse_backend["tokenizer"] = "jieba"
     elif combo.sparse == "bge-m3":
         sparse_backend["model_name"] = "bge-m3"
     sparse = {
         "app": {
-            "type": "bm25",
+            "type": "simple_bm25",
             "tokenizer": "jieba",
-            "import_path": "sparse.bm25.BM25Sparse",
+            "import_path": "sparse.simple_bm25.SimpleBM25Sparse",
         }
     }
     if combo.sparse_impl == "vector":
@@ -354,8 +354,8 @@ def _store_import_path(store_key: str) -> str:
 
 
 def _sparse_import_path(store_key: str, sparse_key: str) -> str:
-    if sparse_key == "bm25":
-        return "sparse.bm25.BM25Sparse"
+    if sparse_key == "simple_bm25":
+        return "sparse.simple_bm25.SimpleBM25Sparse"
     if sparse_key == "milvus_bm25":
         return "sparse.milvus_bm25.MilvusBM25Sparse"
     if store_key == "qdrant":

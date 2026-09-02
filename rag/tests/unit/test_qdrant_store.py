@@ -43,6 +43,44 @@ def test_add_file_chunks_writes_file_metadata(monkeypatch):
     assert points[0].payload["metadata"]["filename"] == "liang.pdf"
 
 
+def test_add_file_chunks_logs_backend_retriever_and_stage_fields(monkeypatch, caplog):
+    import logging
+    import rag.store as store
+    from rag.scope import app_collection
+
+    class FakeDense:
+        def embed_documents(self, texts):
+            return [[0.1, 0.2, 0.3] for _ in texts]
+
+    class FakeClient:
+        def upsert(self, **kwargs):
+            pass
+
+    monkeypatch.setattr(store, "_require_search_ready", lambda: None)
+    monkeypatch.setattr(store, "delete_file_chunks", lambda file_id: None)
+    monkeypatch.setattr(store, "_get_dense", lambda: FakeDense())
+    monkeypatch.setattr(store, "get_qdrant_client", lambda: FakeClient())
+
+    chunks = [
+        {"id": "chunk-1", "content": "华为给我们一万六千张卡", "metadata": {"filename": "liang.pdf", "chunk_index": 0}},
+    ]
+
+    with caplog.at_level(logging.INFO, logger="rag.indexing"):
+        with app_collection("imsdom"):
+            store.add_file_chunks(chunks, file_id="file_a")
+
+    records = {record.event: record for record in caplog.records if hasattr(record, "event")}
+    assert records["dense_embedding_start"].app_id == "imsdom"
+    assert records["dense_embedding_start"].stage == "embedding"
+    assert records["dense_embedding_start"].backend == "model"
+    assert records["dense_embedding_start"].retriever == "dense"
+    assert records["dense_embedding_done"].status == "ok"
+    assert records["qdrant_upsert_start"].stage == "index"
+    assert records["qdrant_upsert_start"].backend == "qdrant"
+    assert records["qdrant_upsert_start"].retriever == "vector"
+    assert records["qdrant_upsert_done"].status == "ok"
+
+
 def test_ensure_payload_indexes_creates_file_id_and_chunk_index_indexes(monkeypatch):
     import rag.store as store
 
@@ -194,6 +232,45 @@ def test_qdrant_list_chunks_uses_scroll_cursor(monkeypatch):
     assert calls[1]["offset"] is None
     assert calls[1]["scroll_filter"].must[1].range.gt == 0
     assert calls[0]["with_vectors"] is False
+
+
+def test_qdrant_reads_dense_and_sparse_vectors_by_chunk_id(monkeypatch):
+    import rag.store as store
+    from rag.scope import app_collection
+
+    calls = []
+
+    class Sparse:
+        indices = [1, 3]
+        values = [0.4, 0.2]
+
+    class FakeRecord:
+        id = "chunk-a"
+        vector = {
+            "dense": [0.1, 0.2],
+            "sparse": Sparse(),
+        }
+
+    class FakeClient:
+        def retrieve(self, **kwargs):
+            calls.append(kwargs)
+            return [FakeRecord()]
+
+    monkeypatch.setattr(store, "get_qdrant_client", lambda: FakeClient())
+    monkeypatch.setattr(store, "_ready", True)
+
+    with app_collection("imsdom"):
+        dense = store.get_dense_vector("chunk-a")
+        sparse = store.get_sparse_vector("chunk-a")
+
+    assert dense == [0.1, 0.2]
+    assert sparse == {"indices": [1, 3], "values": [0.4, 0.2]}
+    assert calls[0] == {
+        "collection_name": "imsdom_chunks",
+        "ids": ["chunk-a"],
+        "with_payload": False,
+        "with_vectors": True,
+    }
 
 
 def test_init_store_does_not_create_collection(monkeypatch):

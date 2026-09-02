@@ -159,7 +159,7 @@ def test_search_benchmark_matrix_skips_ocr(monkeypatch, tmp_path):
     monkeypatch.setattr(benchmark, "_run_scenario", lambda application, batch, mode, top_k: {
         "database": "qdrant",
         "dense": "bge-base",
-        "sparse": "bm25",
+        "sparse": "simple_bm25",
         "sparse_impl": "app",
         "mode": mode,
         "rerank": "none",
@@ -199,13 +199,13 @@ def test_benchmark_batches_can_filter_dense_by_environment(monkeypatch):
 def test_benchmark_batches_can_filter_sparse_by_environment(monkeypatch):
     from tests.benchmark import test_search_benchmark as benchmark
 
-    monkeypatch.setenv("BENCHMARK_SPARSE", "bm25")
+    monkeypatch.setenv("BENCHMARK_SPARSE", "simple_bm25")
     monkeypatch.setenv("BENCHMARK_SPARSE_IMPL", "app")
 
     batches = benchmark._benchmark_batches("qdrant")
 
     assert batches
-    assert {batch.combo.sparse for batch in batches} == {"bm25"}
+    assert {batch.combo.sparse for batch in batches} == {"simple_bm25"}
     assert {batch.combo.sparse_impl for batch in batches} == {"app"}
 
 
@@ -313,7 +313,7 @@ def test_accuracy_benchmark_reuses_one_index_for_all_queries(monkeypatch, tmp_pa
     monkeypatch.setattr(accuracy, "_run_accuracy_scenario", lambda application, batch, query_case, mode, top_k: {
         "database": "qdrant",
         "dense": "bge-base",
-        "sparse": "bm25",
+        "sparse": "simple_bm25",
         "sparse_impl": "app",
         "mode": mode,
         "rerank": "none",

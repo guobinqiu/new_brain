@@ -20,6 +20,7 @@ loki_data/
 pg_data/
 postgres_data/
 qdrant_data/
+opensearch_data/
 redis_data/
 data/
 backend/data/
@@ -38,7 +39,6 @@ dist/
 
 # 环境与 IDE
 deploy/.env
-deploy/*/.env
 .DS_Store
 .idea/
 .vscode/

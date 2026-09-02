@@ -3,7 +3,7 @@ import axios from './api'
 const LOG_LIMIT = 500
 
 export async function fetchLabelValues(label) {
-  const res = await axios.get(`/api/logs/labels/${label}`)
+  const res = await axios.get(`/api/open/rag/logs/labels/${label}`)
   return res.data?.values || []
 }
 
@@ -17,7 +17,7 @@ export async function fetchLogs(filter = {}) {
     params.set('end', String(filter.range[1]))
   }
   if (filter.start != null) params.set('start', String(filter.start))
-  const res = await axios.get(`/api/logs?${params.toString()}`)
+  const res = await axios.get(`/api/open/rag/logs?${params.toString()}`)
   return res.data || { logs: [], has_more: false, next_start: null }
 }
 

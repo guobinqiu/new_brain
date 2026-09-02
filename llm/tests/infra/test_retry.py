@@ -58,7 +58,7 @@ async def test_rag_retry_retries_on_5xx(monkeypatch):
 
     import httpx
 
-    request = httpx.Request("POST", "http://x/api/open/search")
+    request = httpx.Request("POST", "http://x/api/open/rag/search")
     response_503 = httpx.Response(503, request=request)
     err = httpx.HTTPStatusError(
         "Service Unavailable", request=request, response=response_503

@@ -3,11 +3,12 @@ from __future__ import annotations
 import re
 
 from rank_bm25 import BM25L
+
 from rag.tokenizer.base import Tokenizer
 from rag.tokenizer.jieba_tokenizer import JiebaTokenizer
 
 
-class BM25Sparse:
+class SimpleBM25Sparse:
     def __init__(self, tokenizer: Tokenizer | None = None):
         self.tokenizer = tokenizer or JiebaTokenizer()
         self.ready = False
@@ -18,6 +19,12 @@ class BM25Sparse:
 
     def stop(self) -> None:
         self.ready = False
+
+    def supports_search_index(self) -> bool:
+        return False
+
+    def supports_sparse_vector(self) -> bool:
+        return False
 
     def search(self, query: str, documents: list[dict], limit: int) -> list[dict]:
         if not self.ready:

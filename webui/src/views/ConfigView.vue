@@ -34,10 +34,10 @@
               <div><span>ocr</span><strong>{{ configComponentModel(node.data?.ocr) }}</strong></div>
             </div>
             <div class="kv-list">
-              <div><span>parser.text.chunk_size</span><strong>{{ node.data?.parser?.text?.chunk_size ?? '-' }}</strong></div>
-              <div><span>parser.text.chunk_overlap</span><strong>{{ node.data?.parser?.text?.chunk_overlap ?? '-' }}</strong></div>
-              <div><span>parser.table.header_backward_chars</span><strong>{{ node.data?.parser?.table?.header_backward_chars ?? '-' }}</strong></div>
-              <div><span>parser.table.footer_forward_chars</span><strong>{{ node.data?.parser?.table?.footer_forward_chars ?? '-' }}</strong></div>
+              <div><span>parser.text.chunk_size</span><strong>{{ activeParserConfig(node.data?.parser)?.text?.chunk_size ?? '-' }}</strong></div>
+              <div><span>parser.text.chunk_overlap</span><strong>{{ activeParserConfig(node.data?.parser)?.text?.chunk_overlap ?? '-' }}</strong></div>
+              <div><span>parser.table.header_backward_chars</span><strong>{{ activeParserConfig(node.data?.parser)?.table?.header_backward_chars ?? '-' }}</strong></div>
+              <div><span>parser.table.footer_forward_chars</span><strong>{{ activeParserConfig(node.data?.parser)?.table?.footer_forward_chars ?? '-' }}</strong></div>
             </div>
             <div class="kv-list">
               <div><span>{{ t('config.storage') }}</span><strong>{{ node.data?.store?.type || '-' }}</strong></div>
@@ -67,12 +67,17 @@ function configStoreLocation(config) {
 
 function configComponentModel(item) {
   if (!item || item.enable === false) return 'disabled'
-  return item.model_name || item.name || item.type || '-'
+  return item.model_name || item.name || item.type || item.backend || '-'
+}
+
+function activeParserConfig(parser) {
+  if (!parser?.enabled) return null
+  return parser[parser.enabled]
 }
 
 async function fetchConfig() {
   try {
-    const res = await axios.get('/api/nodes/config')
+    const res = await axios.get('/api/open/rag/nodes/config')
     nodes.value = res.data?.nodes || []
   } catch (err) { console.error(err) }
 }

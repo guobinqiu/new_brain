@@ -8,7 +8,7 @@ def test_nodes_monitor_returns_local_node_when_peers_empty(api_client, monkeypat
     monkeypatch.delenv("RAG_PEERS", raising=False)
     monkeypatch.setenv("RAG_NODE_ID", "node-local")
 
-    resp = api_client.get("/api/nodes/monitor")
+    resp = api_client.get("/api/open/rag/nodes/monitor")
 
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -25,7 +25,7 @@ def test_nodes_config_returns_local_node_when_peers_empty(api_client, monkeypatc
     monkeypatch.delenv("RAG_PEERS", raising=False)
     monkeypatch.setenv("RAG_NODE_ID", "node-local")
 
-    resp = api_client.get("/api/nodes/config")
+    resp = api_client.get("/api/open/rag/nodes/config")
 
     assert resp.status_code == 200, resp.text
     body = resp.json()

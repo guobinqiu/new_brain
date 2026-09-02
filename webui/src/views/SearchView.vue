@@ -4,9 +4,9 @@
     <div class="search-section">
       <div class="search-row-1">
         <el-radio-group v-model="mode">
-          <el-radio-button value="hybrid">Hybrid</el-radio-button>
-          <el-radio-button value="dense">Dense</el-radio-button>
-          <el-radio-button value="sparse">Sparse</el-radio-button>
+          <el-radio-button value="hybrid" :disabled="!sparseAvailable">{{ t('search.modeValues.hybrid') }}</el-radio-button>
+          <el-radio-button value="dense">{{ t('search.modeValues.dense') }}</el-radio-button>
+          <el-radio-button value="sparse" :disabled="!sparseAvailable">{{ t('search.modeValues.sparse') }}</el-radio-button>
         </el-radio-group>
       </div>
       <div class="search-row-3">
@@ -17,10 +17,10 @@
       </div>
       <div v-if="mode === 'hybrid'" class="search-row-3">
         <div v-if="mode === 'hybrid'" class="balance-control">
-          <span class="bal-label">Dense</span>
+          <span class="bal-label">{{ t('search.modeValues.dense') }}</span>
           <el-slider v-model="hybridBalance" :min="0" :max="1" :step="0.05" @input="onBalanceChange" style="flex: 1" />
           <span class="bal-value">{{ hybridBalance.toFixed(2) }}</span>
-          <span class="bal-label" style="text-align:right">Sparse</span>
+          <span class="bal-label" style="text-align:right">{{ t('search.modeValues.sparse') }}</span>
         </div>
       </div>
       <div class="search-row-3">
@@ -53,9 +53,9 @@
     <div v-if="searchResults.length > 0" class="results-section">
       <div class="results-bar">
         <span class="results-count">{{ t('search.resultCount', { count: searchResults.length }) }}</span>
-        <span class="results-mode">{{ t('search.mode') }}: {{ lastSearch?.mode }}</span>
+        <span class="results-mode">{{ t('search.mode') }}: {{ t(`search.modeValues.${lastSearch?.mode}`) }}</span>
         <span class="results-mode">{{ t('search.files') }}: {{ lastSearch?.fileIds?.length ? lastSearch.fileIds.length : t('common.all') }}</span>
-        <span v-if="lastSearch?.mode === 'hybrid'" class="results-balance">{{ t('search.balance') }}: {{ lastSearch.balance.toFixed(2) }} Dense</span>
+        <span v-if="lastSearch?.mode === 'hybrid'" class="results-balance">{{ t('search.balance') }}: {{ lastSearch.balance.toFixed(2) }} {{ t('search.modeValues.dense') }}</span>
         <span v-if="searchTime !== null" class="results-elapsed">{{ t('search.elapsed') }}: {{ searchTime }}ms</span>
       </div>
       <div v-for="(r, i) in searchResults" :key="i" class="result-card">
@@ -85,7 +85,7 @@ import { useActiveAppStore } from '../stores/activeApp'
 import { parseFileIds, escapeHtml } from '../utils/format'
 import { errorMessage, showToast } from '../utils/toast'
 
-const API = '/api'
+const API = '/api/open/rag'
 const { t } = useI18n()
 const activeAppStore = useActiveAppStore()
 const route = useRoute()
@@ -97,6 +97,7 @@ const topK = ref(5)
 const fetchK = ref(20)
 const rerank = ref(false)
 const rerankAvailable = ref(false)
+const sparseAvailable = ref(true)
 const fileIdsText = ref('')
 const hybridBalance = ref(0.5)
 const searchConfig = ref({ dense_weight: 0.5, sparse_weight: 0.5, rrf_k: 60 })
@@ -164,6 +165,8 @@ async function fetchConfig() {
     const res = await axios.get(`${API}/config`)
     searchConfig.value = res.data
     mode.value = res.data.default_mode ?? mode.value
+    sparseAvailable.value = Boolean(res.data.sparse)
+    if ((mode.value === 'sparse' || mode.value === 'hybrid') && !sparseAvailable.value) mode.value = 'dense'
     rerankAvailable.value = Boolean(res.data.rerank_available)
     rerank.value = Boolean(res.data.rerank && res.data.rerank_available)
     hybridBalance.value = res.data.dense_weight ?? 0.5

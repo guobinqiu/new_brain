@@ -1,3 +1,5 @@
+from fastapi import HTTPException
+
 from rag.api.runtime import runtime
 from rag.api.schemas import SearchRequest
 from rag.api.services.common import database_principal, require_ready, scoped_store
@@ -11,12 +13,17 @@ def client_search(req: SearchRequest, principal):
 
 
 def search(req: SearchRequest, principal):
-    return _search(req, principal)
+    response = _search(req, principal)
+    if principal.type == "app":
+        response["results"] = [_client_result(result) for result in response["results"]]
+    return response
 
 
 def _search(req: SearchRequest, principal):
     require_ready()
     search_principal = database_principal(principal, req.app_id)
+    if req.mode in {"sparse", "hybrid"} and runtime.application.sparse is None:
+        raise HTTPException(status_code=400, detail="sparse is not enabled")
     effective_rerank = bool(req.rerank and runtime.application.rerank is not None)
     plan = SearchPlan(
         req.query,

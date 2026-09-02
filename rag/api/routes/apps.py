@@ -8,31 +8,31 @@ from rag.api.services import apps as service
 router = APIRouter()
 
 
-@router.get("/api/apps")
+@router.get("/api/open/rag/apps")
 def list_apps(principal=Depends(require_jwt)):
     return service.list_apps(principal)
 
 
-@router.post("/api/apps", status_code=201)
+@router.post("/api/open/rag/apps", status_code=201)
 def create_app(req: AppCreateRequest, principal=Depends(require_jwt)):
     return service.create_app(req, principal)
 
 
-@router.delete("/api/apps/{app_id}")
+@router.delete("/api/open/rag/apps/{app_id}")
 def delete_app(app_id: str, principal=Depends(require_jwt)):
     return service.delete_app(app_id, principal)
 
 
-@router.post("/api/apps/{app_id}/database")
+@router.post("/api/open/rag/apps/{app_id}/database")
 def initialize_app_database(app_id: str, principal=Depends(require_jwt)):
     return service.initialize_app_database(app_id, principal)
 
 
-@router.get("/api/apps/{app_id}/database")
+@router.get("/api/open/rag/apps/{app_id}/database")
 def app_database_status(app_id: str, principal=Depends(require_jwt)):
     return service.app_database_status(app_id, principal)
 
 
-@router.delete("/api/apps/{app_id}/database")
+@router.delete("/api/open/rag/apps/{app_id}/database")
 def delete_app_database(app_id: str, principal=Depends(require_jwt)):
     return service.delete_app_database(app_id, principal)

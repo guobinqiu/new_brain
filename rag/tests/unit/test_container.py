@@ -4,7 +4,7 @@ import pytest
 pytestmark = pytest.mark.unit
 
 
-def _config_file(tmp_path, store_key: str = "qdrant", sparse_key: str = "bm25", sparse_extra: str = "  tokenizer: jieba\n", ocr_key: str = "rapid", ocr_model_name: str = "rapidocr"):
+def _config_file(tmp_path, store_key: str = "qdrant", sparse_key: str = "simple_bm25", sparse_extra: str = "  tokenizer: jieba\n", ocr_key: str = "rapid", ocr_model_name: str = "rapidocr"):
     store_settings = {
         "qdrant": """
     url: http://localhost:6333
@@ -52,7 +52,7 @@ ocr:
 def test_container_maps_sparse_config_to_injected_tokenizer(tmp_path):
     from rag.container import build_sparse, create_container
     from rag.loader import load_config_file
-    from rag.sparse.bm25 import BM25Sparse
+    from rag.sparse.simple_bm25 import SimpleBM25Sparse
 
     config = load_config_file(_config_file(tmp_path))
     container = create_container(config)
@@ -60,8 +60,8 @@ def test_container_maps_sparse_config_to_injected_tokenizer(tmp_path):
     sparse = container.sparse()
     built_sparse = build_sparse(config)
 
-    assert isinstance(sparse, BM25Sparse)
-    assert isinstance(built_sparse, BM25Sparse)
+    assert isinstance(sparse, SimpleBM25Sparse)
+    assert isinstance(built_sparse, SimpleBM25Sparse)
     assert sparse.tokenizer.__class__.__name__ == "JiebaTokenizer"
 
 

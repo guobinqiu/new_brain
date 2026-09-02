@@ -28,6 +28,9 @@ def component_config(component: Any) -> dict[str, Any] | None:
         "model_name": getattr(component, "model_name", None),
         "model_path": getattr(component, "model_path", None),
         "tokenizer": getattr(component, "tokenizer", None),
+        "url": getattr(component, "url", None),
+        "index_prefix": getattr(component, "index_prefix", None),
+        "timeout": getattr(component, "timeout", None),
         "import_path": getattr(component, "import_path", None),
     }
     return {key: value for key, value in data.items() if value is not None}
@@ -144,7 +147,12 @@ def app_database_exists(principal: Principal) -> bool:
     principal = effective_principal(principal)
     if not principal.app_id:
         return True
-    return runtime.application.store.app_collection_exists(principal.app_id)
+    if not runtime.application.store.app_collection_exists(principal.app_id):
+        return False
+    sparse = getattr(runtime.application, "sparse", None)
+    if sparse is not None and hasattr(sparse, "app_collection_exists"):
+        return sparse.app_collection_exists(principal.app_id)
+    return True
 
 
 def iso_datetime(value) -> str | None:

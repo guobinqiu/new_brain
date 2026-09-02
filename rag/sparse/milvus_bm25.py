@@ -13,5 +13,11 @@ class MilvusBM25Sparse:
     def stop(self) -> None:
         self.ready = False
 
+    def supports_search_index(self) -> bool:
+        return False
+
+    def supports_sparse_vector(self) -> bool:
+        return True
+
     def search(self, query: str, documents: list[dict], limit: int) -> list[dict]:
         raise RuntimeError("Milvus BM25 uses store search")

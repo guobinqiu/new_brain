@@ -15,24 +15,31 @@
 
     <div v-else-if="appId && databaseStatus?.exists" class="chunks-card">
       <div class="docs-head">
-        <div class="docs-title">
-          <h2>{{ t('database.chunks') }}</h2>
+        <div class="docs-head-main">
+          <div class="docs-title">
+            <h2>{{ t('database.indexData') }}</h2>
+          </div>
+          <el-radio-group v-model="activeDataSource" size="small" @change="onDataSourceChange">
+            <el-radio-button value="vector">{{ t('database.vectorStore') }}</el-radio-button>
+            <el-radio-button v-if="searchIndexAvailable" value="search">{{ t('database.searchIndex') }}</el-radio-button>
+          </el-radio-group>
         </div>
         <el-button type="danger" class="database-delete-btn" @click="deleteDatabase">{{ t('database.delete') }}</el-button>
       </div>
       <div class="chunk-filter">
         <span>{{ t('database.fileIds') }}</span>
-        <el-input v-model.trim="databaseFileIdsText" :placeholder="t('database.fileIdsPlaceholder')" @keyup.enter="fetchChunks" />
-        <el-button :disabled="!appId || chunksLoading" @click="fetchChunks">{{ t('database.query') }}</el-button>
+        <el-input v-model.trim="databaseFileIdsText" :placeholder="t('database.fileIdsPlaceholder')" @keyup.enter="fetchActiveChunks" />
+        <el-button :disabled="!appId || activeChunksLoading" @click="fetchActiveChunks">{{ t('database.query') }}</el-button>
       </div>
-      <div v-if="chunks.length === 0 && !chunksLoading" class="docs-empty">{{ t('database.empty') }}</div>
+      <div v-if="activeDataSource === 'search' && !searchIndexAvailable" class="docs-empty">{{ t('database.searchIndexDisabled') }}</div>
+      <div v-else-if="activeChunks.length === 0 && !activeChunksLoading" class="docs-empty">{{ activeDataSource === 'vector' ? t('database.vectorEmpty') : t('database.searchIndexEmpty') }}</div>
       <template v-else>
         <el-table
           ref="chunksTableRef"
-          :data="chunks"
+          :data="activeChunks"
           style="width: 100%"
           max-height="420"
-          v-loading="chunksLoading"
+          v-loading="activeChunksLoading"
           @scroll="onChunksScroll"
         >
           <el-table-column prop="id" :label="t('database.chunkId')" min-width="140" show-overflow-tooltip />
@@ -70,14 +77,26 @@
               </div>
             </template>
           </el-table-column>
+          <el-table-column v-if="activeDataSource === 'vector' && (denseVectorAvailable || sparseVectorAvailable)" :label="t('common.actions')" width="150" fixed="right">
+            <template #default="{ row }">
+              <div class="vector-actions">
+                <el-button v-if="denseVectorAvailable" size="small" @click.stop="showVector(row, 'dense')">{{ t('database.denseVector') }}</el-button>
+                <el-button v-if="sparseVectorAvailable" size="small" @click.stop="showVector(row, 'sparse')">{{ t('database.sparseVector') }}</el-button>
+              </div>
+            </template>
+          </el-table-column>
         </el-table>
       </template>
     </div>
+    <el-dialog v-model="vectorDialogVisible" :title="vectorDialogTitle" width="720px">
+      <div v-if="vectorDialogMeta" class="vector-meta">{{ vectorDialogMeta }}</div>
+      <pre class="vector-body">{{ vectorDialogBody }}</pre>
+    </el-dialog>
   </main>
 </template>
 
 <script setup>
-import { computed, ref, onMounted, watch } from 'vue'
+import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
@@ -88,7 +107,7 @@ import { useActiveAppStore } from '../stores/activeApp'
 import { errorMessage, showToast } from '../utils/toast'
 import { copyText, shortTime, parseFileIds } from '../utils/format'
 
-const API = '/api'
+const API = '/api/open/rag'
 const { t } = useI18n()
 const activeAppStore = useActiveAppStore()
 const { appId, databaseStatus } = storeToRefs(activeAppStore)
@@ -97,12 +116,47 @@ const currentAppId = computed(() => route.params.app_id || appId.value)
 
 const databaseFileIdsText = ref('')
 const databaseAppliedFileIdsText = ref('')
+const activeDataSource = ref('vector')
 const chunks = ref([])
 const chunksCursor = ref(null)
 const chunksHasMore = ref(false)
 const chunksLoading = ref(false)
+const chunksLoaded = ref(false)
+const sparseChunks = ref([])
+const sparseChunksCursor = ref(null)
+const sparseChunksHasMore = ref(false)
+const sparseChunksLoading = ref(false)
+const sparseChunksLoaded = ref(false)
 const databaseInitializing = ref(false)
 const chunksTableRef = ref(null)
+const vectorDialogVisible = ref(false)
+const vectorDialogTitle = ref('')
+const vectorDialogBody = ref('')
+const vectorDialogMeta = ref('')
+const capabilities = ref({})
+
+const activeChunks = computed(() => activeDataSource.value === 'vector' ? chunks.value : sparseChunks.value)
+const activeChunksLoading = computed(() => activeDataSource.value === 'vector' ? chunksLoading.value : sparseChunksLoading.value)
+const denseVectorAvailable = computed(() => capabilities.value.dense_vector === true)
+const sparseVectorAvailable = computed(() => capabilities.value.sparse_vector === true)
+const searchIndexAvailable = computed(() => capabilities.value.search_index === true)
+
+async function fetchConfig() {
+  try {
+    const res = await axios.get(`${API}/config`)
+    capabilities.value = res.data?.capabilities || {}
+    if (!searchIndexAvailable.value && activeDataSource.value === 'search') {
+      activeDataSource.value = 'vector'
+      resetSparseChunks()
+    }
+  } catch (err) {
+    capabilities.value = {}
+    if (activeDataSource.value === 'search') {
+      activeDataSource.value = 'vector'
+      resetSparseChunks()
+    }
+  }
+}
 
 async function fetchDatabaseStatus() {
   if (!currentAppId.value) {
@@ -126,7 +180,7 @@ async function initializeDatabase() {
     await axios.post(`${API}/apps/${currentAppId.value}/database`)
     showToast('success', t('database.initialized', { appId: currentAppId.value }))
     await fetchDatabaseStatus()
-    await fetchChunks()
+    await fetchActiveChunks()
   } catch (err) {
     showToast('error', errorMessage(err))
   } finally {
@@ -144,27 +198,46 @@ async function deleteDatabase() {
   try {
     await axios.delete(`${API}/apps/${currentAppId.value}/database`)
     showToast('success', t('database.deleted', { appId: currentAppId.value }))
-    chunks.value = []
-    chunksCursor.value = null
-    chunksHasMore.value = false
+    resetChunks()
+    resetSparseChunks()
     await fetchDatabaseStatus()
   } catch (err) {
     showToast('error', errorMessage(err))
   }
 }
 
-async function fetchChunks() {
+async function fetchActiveChunks() {
   if (!currentAppId.value) {
-    chunks.value = []
-    chunksCursor.value = null
-    chunksHasMore.value = false
+    resetChunks()
+    resetSparseChunks()
     return
   }
   databaseAppliedFileIdsText.value = databaseFileIdsText.value
+  if (activeDataSource.value === 'search') {
+    resetSparseChunks()
+    if (!searchIndexAvailable.value) {
+      sparseChunksLoaded.value = true
+      return
+    }
+    await fetchNextSparseChunks()
+    return
+  }
+  resetChunks()
+  await fetchNextChunks()
+}
+
+function resetChunks() {
   chunks.value = []
   chunksCursor.value = null
   chunksHasMore.value = false
-  await fetchNextChunks()
+  chunksLoaded.value = false
+}
+
+function resetSparseChunks() {
+  sparseChunks.value = []
+  sparseChunksCursor.value = null
+  sparseChunksHasMore.value = false
+  sparseChunksLoaded.value = false
 }
 
 async function fetchNextChunks() {
@@ -181,10 +254,36 @@ async function fetchNextChunks() {
     chunks.value = chunks.value.concat(res.data.chunks || [])
     chunksCursor.value = res.data.next_cursor || null
     chunksHasMore.value = Boolean(res.data.has_more)
+    chunksLoaded.value = true
     if (!chunksCursor.value) await fetchDatabaseStatus()
   }
   catch (err) { console.error(err) }
   finally { chunksLoading.value = false }
+}
+
+async function fetchNextSparseChunks() {
+  if (!currentAppId.value) return
+  if (sparseChunksLoading.value) return
+  sparseChunksLoading.value = true
+  try {
+    const body = { limit: 50 }
+    if (sparseChunksCursor.value) body.cursor = sparseChunksCursor.value
+    if (currentAppId.value) body.app_id = currentAppId.value
+    const fileIds = parseFileIds(databaseAppliedFileIdsText.value)
+    if (fileIds.length) body.file_ids = fileIds
+    const res = await axios.post(`${API}/sparse/chunks`, body)
+    sparseChunks.value = sparseChunks.value.concat(res.data.chunks || [])
+    sparseChunksCursor.value = res.data.next_cursor || null
+    sparseChunksHasMore.value = Boolean(res.data.has_more)
+    sparseChunksLoaded.value = true
+  }
+  catch (err) { console.error(err) }
+  finally { sparseChunksLoading.value = false }
+}
+
+async function onDataSourceChange() {
+  if (activeDataSource.value === 'search' && !sparseChunksLoaded.value) await fetchActiveChunks()
+  if (activeDataSource.value === 'vector' && !chunksLoaded.value) await fetchActiveChunks()
 }
 
 function onChunksScroll(event) {
@@ -193,21 +292,94 @@ function onChunksScroll(event) {
   const wrap = chunksTableRef.value?.scrollBarRef?.wrapRef
   if (!wrap) return
   const scrollTop = event?.scrollTop ?? wrap.scrollTop
+  if (activeDataSource.value === 'search' && scrollTop + wrap.clientHeight >= wrap.scrollHeight - 24 && sparseChunksHasMore.value) {
+    fetchNextSparseChunks()
+    return
+  }
   if (scrollTop + wrap.clientHeight >= wrap.scrollHeight - 24 && chunksHasMore.value) {
     fetchNextChunks()
   }
 }
 
+async function showVector(row, type) {
+  if (!currentAppId.value || !row?.id) return
+  try {
+    const res = await axios.get(`${API}/apps/${currentAppId.value}/chunks/${row.id}/${type}-vector`)
+    vectorDialogTitle.value = type === 'dense' ? t('database.denseVectorTitle') : t('database.sparseVectorTitle')
+    vectorDialogMeta.value = vectorMeta(res.data.vector, type)
+    vectorDialogBody.value = JSON.stringify(res.data.vector, null, 2)
+    vectorDialogVisible.value = true
+  } catch (err) {
+    showToast('error', errorMessage(err))
+  }
+}
+
+function vectorMeta(vector, type) {
+  if (type === 'dense' && Array.isArray(vector)) {
+    return t('database.vectorDimension', { count: vector.length })
+  }
+  if (type === 'sparse' && vector?.indices && Array.isArray(vector.indices)) {
+    return t('database.sparseVectorNonZero', { count: vector.indices.length })
+  }
+  return ''
+}
+
 onMounted(async () => {
+  await fetchConfig()
   await fetchDatabaseStatus()
-  if (activeAppStore.databaseStatus?.exists) await fetchChunks()
+  if (activeAppStore.databaseStatus?.exists) await fetchActiveChunks()
+  window.addEventListener('focus', refreshConfig)
+  document.addEventListener('visibilitychange', onVisibilityChange)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('focus', refreshConfig)
+  document.removeEventListener('visibilitychange', onVisibilityChange)
 })
 
 watch(currentAppId, async () => {
-  chunks.value = []
-  chunksCursor.value = null
-  chunksHasMore.value = false
+  resetChunks()
+  resetSparseChunks()
+  await fetchConfig()
   await fetchDatabaseStatus()
-  if (activeAppStore.databaseStatus?.exists) await fetchChunks()
+  if (activeAppStore.databaseStatus?.exists) await fetchActiveChunks()
 })
+
+async function refreshConfig() {
+  await fetchConfig()
+}
+
+function onVisibilityChange() {
+  if (document.visibilityState === 'visible') refreshConfig()
+}
 </script>
+
+<style scoped>
+.vector-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.vector-actions .el-button + .el-button {
+  margin-left: 0;
+}
+
+.vector-body {
+  max-height: 520px;
+  overflow: auto;
+  padding: 12px;
+  border-radius: 6px;
+  background: var(--el-fill-color-light);
+  color: var(--el-text-color-primary);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.vector-meta {
+  margin-bottom: 10px;
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
+}
+</style>

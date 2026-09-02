@@ -25,6 +25,10 @@ def index_file(application, file_id: str, path: str | Path, filename: str, extra
             chunk_metadata.update(extra_metadata)
         chunk_metadata.setdefault("created_at", created_at)
     count = application.store.add_file_chunks(chunks, file_id=file_id)
+    sparse = getattr(application, "sparse", None)
+    if sparse is not None and hasattr(sparse, "add_file_chunks"):
+        sparse.delete_file_chunks(file_id)
+        sparse.add_file_chunks(chunks, file_id=file_id)
     return count
 
 

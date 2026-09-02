@@ -13,6 +13,9 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 os.environ.setdefault("CONFIG_FILE", str(BACKEND_DIR / "config" / "qdrant-bgebase.yaml"))
+os.environ.setdefault("DATABASE_URL", "postgresql://rag:rag@localhost:5432/rag")
+os.environ.setdefault("QDRANT_URL", "http://localhost:6333")
+os.environ.setdefault("OPENSEARCH_URL", "http://localhost:9200")
 TEST_APP_ID = "test_imsdom"
 
 
@@ -87,14 +90,14 @@ def api_client(store_test_env):
     from rag.bootstrap import Application
     from rag.database.base import FakeDatabase
     orig_application = runtime.application
-    runtime.set_application(Application(database=FakeDatabase()))
+    runtime.set_application(Application(database=FakeDatabase(), sparse=FakeOpenSearchBM25Sparse()))
     orig_startup_in_background = runtime.startup_in_background
     runtime.startup_in_background = False
 
     try:
         with TestClient(main.app) as client:
             resp = client.post(
-                "/api/login",
+                "/api/open/rag/login",
                 json={
                     "username": "admin",
                     "password": "admin123",
@@ -117,7 +120,7 @@ def anonymous_api_client(store_test_env):
     from rag.bootstrap import Application
     from rag.database.base import FakeDatabase
     orig_application = runtime.application
-    runtime.set_application(Application(database=FakeDatabase()))
+    runtime.set_application(Application(database=FakeDatabase(), sparse=FakeOpenSearchBM25Sparse()))
     orig_startup_in_background = runtime.startup_in_background
     runtime.startup_in_background = False
 
@@ -153,11 +156,84 @@ class AppApiClient:
         return self._client.post(path, content=body, headers=headers, **kwargs)
 
 
+class FakeOpenSearchBM25Sparse:
+    backend = "opensearch"
+    retriever = "bm25"
+
+    def __init__(self):
+        self.ready = False
+        self._chunks = {}
+
+    def start(self):
+        self.ready = True
+
+    def stop(self):
+        self.ready = False
+
+    def add_file_chunks(self, chunks, file_id):
+        from rag.scope import current_app_id
+
+        app_id = current_app_id()
+        rows = self._chunks.setdefault(app_id, [])
+        rows.extend(
+            {
+                "id": chunk["id"],
+                "content": chunk.get("content", ""),
+                "metadata": {**dict(chunk.get("metadata") or {}), "file_id": file_id},
+            }
+            for chunk in chunks
+        )
+
+    def delete_file_chunks(self, file_id):
+        from rag.scope import current_app_id
+
+        app_id = current_app_id()
+        self._chunks[app_id] = [
+            chunk
+            for chunk in self._chunks.get(app_id, [])
+            if chunk.get("metadata", {}).get("file_id") != file_id
+        ]
+
+    def search(self, query, limit, *, app_id=None, file_ids=None):
+        from rag.scope import current_app_id
+
+        app_id = app_id or current_app_id()
+        query_lower = query.lower()
+        file_id_set = set(file_ids or [])
+        results = []
+        for chunk in self._chunks.get(app_id, []):
+            if file_id_set and chunk.get("metadata", {}).get("file_id") not in file_id_set:
+                continue
+            if query_lower in chunk.get("content", "").lower():
+                results.append({**chunk, "_score": 1.0})
+        return results[:limit]
+
+    def list_chunks(self, file_ids=None, limit=50, cursor=None):
+        from rag.scope import current_app_id
+
+        app_id = current_app_id()
+        file_id_set = set(file_ids or [])
+        rows = [
+            chunk
+            for chunk in self._chunks.get(app_id, [])
+            if not file_id_set or chunk.get("metadata", {}).get("file_id") in file_id_set
+        ]
+        rows.sort(key=lambda chunk: (chunk.get("metadata", {}).get("chunk_index") or 0, chunk.get("id") or ""))
+        offset = int(cursor or 0)
+        page_rows = rows[offset:offset + limit]
+        next_offset = offset + limit
+        return {
+            "documents": page_rows,
+            "next_cursor": str(next_offset) if next_offset < len(rows) else None,
+            "has_more": next_offset < len(rows),
+        }
+
+
 @pytest.fixture
 def app_api_client(api_client):
-    app_resp = api_client.post("/api/apps", json={"app_id": TEST_APP_ID})
+    app_resp = api_client.post("/api/open/rag/apps", json={"app_id": TEST_APP_ID})
     assert app_resp.status_code == 201, app_resp.text
-    db_resp = api_client.post(f"/api/apps/{TEST_APP_ID}/database")
+    db_resp = api_client.post(f"/api/open/rag/apps/{TEST_APP_ID}/database")
     assert db_resp.status_code == 200, db_resp.text
     credential = app_resp.json()
     return AppApiClient(api_client, TEST_APP_ID, credential["access_key"], credential["secret_key"])

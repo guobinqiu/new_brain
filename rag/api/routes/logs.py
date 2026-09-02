@@ -7,7 +7,7 @@ from rag.api.services import logs as service
 router = APIRouter()
 
 
-@router.get("/api/logs")
+@router.get("/api/open/rag/logs")
 async def logs(
     node_id: str | None = None,
     container: str | None = None,
@@ -19,6 +19,6 @@ async def logs(
     return await service.logs(node_id, container, start, end, limit, principal)
 
 
-@router.get("/api/logs/labels/{label}")
+@router.get("/api/open/rag/logs/labels/{label}")
 async def log_label_values(label: str, principal=Depends(require_jwt)):
     return await service.log_label_values(label, principal)

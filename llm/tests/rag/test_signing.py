@@ -20,17 +20,17 @@ import pytest
 # 黄金向量：
 #   body    = '{"query":"hi"}'              (12 bytes UTF-8)
 #   method  = 'POST'
-#   path    = '/api/open/search'
+#   path    = '/api/open/rag/search'
 #   ts      = 1700000000
 #   app_id  = 'my_agent'
 #   secret  = 'test_secret'
 # body_hash = sha256(b'{"query":"hi"}') =
 #   a43337f2c2aecb3709c60fcd7b28f6a555362fffa9e89588a63f34fdad8fe8ad
 # signature = hmac_sha256(secret, canonical) =
-#   25002bfef1d9a6278081518fc1991f97bf7ccb1bd63c032bf024152d87663301
+#   348f5b365094251bf7a15a24cb491d2b6a7cc7ac4b88d651d09f9ee4ec6de7e5
 GOLDEN_BODY = b'{"query":"hi"}'
 GOLDEN_BODY_HASH = "a43337f2c2aecb3709c60fcd7b28f6a555362fffa9e89588a63f34fdad8fe8ad"
-GOLDEN_SIGNATURE = "25002bfef1d9a6278081518fc1991f97bf7ccb1bd63c032bf024152d87663301"
+GOLDEN_SIGNATURE = "348f5b365094251bf7a15a24cb491d2b6a7cc7ac4b88d651d09f9ee4ec6de7e5"
 GOLDEN_CANONICAL_LINES = 5  # METHOD\nPATH\nTS\nHASH\nAPP_ID
 
 
@@ -52,7 +52,7 @@ def test_sign_returns_lowercase_hex_64_chars():
     out = _try_sign(
         body_bytes=b"hello",
         method="POST",
-        path="/api/open/search",
+        path="/api/open/rag/search",
         ts=1700000000,
         app_id="my_agent",
         secret="test_secret",
@@ -71,7 +71,7 @@ def test_sign_golden_vector_matches_qdrant_doc_example():
     out = _try_sign(
         body_bytes=GOLDEN_BODY,
         method="POST",
-        path="/api/open/search",
+        path="/api/open/rag/search",
         ts=1700000000,
         app_id="my_agent",
         secret="test_secret",
@@ -86,7 +86,7 @@ def test_sign_canonical_string_construction_order():
     out = _try_sign(
         body_bytes=GOLDEN_BODY,
         method="POST",
-        path="/api/open/search",
+        path="/api/open/rag/search",
         ts=1700000000,
         app_id="my_agent",
         secret="test_secret",
@@ -95,14 +95,14 @@ def test_sign_canonical_string_construction_order():
         pytest.fail("rag.client.sign not implemented yet — RED")
 
     canonical = (
-        f"POST\n/api/open/search\n1700000000\n{GOLDEN_BODY_HASH}\nmy_agent"
+        f"POST\n/api/open/rag/search\n1700000000\n{GOLDEN_BODY_HASH}\nmy_agent"
     )
     expected = hmac.new(b"test_secret", canonical.encode("utf-8"), hashlib.sha256).hexdigest()
     assert out == expected
 
     # 篡改任一字段都应改变签名
     canonical_swapped = (
-        f"my_agent\n/api/open/search\n1700000000\n{GOLDEN_BODY_HASH}\nPOST"
+        f"my_agent\n/api/open/rag/search\n1700000000\n{GOLDEN_BODY_HASH}\nPOST"
     )
     assert hmac.new(
         b"test_secret", canonical_swapped.encode(), hashlib.sha256
@@ -118,7 +118,7 @@ def test_sign_handles_arbitrary_timestamps(ts_value):
     out = _try_sign(
         body_bytes=b"x",
         method="POST",
-        path="/api/open/search",
+        path="/api/open/rag/search",
         ts=ts_value,
         app_id="a",
         secret="s",
@@ -142,7 +142,7 @@ def test_sign_handles_secret_with_special_chars_and_utf8():
         out = _try_sign(
             body_bytes=b"q",
             method="POST",
-            path="/api/open/search",
+            path="/api/open/rag/search",
             ts=1700000000,
             app_id="agent-1",
             secret=s,
@@ -158,7 +158,7 @@ def test_sign_handles_chinese_utf8_body():
     out = _try_sign(
         body_bytes=body,
         method="POST",
-        path="/api/open/search",
+        path="/api/open/rag/search",
         ts=1700000000,
         app_id="rag_demo",
         secret="another_secret",
@@ -167,7 +167,7 @@ def test_sign_handles_chinese_utf8_body():
         pytest.fail("rag.client.sign not implemented yet — RED")
     # 与手算的 SHA-256 hash 比对一致性
     expected_hash = hashlib.sha256(body).hexdigest()
-    canonical = f"POST\n/api/open/search\n1700000000\n{expected_hash}\nrag_demo"
+    canonical = f"POST\n/api/open/rag/search\n1700000000\n{expected_hash}\nrag_demo"
     expected_sig = hmac.new(
         b"another_secret", canonical.encode("utf-8"), hashlib.sha256
     ).hexdigest()
@@ -175,11 +175,11 @@ def test_sign_handles_chinese_utf8_body():
 
 
 def test_sign_path_must_not_include_query():
-    """PATH 固定为 /api/open/search，不含 query。"""
+    """PATH 固定为 /api/open/rag/search，不含 query。"""
     out1 = _try_sign(
         body_bytes=b"{}",
         method="POST",
-        path="/api/open/search",
+        path="/api/open/rag/search",
         ts=1,
         app_id="a",
         secret="s",
@@ -187,7 +187,7 @@ def test_sign_path_must_not_include_query():
     out2 = _try_sign(
         body_bytes=b"{}",
         method="POST",
-        path="/api/open/search?foo=bar",  # 不应使用此形式
+        path="/api/open/rag/search?foo=bar",  # 不应使用此形式
         ts=1,
         app_id="a",
         secret="s",
@@ -202,7 +202,7 @@ def test_sign_different_methods_yield_different_signatures():
     out_post = _try_sign(
         body_bytes=b"{}",
         method="POST",
-        path="/api/open/search",
+        path="/api/open/rag/search",
         ts=1,
         app_id="a",
         secret="s",
@@ -210,7 +210,7 @@ def test_sign_different_methods_yield_different_signatures():
     out_get = _try_sign(
         body_bytes=b"{}",
         method="GET",
-        path="/api/open/search",
+        path="/api/open/rag/search",
         ts=1,
         app_id="a",
         secret="s",
@@ -225,7 +225,7 @@ def test_sign_is_byte_sensitive_to_body():
     out1 = _try_sign(
         body_bytes=b'{"query":"hi"}',
         method="POST",
-        path="/api/open/search",
+        path="/api/open/rag/search",
         ts=1,
         app_id="a",
         secret="s",
@@ -233,7 +233,7 @@ def test_sign_is_byte_sensitive_to_body():
     out2 = _try_sign(
         body_bytes=b'{"query":"hI"}',  # 大小写差一比特
         method="POST",
-        path="/api/open/search",
+        path="/api/open/rag/search",
         ts=1,
         app_id="a",
         secret="s",
@@ -248,7 +248,7 @@ def test_sign_empty_body_works():
     out = _try_sign(
         body_bytes=b"",
         method="POST",
-        path="/api/open/search",
+        path="/api/open/rag/search",
         ts=1700000000,
         app_id="a",
         secret="s",
@@ -263,7 +263,7 @@ def test_sign_is_deterministic():
     kwargs = dict(
         body_bytes=b"payload",
         method="POST",
-        path="/api/open/search",
+        path="/api/open/rag/search",
         ts=1234567890,
         app_id="myid",
         secret="mysecret",

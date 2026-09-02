@@ -49,6 +49,9 @@ def initialize_app_database(app_id: str, _):
     require_ready()
     try:
         runtime.application.store.ensure_app_collection(app_id)
+        sparse = getattr(runtime.application, "sparse", None)
+        if sparse is not None and hasattr(sparse, "ensure_app_collection"):
+            sparse.ensure_app_collection(app_id)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     return {"app_id": app_id, "initialized": True}
@@ -65,5 +68,8 @@ def delete_app_database(app_id: str, _):
     if not status["exists"]:
         raise HTTPException(404, "app database not found")
     deleted = runtime.application.store.drop_app_collection(app_id)
+    sparse = getattr(runtime.application, "sparse", None)
+    if sparse is not None and hasattr(sparse, "drop_app_collection"):
+        sparse.drop_app_collection(app_id)
     runtime.application.database.purge_app(app_id)
     return {"app_id": app_id, "deleted": deleted}

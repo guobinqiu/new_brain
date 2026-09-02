@@ -49,12 +49,12 @@ def test_fetch_peers_returns_success_and_forwards_authorization():
     async def _run():
         client = FakeAsyncClient(
             {
-                "http://a:8000/api/monitor": FakeResponse(200, {"node_id": "node-a", "ready": True}),
-                "http://b:8000/api/monitor": FakeResponse(200, {"ready": True}),
+                "http://a:8000/api/open/rag/monitor": FakeResponse(200, {"node_id": "node-a", "ready": True}),
+                "http://b:8000/api/open/rag/monitor": FakeResponse(200, {"ready": True}),
             }
         )
 
-        rows = await fetch_peers(["http://a:8000", "http://b:8000"], "/api/monitor", "Bearer token", client=client)
+        rows = await fetch_peers(["http://a:8000", "http://b:8000"], "/api/open/rag/monitor", "Bearer token", client=client)
 
         assert [row.node_id for row in rows] == ["node-a", "b:8000"]
         assert [row.status for row in rows] == ["ok", "ok"]
@@ -70,12 +70,12 @@ def test_fetch_peers_keeps_failed_peer_as_unreachable():
     async def _run():
         client = FakeAsyncClient(
             {
-                "http://a:8000/api/config": FakeResponse(500, {"error": "failed"}),
-                "http://b:8000/api/config": httpx.ConnectTimeout("timeout"),
+                "http://a:8000/api/open/rag/config": FakeResponse(500, {"error": "failed"}),
+                "http://b:8000/api/open/rag/config": httpx.ConnectTimeout("timeout"),
             }
         )
 
-        rows = await fetch_peers(["http://a:8000", "http://b:8000"], "/api/config", None, client=client)
+        rows = await fetch_peers(["http://a:8000", "http://b:8000"], "/api/open/rag/config", None, client=client)
 
         assert [row.node_id for row in rows] == ["a:8000", "b:8000"]
         assert [row.status for row in rows] == ["unreachable", "unreachable"]

@@ -19,9 +19,10 @@ from rag.schema import AppConfig
 from rag.search.base import Search
 from rag.search.pipeline import SearchPipeline
 from rag.sparse.base import Sparse
-from rag.sparse.bm25 import BM25Sparse
+from rag.sparse.simple_bm25 import SimpleBM25Sparse
 from rag.sparse.milvus_bge_m3 import MilvusBGEM3Sparse
 from rag.sparse.milvus_bm25 import MilvusBM25Sparse
+from rag.sparse.opensearch_bm25 import OpenSearchBM25Sparse
 from rag.sparse.qdrant_bge_m3 import QdrantBGEM3Sparse
 from rag.store.base import Store
 from rag.store.chroma import ChromaStore
@@ -43,6 +44,8 @@ def _store_key(name: str) -> str:
 
 def _sparse_key(app_config: AppConfig) -> str:
     sparse_config = app_config.sparse
+    if sparse_config is None:
+        return "none"
     sparse_key = _component_key(sparse_config.name)
     if sparse_key != "bge_m3":
         return sparse_key
@@ -60,8 +63,13 @@ class ApplicationContainer(containers.DeclarativeContainer):
     dense_name = providers.Callable(lambda app_config: _component_key(app_config.dense.name), config)
     dense_model_path = providers.Callable(lambda app_config: app_config.dense.model_path, config)
     sparse_key = providers.Callable(_sparse_key, config)
-    sparse_tokenizer = providers.Callable(lambda app_config: app_config.sparse.tokenizer, config)
-    sparse_model_path = providers.Callable(lambda app_config: app_config.sparse.model_path, config)
+    sparse_tokenizer = providers.Callable(lambda app_config: app_config.sparse.tokenizer if app_config.sparse is not None else None, config)
+    sparse_model_path = providers.Callable(lambda app_config: app_config.sparse.model_path if app_config.sparse is not None else None, config)
+    sparse_url = providers.Callable(lambda app_config: app_config.sparse.url if app_config.sparse is not None else None, config)
+    sparse_index_prefix = providers.Callable(lambda app_config: app_config.sparse.index_prefix if app_config.sparse is not None else None, config)
+    sparse_timeout = providers.Callable(lambda app_config: app_config.sparse.timeout if app_config.sparse is not None else None, config)
+    sparse_username = providers.Callable(lambda app_config: app_config.sparse.username if app_config.sparse is not None else None, config)
+    sparse_password = providers.Callable(lambda app_config: app_config.sparse.password if app_config.sparse is not None else None, config)
     rerank_name = providers.Callable(lambda app_config: _component_key(app_config.rerank.name), config)
     rerank_model_path = providers.Callable(lambda app_config: app_config.rerank.model_path, config)
     ocr_name = providers.Callable(lambda app_config: _component_key(app_config.ocr.name), config)
@@ -82,7 +90,6 @@ class ApplicationContainer(containers.DeclarativeContainer):
         sparse_tokenizer,
         jieba=providers.Factory(JiebaTokenizer),
     )
-
     dense = providers.Selector(
         dense_name,
         test_dense=providers.Singleton(HuggingFaceDense, model_name=dense_model_path, batch_size=embedding_dense_batch_size, release_memory=embedding_release_memory),
@@ -94,10 +101,12 @@ class ApplicationContainer(containers.DeclarativeContainer):
 
     sparse = providers.Selector(
         sparse_key,
-        bm25=providers.Singleton(BM25Sparse, tokenizer=tokenizer),
+        none=providers.Object(None),
+        simple_bm25=providers.Singleton(SimpleBM25Sparse, tokenizer=tokenizer),
         milvus_bm25=providers.Singleton(MilvusBM25Sparse),
         qdrant_bge_m3=providers.Singleton(QdrantBGEM3Sparse, model_name=sparse_model_path, batch_size=embedding_sparse_batch_size, release_memory=embedding_release_memory),
         milvus_bge_m3=providers.Singleton(MilvusBGEM3Sparse, model_name=sparse_model_path, batch_size=embedding_sparse_batch_size, release_memory=embedding_release_memory),
+        opensearch_bm25=providers.Singleton(OpenSearchBM25Sparse, url=sparse_url, index_prefix=sparse_index_prefix, timeout=sparse_timeout, username=sparse_username, password=sparse_password),
     )
 
     rerank = providers.Selector(
@@ -184,17 +193,21 @@ def build_dense(config: AppConfig) -> Dense:
     return _resolve(create_container(config).dense, "dense", config.dense.name)
 
 
-def build_sparse(config: AppConfig) -> Sparse:
+def build_sparse(config: AppConfig) -> Sparse | None:
     sparse_config = config.sparse
+    if sparse_config is None:
+        return None
     if sparse_config.import_path:
         cls = _load_class(sparse_config.import_path)
         key = _component_key(sparse_config.name)
-        if key == "bm25":
+        if key == "simple_bm25":
             if sparse_config.tokenizer != "jieba":
                 raise ValueError(f"unsupported sparse.tokenizer: {sparse_config.tokenizer}")
             return cls(tokenizer=JiebaTokenizer())
         if key == "milvus_bm25":
             return cls()
+        if key == "opensearch_bm25":
+            return cls(url=sparse_config.url, index_prefix=sparse_config.index_prefix, timeout=sparse_config.timeout, username=sparse_config.username, password=sparse_config.password)
         return cls(model_name=sparse_config.model_path, batch_size=config.embedding.sparse_batch_size, release_memory=config.embedding.release_memory)
     return _resolve(create_container(config).sparse, "sparse", sparse_config.name)
 
@@ -219,7 +232,7 @@ def build_store(config: AppConfig, dense: Dense, sparse: Sparse | None = None) -
     return container.store(dense=dense, sparse=sparse)
 
 
-def build_search(config: AppConfig, store: Store, sparse: Sparse) -> Search:
+def build_search(config: AppConfig, store: Store, sparse: Sparse | None) -> Search:
     return create_container(config).search(store=store, sparse=sparse)
 
 

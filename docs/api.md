@@ -46,7 +46,7 @@ Authorization: Bearer <access_token>
 ### 管理台登录
 
 ```http
-POST /api/login
+POST /api/open/rag/login
 Content-Type: application/json
 ```
 
@@ -75,7 +75,7 @@ Content-Type: application/json
 ### 创建应用
 
 ```http
-POST /api/apps
+POST /api/open/rag/apps
 Content-Type: application/json
 ```
 
@@ -102,7 +102,7 @@ Content-Type: application/json
 ### 查询应用列表
 
 ```http
-GET /api/apps
+GET /api/open/rag/apps
 ```
 
 响应：
@@ -122,7 +122,7 @@ GET /api/apps
 ### 删除应用凭证
 
 ```http
-DELETE /api/apps/{app_id}
+DELETE /api/open/rag/apps/{app_id}
 ```
 
 只删除该应用的 AK/SK，不删除向量库数据。
@@ -138,7 +138,7 @@ DELETE /api/apps/{app_id}
 ### 初始化应用数据库
 
 ```http
-POST /api/apps/{app_id}/database
+POST /api/open/rag/apps/{app_id}/database
 ```
 
 初始化该应用对应的 chunks collection。重复调用是幂等操作。
@@ -155,7 +155,7 @@ POST /api/apps/{app_id}/database
 ### 查询应用数据库状态
 
 ```http
-GET /api/apps/{app_id}/database
+GET /api/open/rag/apps/{app_id}/database
 ```
 
 响应：
@@ -172,7 +172,7 @@ GET /api/apps/{app_id}/database
 ### 删除应用数据库
 
 ```http
-DELETE /api/apps/{app_id}/database
+DELETE /api/open/rag/apps/{app_id}/database
 ```
 
 删除当前应用数据库，同时清理该应用的文件记录。
@@ -194,11 +194,11 @@ DELETE /api/apps/{app_id}/database
 ### 同步索引对象存储文件
 
 ```http
-POST /api/open/files
+POST /api/open/rag/files
 Content-Type: application/json
 ```
 
-认证使用 AK/SK 请求签名（请求头与签名算法见开头「鉴权」一节），认证失败返回 401。
+认证支持 AK/SK 请求签名或 User JWT。外部系统的 `app_id` 来自 AK/SK 签名；管理台使用 User JWT 时需要在请求体里传 `app_id`。
 
 请求字段：
 
@@ -246,11 +246,11 @@ Content-Type: application/json
 ### 创建异步索引任务
 
 ```http
-POST /api/open/files/jobs
+POST /api/open/rag/files/jobs
 Content-Type: application/json
 ```
 
-认证使用 AK/SK 请求签名（请求头与签名算法见开头「鉴权」一节）。签名验证通过后主体类型为 `app`，绑定 `X-App-Id` 对应的应用；缺签名头、access key 无效、时间戳偏差超过 300 秒或签名不匹配返回 401。
+认证支持 AK/SK 请求签名或 User JWT。签名验证通过后主体类型为 `app`，绑定 `X-App-Id` 对应的应用；User JWT 面向管理台，不绑定业务 app，调用时需要显式传 `app_id`。
 
 请求字段：
 
@@ -260,7 +260,7 @@ Content-Type: application/json
 | `s3_url` | string | 是 | - | 稳定对象存储地址，例如 `s3://bucket/key`，写入 metadata 用于追溯；必须以 `s3://` 开头并包含 bucket 和 object key |
 | `filename` | string | 否 | 从 `s3_url` 推导 | 展示文件名，扩展名以此字段（缺省时取 object key）判断；对象 key 无扩展名时必须传带受支持扩展名的 `filename`，否则返回 400 |
 | `file_id` | string | 否 | 服务端生成 | 上游文件 ID；传入时原样保存，推荐使用 UUID |
-| `app_id` | string | 否 | 签名里的 `X-App-Id` | AK/SK 主体已绑定单一应用，通常不传；传入时必须与签名应用一致，否则返回 403 |
+| `app_id` | string | User JWT 必填，AK/SK 调用不传 | 签名里的 `X-App-Id` | AK/SK 主体已绑定单一应用，通常不传；传入时必须与签名应用一致，否则返回 403 |
 
 请求示例：
 
@@ -295,58 +295,12 @@ Content-Type: application/json
 
 异步索引入队成功返回 202 和 `file_id`。下载、解析、embedding 和向量库写入由 backend 进程内的索引消费器后台执行。没有任务状态查询接口；调用方可以用 `file_id` 通过搜索接口验证索引是否就绪。`presigned_url` 的有效性在后台消费时才校验，入队成功不代表下载成功。进程内待处理任务队列已满时返回 429。任务不落盘，backend 重启会丢失队列中未完成的任务，需要重新提交索引。
 
-管理台内部版本 `POST /api/files/jobs` 见下文：认证改用 User JWT，`file_id` 和 `app_id` 必填。
-
-### 创建异步索引任务（管理台内部）
-
-```http
-POST /api/files/jobs
-Content-Type: application/json
-```
-
-`POST /api/open/files/jobs` 的管理台内部版本，两侧共用 `_create_index_job()` 实现，业务行为完全相同：异步入队、成功返回 202 和 `{file_id}`、队列满返回 429。差异只在认证方式和请求模型。
-
-认证使用 User JWT（`Authorization: Bearer <access_token>`，登录接口签发），不走 AK/SK 签名。
-
-请求字段与 `POST /api/open/files` 相同，但 `file_id` 必填：
-
-| 字段 | 类型 | 必填 | 默认值 | 说明 |
-|---|---|---|---|---|
-| `presigned_url` | string | 是 | - | 本次索引用的一次性下载 URL，管理台链路通常由 `/api/presign` 对 `/api/upload` 返回的 `s3_url` 生成 |
-| `s3_url` | string | 是 | - | 稳定对象存储地址，写入 metadata 用于追溯 |
-| `filename` | string | 否 | 从 `s3_url` 推导 | 自定义展示文件名 |
-| `file_id` | string | 是 | - | `/api/upload` 返回的文件 ID；RAG 生成的值为 UUID |
-| `app_id` | string | 是 | - | 管理台当前选择的应用 ID（User JWT 不绑定业务 app） |
-
-`file_id` 必填的原因：`/api/upload` 上传成功时已经把返回的 `file_id` 写进 MinIO 对象路径 `uploads/{app_id}/{file_id}/{filename}`，后续的索引、删除和文件列表都以这一前缀互相对齐。创建任务时如果不传 `file_id`，服务器会另外生成一个新的 `file_id`，向量库记录将与上传对象、文件列表断链：删除接口删不掉 MinIO 里的原文，文件列表也会出现一条无法对齐的幽灵记录。
-
-响应：
-
-```json
-{
-  "file_id": "550e8400-e29b-41d4-a716-446655440000"
-}
-```
-
-错误码：
-
-| 状态码 | 场景 |
-|---|---|
-| 401 | User JWT 缺失或无效 |
-| 400 | 不支持的文件类型；User JWT 未传 `app_id`（`app_id is required`） |
-| 409 | 目标 app 数据库未初始化（`app database is not initialized`） |
-| 422 | 请求体校验失败：缺 `file_id` 或其他必填字段、`file_id` 不是 UUID、`s3_url` 不以 `s3://` 开头等 |
-| 429 | 进程内待处理任务队列已满 |
-| 503 | 应用未完成初始化（`search is not initialized`） |
-
-任务同样不落盘，backend 重启会丢失队列中未完成的任务，需要重新提交索引。
-
-open 侧（外部上游）的 `file_id` 保持可选：外部文件不经过 `/api/upload`，没有对象路径对齐需求，缺省时由服务端生成新的 `file_id`。
+管理台上传链路会把 `/api/open/rag/upload` 返回的 `file_id` 带入该接口，保证向量库记录、文件列表和 MinIO 对象路径 `uploads/{app_id}/{file_id}/{filename}` 对齐。外部系统不经过上传接口时，`file_id` 可以省略，由服务端生成。
 
 ## 搜索
 
 ```http
-POST /api/open/search
+POST /api/open/rag/search
 Content-Type: application/json
 ```
 
@@ -362,7 +316,7 @@ Content-Type: application/json
 | `rerank` | bool | 否 | 配置是否启用 rerank 组件 | 是否启用重排 |
 | `fetch_k` | int | 否 | 配置文件里的 `search.fetch_k` | 重排候选池，必须大于等于 `top_k` |
 | `dense_weight` | number | 否 | 配置文件里的 `search.dense_weight` | hybrid 查询的 dense 权重 |
-| `sparse_weight` | number | 否 | 配置文件里的 `search.sparse_weight` | hybrid 查询的 sparse 权重 |
+| `sparse_weight` | number | 否 | 配置文件里的 `search.sparse_weight` | hybrid 查询第二路召回权重 |
 | `rrf_k` | int | 否 | 配置文件里的 `search.rrf_k` | hybrid 查询的 RRF 参数 |
 | `file_ids` | string[] | 否 | - | 限定搜索范围；不传表示全库搜索；空数组会被拒绝；最多 1000 个 |
 
@@ -391,7 +345,7 @@ Content-Type: application/json
 | `rerank` | 本次是否启用重排 |
 | `fetch_k` | 本次候选池大小 |
 | `dense_weight` | 本次 hybrid 查询的 dense 权重 |
-| `sparse_weight` | 本次 hybrid 查询的 sparse 权重 |
+| `sparse_weight` | 本次 hybrid 查询第二路召回权重 |
 | `rrf_k` | 本次 hybrid 查询的 RRF 参数 |
 | `elapsed_ms` | 后端搜索耗时，单位毫秒 |
 
@@ -439,7 +393,7 @@ Content-Type: application/json
 ### 上传文件到对象存储
 
 ```http
-POST /api/upload
+POST /api/open/rag/upload
 Content-Type: multipart/form-data
 ```
 
@@ -461,7 +415,7 @@ Content-Type: multipart/form-data
 ### 生成短期下载地址
 
 ```http
-POST /api/presign
+POST /api/open/rag/presign
 Content-Type: application/json
 ```
 
@@ -483,7 +437,7 @@ Content-Type: application/json
 ### 运行监控
 
 ```http
-GET /api/monitor
+GET /api/open/rag/monitor
 ```
 
 响应字段：
@@ -496,13 +450,13 @@ GET /api/monitor
 | `capabilities` | 服务能力，包括搜索模式、是否支持配置写入和重启 |
 | `index_contract` | 索引与存储诊断信息，包括 collection、dense 和 sparse 配置等 |
 
-`/api/monitor` 是轻量状态接口，不读取向量 chunk，不统计文件数或 chunk 数。
+`/api/open/rag/monitor` 是轻量状态接口，不读取向量 chunk，不统计文件数或 chunk 数。
 
 ### 运行日志与搜索 Trace
 
 ```http
-GET /api/logs
-GET /api/traces
+GET /api/open/rag/logs
+GET /api/open/rag/traces
 ```
 
 运行日志和搜索 Trace 由后端统一按时间范围查询。管理台使用 User JWT 访问后端接口。
@@ -523,7 +477,7 @@ GET /api/traces
 ### 上传文件列表
 
 ```http
-GET /api/files?limit=50&cursor=...&app_id=<app_id>
+GET /api/open/rag/files?limit=50&cursor=...&app_id=<app_id>
 ```
 
 列出当前 app 的索引文件。数据来自 PostgreSQL `app_files` 表（database 组件维护的文件元数据），软删除的文件不再出现。返回的 `id` 是 `file_id`，`s3_url` 指向 MinIO 对象，key 固定为 `uploads/{app_id}/{file_id}/{filename}`。
@@ -567,7 +521,7 @@ GET /api/files?limit=50&cursor=...&app_id=<app_id>
 ### 向量数据列表
 
 ```http
-POST /api/chunks
+POST /api/open/rag/chunks
 ```
 
 请求：
@@ -583,10 +537,29 @@ POST /api/chunks
 
 直接分页查看向量库里的 chunk 数据。`file_ids` 不传时查看全库 chunk。
 
+### 查看向量本体
+
+```http
+GET /api/open/rag/apps/{app_id}/chunks/{chunk_id}/dense-vector
+GET /api/open/rag/apps/{app_id}/chunks/{chunk_id}/sparse-vector
+```
+
+管理台按行查看当前 chunk 在向量库里的向量本体。列表接口不默认返回向量本体，避免分页响应过大。
+
+`dense-vector` 返回 dense embedding 数组。`sparse-vector` 只在当前向量库保存 sparse vector 时可用，例如 Qdrant/Milvus 使用 BGE-M3 sparse；`simple_bm25` 和 `opensearch_bm25` 不提供 sparse vector 本体。
+
+### 全文索引数据列表
+
+```http
+POST /api/open/rag/sparse/chunks
+```
+
+查看 OpenSearch 全文索引中的 chunk 文档记录。该页面用于确认全文索引底座是否写入数据；OpenSearch BM25 没有固定的 vector 本体，BM25 分数解释需要带 query，适合放在搜索结果链路中查看。
+
 ### 删除索引文件
 
 ```http
-DELETE /api/files/{file_id}
+DELETE /api/open/rag/files/{file_id}
 ```
 
 管理台删除文件会同时删除当前 app 向量库里的 chunks，以及 MinIO/S3 中 `uploads/{app_id}/{file_id}/` 前缀下的原始上传对象。
@@ -602,7 +575,7 @@ DELETE /api/files/{file_id}
 上游系统删除索引文件：
 
 ```http
-DELETE /api/open/files/{file_id}
+DELETE /api/open/rag/files/{file_id}
 ```
 
 上游接口只删除当前 app 向量库里的 chunks，不删除对象存储中的原始文件。

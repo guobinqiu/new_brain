@@ -84,7 +84,7 @@ import { useActiveAppStore } from '../stores/activeApp'
 import { errorMessage, showToast } from '../utils/toast'
 import { shortTime } from '../utils/format'
 
-const API = '/api'
+const API = '/api/open/rag'
 const { t } = useI18n()
 const activeAppStore = useActiveAppStore()
 const { appId } = storeToRefs(activeAppStore)

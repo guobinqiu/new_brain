@@ -11,7 +11,7 @@ pytestmark = pytest.mark.e2e
 
 def test_login_returns_token(api_client):
     resp = api_client.post(
-        "/api/login",
+        "/api/open/rag/login",
         json={
             "username": "admin",
             "password": "admin123",
@@ -25,22 +25,22 @@ def test_login_returns_token(api_client):
 
 
 def test_business_api_accepts_client_signature(api_client):
-    credential = api_client.post("/api/apps", json={"app_id": "signed_search"}).json()
-    db_resp = api_client.post("/api/apps/signed_search/database")
+    credential = api_client.post("/api/open/rag/apps", json={"app_id": "signed_search"}).json()
+    db_resp = api_client.post("/api/open/rag/apps/signed_search/database")
     assert db_resp.status_code == 200, db_resp.text
-    body = json.dumps({"query": "人工智能", "mode": "sparse"}, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    body = json.dumps({"query": "人工智能", "mode": "dense"}, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
     timestamp = str(int(time.time()))
     signature = _signature(
         secret_key=credential["secret_key"],
         method="POST",
-        path="/api/open/search",
+        path="/api/open/rag/search",
         timestamp=timestamp,
         body=body,
         app_id="signed_search",
     )
 
     resp = api_client.post(
-        "/api/open/search",
+        "/api/open/rag/search",
         content=body,
         headers={
             "Authorization": "",
@@ -53,21 +53,22 @@ def test_business_api_accepts_client_signature(api_client):
     )
 
     assert resp.status_code == 200, resp.text
-    assert resp.json()["mode"] == "sparse"
+    assert resp.json()["mode"] == "dense"
 
 
 def test_config_requires_bearer_token(anonymous_api_client):
-    resp = anonymous_api_client.get("/api/config")
+    resp = anonymous_api_client.get("/api/open/rag/config")
 
     assert resp.status_code == 401
 
 
-def test_monitor_reports_sparse_as_one_runtime_component(api_client):
-    resp = api_client.get("/api/monitor")
+def test_monitor_reports_opensearch_bm25_as_sparse_component(api_client):
+    resp = api_client.get("/api/open/rag/monitor")
 
     assert resp.status_code == 200, resp.text
     components = {item["name"]: item for item in resp.json()["components"]}
-    assert components["Sparse"]["model"] == "bm25"
+    assert components["Sparse"]["status"] == "ready"
+    assert components["Sparse"]["model"] == "opensearch_bm25"
 
 
 def _signature(*, secret_key: str, method: str, path: str, timestamp: str, body: bytes, app_id: str) -> str:

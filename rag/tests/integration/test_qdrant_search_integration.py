@@ -14,9 +14,9 @@ def _chunk(filename: str, content: str, chunk_id: str | None = None) -> dict:
 
 
 def _started_bm25_sparse():
-    from rag.sparse.bm25 import BM25Sparse
+    from rag.sparse.simple_bm25 import SimpleBM25Sparse
 
-    sparse = BM25Sparse()
+    sparse = SimpleBM25Sparse()
     sparse.start()
     return sparse
 

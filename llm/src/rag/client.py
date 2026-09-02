@@ -9,7 +9,7 @@
 关键不变量：
   - body_bytes 既是签名对象也是 HTTP body 字节 —— 不让 httpx 重新序列化。
   - 签名头：X-App-Id / X-Access-Key / X-Timestamp(Unix 秒字符串) / X-Signature(hex)
-  - PATH 固定为 /api/open/search，不拼 query。
+  - PATH 固定为 /api/open/rag/search，不拼 query。
   - 5xx / TimeoutException / ConnectError → rag_retry 自愈；
     401 / 403 / 其他 4xx → 不重试（签名错误换时间戳无意义）。
 """
@@ -30,7 +30,7 @@ from llm.src.rag.schemas import Document, SearchRequest
 logger = get_logger("rag.client")
 
 RAG_DEFAULT_TOP_K = 5
-PATH = "/api/open/search"
+PATH = "/api/open/rag/search"
 _method = "POST"
 
 

@@ -78,13 +78,13 @@ def test_application_selects_production_components():
     from rag.dense.huggingface import HuggingFaceDense
     from rag.ocr.paddle import PaddleOCR
     from rag.search.pipeline import SearchPipeline
-    from rag.sparse.bm25 import BM25Sparse
+    from rag.sparse.opensearch_bm25 import OpenSearchBM25Sparse
     from rag.store.qdrant import QdrantStore
 
     application = bootstrap.Application()
 
     assert isinstance(application.dense, HuggingFaceDense)
-    assert isinstance(application.sparse, BM25Sparse)
+    assert isinstance(application.sparse, OpenSearchBM25Sparse)
     assert isinstance(application.store, QdrantStore)
     assert isinstance(application.search, SearchPipeline)
     assert application.rerank is None
@@ -188,7 +188,7 @@ def test_build_dense_rejects_unsupported_dense_type():
 
     config = AppConfig(
         dense=DenseConfig(name="unknown", model_path="/models/dense"),
-        sparse=SparseConfig(name="bm25", tokenizer="jieba"),
+        sparse=SparseConfig(name="simple_bm25", tokenizer="jieba"),
         store=StoreConfig(type="qdrant", url="http://localhost:6333"),
         database=DatabaseConfig(type="postgres", url="postgresql://rag:rag@localhost:5432/rag"),
         search=SearchConfig(),

@@ -29,7 +29,7 @@ database:
   url: postgresql://rag:rag@localhost:5432/rag
 dense: test_dense
 sparse:
-  type: bm25
+  type: simple_bm25
   tokenizer: jieba
 store:
   type: qdrant
@@ -70,7 +70,7 @@ ocr: test_ocr
 
     assert config.name == "custom"
     assert config.dense.model_path == str(PROJECT_ROOT / "models" / "dense")
-    assert config.sparse.name == "bm25"
+    assert config.sparse.name == "simple_bm25"
     assert config.sparse.tokenizer == "jieba"
     assert config.rerank.model_path == str(PROJECT_ROOT / "models" / "rerank")
     assert config.ocr.model_path == str(PROJECT_ROOT / "models" / "ocr")
@@ -87,6 +87,86 @@ ocr: test_ocr
     assert config.logging.search_trace is False
     assert config.api.rate_limit == "60/minute"
     assert config.api.rate_limit_index == "5/minute"
+
+
+def test_load_app_config_supports_opensearch_bm25_sparse(monkeypatch, tmp_path):
+    from rag.loader import load_app_config
+
+    path = tmp_path / "opensearch.yaml"
+    path.write_text(
+        """
+database:
+  type: postgres
+  url: postgresql://rag:rag@localhost:5432/rag
+dense: test_dense
+sparse:
+  simple_bm25:
+    enable: false
+    tokenizer: jieba
+  bge_m3:
+    enable: false
+    model_name: bge-m3
+  opensearch_bm25:
+    enable: true
+    timeout: 10
+    username: admin
+    password: Admin@123
+store:
+  type: qdrant
+  url: http://localhost:6333
+search:
+  default_mode: hybrid
+rerank: test_rerank
+ocr: test_ocr
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CONFIG_FILE", str(path))
+    monkeypatch.setenv("OPENSEARCH_URL", "http://opensearch:9200")
+
+    config = load_app_config()
+
+    assert config.sparse.name == "opensearch_bm25"
+    assert config.sparse.url == "http://opensearch:9200"
+    assert config.sparse.index_prefix == ""
+    assert config.sparse.timeout == 10
+    assert config.sparse.username == "admin"
+    assert config.sparse.password == "Admin@123"
+
+
+def test_load_app_config_supports_simple_bm25_sparse_group(monkeypatch, tmp_path):
+    from rag.loader import load_app_config
+
+    path = tmp_path / "simple_bm25.yaml"
+    path.write_text(
+        """
+database:
+  type: postgres
+  url: postgresql://rag:rag@localhost:5432/rag
+dense: test_dense
+sparse:
+  simple_bm25:
+    enable: true
+    tokenizer: jieba
+  bge_m3:
+    enable: false
+    model_name: bge-m3
+  opensearch_bm25:
+    enable: false
+store:
+  type: qdrant
+  url: http://localhost:6333
+rerank: test_rerank
+ocr: test_ocr
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CONFIG_FILE", str(path))
+
+    config = load_app_config()
+
+    assert config.sparse.name == "simple_bm25"
+    assert config.sparse.tokenizer == "jieba"
 
 
 def test_load_app_config_supports_embedding_runtime_config(monkeypatch, tmp_path):
@@ -134,7 +214,7 @@ database:
   url: postgresql://rag:rag@localhost:5432/rag
 dense: test_dense
 sparse:
-  type: bm25
+  type: simple_bm25
   tokenizer: jieba
 store:
   type: qdrant
@@ -166,7 +246,7 @@ database:
   url: postgresql://rag:rag@localhost:5432/rag
 dense: test_dense
 sparse:
-  type: bm25
+  type: simple_bm25
   tokenizer: jieba
 store:
   type: qdrant
@@ -202,7 +282,7 @@ database:
   url: postgresql://rag:rag@localhost:5432/rag
 dense: test_dense
 sparse:
-  type: bm25
+  type: simple_bm25
   tokenizer: jieba
 store:
   type: qdrant
@@ -258,7 +338,7 @@ database:
   url: postgresql://rag:rag@localhost:5432/rag
 dense: test_dense
 sparse:
-  type: bm25
+  type: simple_bm25
   tokenizer: jieba
 store:
   qdrant:
@@ -333,9 +413,7 @@ database:
 dense: bge_m3
 sparse:
   app:
-    type: bm25
   vector:
-    type: bge_m3
 store:
   type: qdrant
   url: http://localhost:6333
@@ -365,7 +443,7 @@ dense:
   name: bge_m3
   model_name: bge-m3
 sparse:
-  type: bm25
+  type: simple_bm25
   tokenizer: jieba
 store:
   type: qdrant
@@ -392,7 +470,7 @@ ocr:
 
     assert config.dense.name == "bge_m3"
     assert config.dense.model_path == str(PROJECT_ROOT / "models" / "BAAI" / "bge-m3")
-    assert config.sparse.name == "bm25"
+    assert config.sparse.name == "simple_bm25"
     assert config.sparse.tokenizer == "jieba"
     assert config.store.type == "qdrant"
     assert config.store.url == "http://localhost:6333"
@@ -413,7 +491,7 @@ dense:
   name: bge_base
   model_name: bge-base-zh-v1.5
 sparse:
-  type: bm25
+  type: simple_bm25
   tokenizer: jieba
 store:
   type: qdrant
@@ -436,6 +514,9 @@ def test_load_app_config_can_use_project_relative_config_path(monkeypatch):
     from rag.loader import load_app_config
 
     monkeypatch.setenv("CONFIG_FILE", "rag/config/qdrant-bgebase.yaml")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://rag:rag@postgres:5432/rag")
+    monkeypatch.setenv("QDRANT_URL", "http://qdrant:6333")
+    monkeypatch.setenv("OPENSEARCH_URL", "http://opensearch:9200")
 
     config = load_app_config()
 
@@ -448,11 +529,25 @@ def test_load_app_config_applies_runtime_url_overrides(monkeypatch):
     monkeypatch.setenv("CONFIG_FILE", "rag/config/qdrant-bgebase.yaml")
     monkeypatch.setenv("DATABASE_URL", "postgresql://rag:rag@19.16.1.233:5432/rag")
     monkeypatch.setenv("QDRANT_URL", "http://19.16.1.233:6333")
+    monkeypatch.setenv("OPENSEARCH_URL", "http://19.16.1.233:9200")
 
     config = load_app_config()
 
     assert config.database.url == "postgresql://rag:rag@19.16.1.233:5432/rag"
     assert config.store.url == "http://19.16.1.233:6333"
+    assert config.sparse.url == "http://19.16.1.233:9200"
+
+
+def test_load_app_config_requires_qdrant_url_when_enabled(monkeypatch):
+    from rag.loader import load_app_config
+
+    monkeypatch.setenv("CONFIG_FILE", "rag/config/qdrant-bgebase.yaml")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://rag:rag@postgres:5432/rag")
+    monkeypatch.setenv("OPENSEARCH_URL", "http://opensearch:9200")
+    monkeypatch.delenv("QDRANT_URL", raising=False)
+
+    with pytest.raises(ValueError, match="store.url is required"):
+        load_app_config()
 
 
 def test_load_app_config_rejects_chroma_bge_m3_sparse(tmp_path):
@@ -507,7 +602,7 @@ database:
   url: postgresql://rag:rag@localhost:5432/rag
 dense: test_dense
 sparse:
-  type: bm25
+  type: simple_bm25
   tokenizer: jieba
 store:
   milvus:
@@ -531,15 +626,31 @@ ocr: test_ocr
     assert config.store.uri == "http://localhost:19530"
 
 
-def test_load_app_config_keeps_app_bm25_sparse_without_model_path(monkeypatch):
+def test_load_app_config_uses_opensearch_bm25_sparse(monkeypatch):
     from rag.loader import load_app_config
 
     monkeypatch.setenv("CONFIG_FILE", "rag/config/qdrant-bgebase.yaml")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://rag:rag@postgres:5432/rag")
+    monkeypatch.setenv("QDRANT_URL", "http://qdrant:6333")
+    monkeypatch.setenv("OPENSEARCH_URL", "http://opensearch:9200")
 
     config = load_app_config()
 
     assert config.dense.model_path == str(PROJECT_ROOT / "models" / "AI-ModelScope" / "bge-base-zh-v1.5")
-    assert config.sparse.name == "bm25"
+    assert config.sparse.name == "opensearch_bm25"
+    assert config.sparse.url == "http://opensearch:9200"
+
+
+def test_load_app_config_requires_opensearch_url_when_enabled(monkeypatch):
+    from rag.loader import load_app_config
+
+    monkeypatch.setenv("CONFIG_FILE", "rag/config/qdrant-bgebase.yaml")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://rag:rag@postgres:5432/rag")
+    monkeypatch.setenv("QDRANT_URL", "http://qdrant:6333")
+    monkeypatch.delenv("OPENSEARCH_URL", raising=False)
+
+    with pytest.raises(ValueError, match="sparse.url is required"):
+        load_app_config()
 
 
 def test_load_app_config_supports_milvus_builtin_bm25_sparse(monkeypatch, tmp_path):
@@ -591,7 +702,7 @@ dense:
   name: bge_base
   model_name: bge-base-zh-v1.5
 sparse:
-  type: bm25
+  type: simple_bm25
   tokenizer: jieba
 store:
   type: qdrant
@@ -628,7 +739,7 @@ dense:
   name: bge_base
   model_name: bge-base-zh-v1.5
 sparse:
-  type: bm25
+  type: simple_bm25
   tokenizer: jieba
 store:
   type: qdrant
@@ -663,7 +774,7 @@ database:
   url: postgresql://rag:rag@localhost:5432/rag
 dense: test_dense
 sparse:
-  type: bm25
+  type: simple_bm25
   tokenizer: jieba
 store:
   type: unknown

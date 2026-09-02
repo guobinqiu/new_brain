@@ -53,6 +53,28 @@ class FakeStore:
         return False
 
 
+class FakeVectorSparseStore(FakeStore):
+    type = "qdrant"
+
+    def sparse_uses_store(self, sparse=None):
+        return True
+
+
+class ReadyIndexedSparse:
+    backend = "opensearch"
+    retriever = "bm25"
+    ready = True
+
+    def start(self):
+        pass
+
+    def stop(self):
+        pass
+
+    def search_index(self, query, limit, *, app_id=None, file_ids=None):
+        return [{"id": "bm25-1", "content": "bm25", "metadata": {"app_id": app_id, "file_ids": file_ids}, "_score": 2.0}]
+
+
 def test_search_plan_uses_file_ids():
     import rag.search as search_mod
 
@@ -73,6 +95,13 @@ def test_search_plan_limits_file_ids_to_1000():
 
     with pytest.raises(ValueError, match="file_ids exceeds max limit: 1000"):
         search_mod.SearchPlan("query", file_ids=[f"f{i}" for i in range(1001)])
+
+
+def test_search_plan_rejects_weights_greater_than_one():
+    import rag.search as search_mod
+
+    with pytest.raises(ValueError, match="search weights must be less than or equal to 1"):
+        search_mod.SearchPlan("query", dense_weight=0.6, sparse_weight=0.5)
 
 
 def test_executor_builds_single_chunks_pipeline_with_parallel_dense_sparse():
@@ -225,6 +254,87 @@ def test_executor_logs_search_trace_with_file_ids_when_enabled(monkeypatch):
     assert row["app_id"] == "imsdom"
     assert row["mode"] == "dense"
     assert row["file_ids"] == ["file_a"]
+
+
+def test_executor_search_trace_stages_include_backend_and_retriever_fields():
+    import rag.search as search_mod
+
+    executor = search_mod._SearchExecutor(
+        search_mod.SearchPlan("query", mode="hybrid", top_k=2, dense_weight=0.5, sparse_weight=0.5),
+        sparse=ReadySparse(),
+        store=FakeStore(),
+        search_trace=True,
+    )
+
+    assert [item["id"] for item in executor.execute()] == ["dense-1", "app-sparse-1"]
+
+    stages = {stage["name"]: stage for stage in executor.trace.result["stages"]}
+    assert stages["dense"]["backend"] == "qdrant"
+    assert stages["dense"]["retriever"] == "dense"
+    assert stages["dense"]["hit_count"] == 1
+    assert stages["sparse"]["backend"] == "app"
+    assert stages["sparse"]["retriever"] == "bm25"
+    assert stages["sparse"]["hit_count"] == 1
+    assert stages["fusion"]["backend"] == "app"
+    assert stages["fusion"]["retriever"] == "fusion"
+    assert stages["fusion"]["hit_count"] == 2
+
+
+def test_hybrid_executor_uses_vector_sparse_backend():
+    import rag.search as search_mod
+
+    executor = search_mod._SearchExecutor(
+        search_mod.SearchPlan("query", mode="hybrid", top_k=3, dense_weight=0.5, sparse_weight=0.5),
+        sparse=ReadySparse(),
+        store=FakeVectorSparseStore(),
+        search_trace=True,
+    )
+
+    results = executor.execute()
+    assert {item["id"] for item in results} == {"dense-1", "vector-sparse-1"}
+    stages = {stage["name"]: stage for stage in executor.trace.result["stages"]}
+    assert "bm25" not in stages
+    assert stages["sparse"]["backend"] == "qdrant"
+    assert stages["sparse"]["retriever"] == "sparse_vector"
+    assert stages["sparse"]["hit_count"] == 1
+
+
+def test_hybrid_executor_uses_indexed_sparse_backend():
+    import rag.search as search_mod
+
+    executor = search_mod._SearchExecutor(
+        search_mod.SearchPlan("query", app_id="imsdom", mode="hybrid", top_k=3, file_ids=["file_a"], dense_weight=0.5, sparse_weight=0.5),
+        sparse=ReadyIndexedSparse(),
+        store=FakeStore(),
+        search_trace=True,
+    )
+
+    results = executor.execute()
+    assert {item["id"] for item in results} == {"dense-1", "bm25-1"}
+    stages = {stage["name"]: stage for stage in executor.trace.result["stages"]}
+    assert stages["sparse"]["backend"] == "opensearch"
+    assert stages["sparse"]["retriever"] == "bm25"
+    assert stages["sparse"]["hit_count"] == 1
+    assert results[1]["metadata"] == {"app_id": "imsdom", "file_ids": ["file_a"]}
+
+
+@pytest.mark.parametrize("mode", ["sparse", "hybrid"])
+def test_search_service_rejects_sparse_modes_when_sparse_is_disabled(monkeypatch, mode):
+    from fastapi import HTTPException
+
+    from rag.api.runtime import runtime
+    from rag.api.schemas import SearchRequest
+    from rag.api.services import search as service
+    from rag.auth import Principal
+
+    monkeypatch.setattr(service, "require_ready", lambda: None)
+    monkeypatch.setattr(runtime.application, "sparse", None)
+
+    with pytest.raises(HTTPException) as exc:
+        service.search(SearchRequest(query="query", app_id="imsdom", mode=mode), Principal(type="admin", app_id=""))
+
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "sparse is not enabled"
 
 
 def test_executor_does_not_log_search_trace_when_disabled(monkeypatch):

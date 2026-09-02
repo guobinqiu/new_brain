@@ -55,6 +55,15 @@ def _apply_runtime_overrides(raw: dict) -> None:
     if qdrant_url and isinstance(store, dict) and store.get("type") in ("qdrant", "store/qdrant"):
         store["url"] = qdrant_url
 
+    milvus_uri = os.getenv("MILVUS_URI")
+    if milvus_uri and isinstance(store, dict) and store.get("type") in ("milvus", "store/milvus"):
+        store["uri"] = milvus_uri
+
+    opensearch_url = os.getenv("OPENSEARCH_URL")
+    sparse = raw.get("sparse")
+    if opensearch_url and isinstance(sparse, dict) and (sparse.get("type") or sparse.get("name")) in ("opensearch_bm25", "sparse/opensearch_bm25"):
+        sparse["url"] = opensearch_url
+
 
 def _resolve_model_paths(raw: dict) -> None:
     _resolve_component(raw, "dense", {
@@ -92,16 +101,18 @@ def _resolve_model_paths(raw: dict) -> None:
 
 
 def _select_enabled_components(raw: dict) -> None:
-    for section_name in ("dense", "store", "rerank", "ocr"):
+    for section_name in ("dense", "sparse", "store", "rerank", "ocr"):
         section = raw.get(section_name)
         if not _is_component_group(section):
             continue
+        if section_name == "sparse" and ("app" in section or "vector" in section):
+            raise ValueError("sparse must define exactly one backend")
         enabled = [
             (name, dict(config))
             for name, config in section.items()
             if isinstance(config, dict) and bool(config.get("enable"))
         ]
-        if section_name == "rerank" and not enabled:
+        if section_name in ("sparse", "rerank") and not enabled:
             raw[section_name] = None
             continue
         if len(enabled) != 1:
@@ -119,6 +130,7 @@ def _select_enabled_components(raw: dict) -> None:
 def _available_components(raw: dict) -> dict[str, list[dict[str, object]]]:
     return {
         "store": _component_options(raw.get("store")),
+        "sparse": _component_options(raw.get("sparse")),
         "rerank": _component_options(raw.get("rerank")),
         "ocr": _component_options(raw.get("ocr")),
     }

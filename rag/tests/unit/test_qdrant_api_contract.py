@@ -50,6 +50,7 @@ def test_index_object_indexes_presigned_object_synchronously(monkeypatch):
     monkeypatch.setattr(service, "require_ready", lambda: None)
     monkeypatch.setattr(service, "create_file_id", lambda: "abc123")
     monkeypatch.setattr(runtime.application, "store", Store())
+    monkeypatch.setattr(runtime.application, "sparse", None)
     monkeypatch.setattr(runtime.application, "database", Database())
     monkeypatch.setattr(
         service,
@@ -101,6 +102,7 @@ def test_create_index_job_enqueues_async_job(monkeypatch):
     monkeypatch.setattr(service, "require_ready", lambda: None)
     monkeypatch.setattr(service, "create_file_id", lambda: "abc123")
     monkeypatch.setattr(runtime.application, "store", Store())
+    monkeypatch.setattr(runtime.application, "sparse", None)
     monkeypatch.setattr(runtime.application, "database", Database())
     monkeypatch.setattr(
         service,
@@ -160,6 +162,44 @@ def test_index_file_uses_application_parser(tmp_path):
     assert count == 1
     assert calls[0] == (str(path), "a.txt", Application.ocr)
     assert calls[1][0] == "store"
+
+
+def test_index_file_writes_configured_indexed_sparse_backend(tmp_path):
+    from rag.index.service import index_file
+
+    calls = []
+
+    class Parser:
+        def parse_file(self, path, *, original_filename, ocr):
+            return [{"id": "chunk-1", "content": "hello", "metadata": {"filename": original_filename, "chunk_index": 0}}]
+
+    class Store:
+        def add_file_chunks(self, chunks, file_id):
+            calls.append(("store", file_id, chunks))
+            return len(chunks)
+
+    class Sparse:
+        def delete_file_chunks(self, file_id):
+            calls.append(("sparse_delete", file_id))
+
+        def add_file_chunks(self, chunks, file_id):
+            calls.append(("sparse_add", file_id, chunks))
+
+    class Application:
+        parser = Parser()
+        store = Store()
+        sparse = Sparse()
+        ocr = object()
+
+    path = tmp_path / "a.txt"
+    path.write_text("hello", encoding="utf-8")
+
+    count = index_file(Application(), "file-1", path, "a.txt")
+
+    assert count == 1
+    assert [call[0] for call in calls] == ["store", "sparse_delete", "sparse_add"]
+    assert calls[1] == ("sparse_delete", "file-1")
+    assert calls[2][1] == "file-1"
 
 
 def test_create_index_job_returns_429_when_queue_rejects(monkeypatch):
@@ -249,18 +289,16 @@ def test_presign_route_is_admin_api_endpoint():
 
     paths = {route.path for route in main.app.routes}
 
-    assert "/api/presign" in paths
+    assert "/api/open/rag/presign" in paths
 
 
-def test_sync_and_async_index_routes_are_separate():
+def test_sync_and_async_index_routes_are_registered():
     import main
 
     routes = [(route.path, route.methods) for route in main.app.routes if hasattr(route, "methods")]
 
-    assert any(path == "/api/open/files" and "POST" in methods for path, methods in routes)
-    assert any(path == "/api/open/files/jobs" and "POST" in methods for path, methods in routes)
-    assert any(path == "/api/files" and "POST" in methods for path, methods in routes)
-    assert any(path == "/api/files/jobs" and "POST" in methods for path, methods in routes)
+    assert any(path == "/api/open/rag/files" and "POST" in methods for path, methods in routes)
+    assert any(path == "/api/open/rag/files/jobs" and "POST" in methods for path, methods in routes)
 
 
 def testupload_file_to_storage_puts_object_in_bucket(monkeypatch):
@@ -306,3 +344,48 @@ def test_client_delete_file_removes_index_only(monkeypatch):
 
     assert result == {"deleted_chunks": 2}
     assert calls == [("index", "file-a", "imsdom")]
+
+
+def test_delete_index_file_deletes_configured_indexed_sparse_backend(monkeypatch):
+    from rag.api.runtime import runtime
+    from rag.api.services import files as service
+    from rag.auth import Principal
+
+    calls = []
+
+    class Store:
+        def delete_file_chunks(self, file_id):
+            calls.append(("store_delete", file_id))
+            return 2
+
+    class Database:
+        def soft_delete_file(self, app_id, file_id):
+            calls.append(("soft_delete", app_id, file_id))
+
+    class Sparse:
+        def delete_file_chunks(self, file_id):
+            calls.append(("sparse_delete", file_id))
+
+    class Context:
+        def __enter__(self):
+            calls.append(("enter",))
+
+        def __exit__(self, exc_type, exc, tb):
+            calls.append(("exit",))
+
+    monkeypatch.setattr(service, "require_ready", lambda: None)
+    monkeypatch.setattr(service, "scoped_store", lambda principal: Store())
+    monkeypatch.setattr(service, "store_context", lambda principal: Context())
+    monkeypatch.setattr(runtime.application, "database", Database())
+    monkeypatch.setattr(runtime.application, "sparse", Sparse())
+
+    result = service.delete_index_file("file-a", Principal(type="app", app_id="imsdom"))
+
+    assert result == {"deleted_chunks": 2}
+    assert calls == [
+        ("store_delete", "file-a"),
+        ("enter",),
+        ("sparse_delete", "file-a"),
+        ("exit",),
+        ("soft_delete", "imsdom", "file-a"),
+    ]

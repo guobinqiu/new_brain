@@ -7,7 +7,7 @@ def _request(headers: list[tuple[bytes, bytes]], client: tuple[str, int] = ("10.
     return Request({
         "type": "http",
         "method": "GET",
-        "path": "/api/open/search",
+        "path": "/api/open/rag/search",
         "headers": headers,
         "client": client,
     })
@@ -57,7 +57,7 @@ def test_check_raises_429_after_limit(monkeypatch):
 def test_open_search_uses_default_rate_limit():
     from rag.api.routes.search import router
 
-    route = _route(router, "/api/open/search", "POST")
+    route = _route(router, "/api/open/rag/search", "POST")
 
     assert "require_rate_limit" in _dependency_names(route)
 
@@ -65,7 +65,7 @@ def test_open_search_uses_default_rate_limit():
 def test_open_sync_index_uses_index_rate_limit():
     from rag.api.routes.files import router
 
-    route = _route(router, "/api/open/files", "POST")
+    route = _route(router, "/api/open/rag/files", "POST")
 
     assert "require_index_rate_limit" in _dependency_names(route)
 
@@ -73,7 +73,7 @@ def test_open_sync_index_uses_index_rate_limit():
 def test_open_delete_uses_default_rate_limit():
     from rag.api.routes.files import router
 
-    route = _route(router, "/api/open/files/{file_id}", "DELETE")
+    route = _route(router, "/api/open/rag/files/{file_id}", "DELETE")
 
     assert "require_rate_limit" in _dependency_names(route)
 
@@ -81,7 +81,7 @@ def test_open_delete_uses_default_rate_limit():
 def test_open_async_index_job_has_no_rate_limit():
     from rag.api.routes.files import router
 
-    route = _route(router, "/api/open/files/jobs", "POST")
+    route = _route(router, "/api/open/rag/files/jobs", "POST")
 
     names = _dependency_names(route)
     assert "require_rate_limit" not in names

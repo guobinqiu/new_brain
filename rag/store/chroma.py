@@ -68,6 +68,18 @@ class ChromaStore:
     def list_chunks(self, file_ids: list[str] | None = None, limit: int = 50, cursor: str | None = None) -> dict:
         return list_chunks(file_ids=file_ids, limit=limit, cursor=cursor)
 
+    def get_dense_vector(self, chunk_id: str) -> list[float] | None:
+        return get_dense_vector(chunk_id)
+
+    def get_sparse_vector(self, chunk_id: str) -> dict | None:
+        return get_sparse_vector(chunk_id)
+
+    def supports_dense_vector(self) -> bool:
+        return True
+
+    def supports_sparse_vector(self, sparse: Sparse | None = None) -> bool:
+        return _sparse_uses_store(sparse)
+
     def ensure_app_collection(self, app_id: str) -> str:
         _configure_store(self.persist_dir)
         return ensure_app_collection(app_id)
@@ -400,6 +412,19 @@ def list_chunks(file_ids: list[str] | None = None, limit: int = 50, cursor: str 
         "next_cursor": _encode_chunk_cursor(page_rows[-1]) if start + limit < len(documents) and page_rows else None,
         "has_more": start + limit < len(documents),
     }
+
+
+def get_dense_vector(chunk_id: str) -> list[float] | None:
+    rows = _collection().get(ids=[chunk_id], include=["embeddings"])
+    embeddings = rows.get("embeddings")
+    if embeddings is None or len(embeddings) == 0:
+        return None
+    vector = embeddings[0]
+    return vector.tolist() if hasattr(vector, "tolist") else list(vector)
+
+
+def get_sparse_vector(chunk_id: str) -> dict | None:
+    raise NotImplementedError("sparse vector is not supported by current store")
 
 
 def _rows_to_documents(rows: dict) -> list[dict]:

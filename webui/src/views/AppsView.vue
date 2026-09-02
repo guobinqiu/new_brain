@@ -58,7 +58,7 @@ import { ElMessageBox } from 'element-plus'
 import { CopyDocument } from '@element-plus/icons-vue'
 import { copyText } from '../utils/format'
 
-const API = '/api'
+const API = '/api/open/rag'
 const router = useRouter()
 const { t } = useI18n()
 const activeAppStore = useActiveAppStore()

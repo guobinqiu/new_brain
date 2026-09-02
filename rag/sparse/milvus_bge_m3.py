@@ -18,6 +18,12 @@ class MilvusBGEM3Sparse:
     def ready(self) -> bool:
         return self._encoder.ready
 
+    def supports_search_index(self) -> bool:
+        return False
+
+    def supports_sparse_vector(self) -> bool:
+        return True
+
     def embed_query(self, query: str) -> dict[int, float]:
         return self._encoder.embed_query(query)
 

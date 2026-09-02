@@ -55,7 +55,12 @@
     "balance": "Balance",
     "elapsed": "Elapsed",
     "noResults": "No matching results",
-    "noResultsHint": "Try another search mode or adjust the Sparse / Dense balance"
+    "noResultsHint": "Try another search mode or adjust the Sparse / Dense balance",
+    "modeValues": {
+      "dense": "Dense",
+      "sparse": "Sparse",
+      "hybrid": "Hybrid"
+    }
   },
   "upload": {
     "choose": "Choose documents",
@@ -91,7 +96,12 @@
   "database": {
     "title": "Database",
     "location": "Location",
-    "chunks": "Vector data",
+    "chunks": "Vector store",
+    "indexData": "Index data",
+    "vectorData": "Vector store",
+    "sparseData": "Search index",
+    "vectorStore": "Vector store",
+    "searchIndex": "Search index",
     "app": "App",
     "initialize": "Initialize database",
     "initialized": "{appId} database initialized",
@@ -108,7 +118,17 @@
     "createdAt": "Created at",
     "chunkIndex": "Chunk index",
     "content": "Content",
-    "empty": "No vector data"
+    "empty": "No vector store data",
+    "vectorEmpty": "No vector store data",
+    "sparseEmpty": "No search index data",
+    "searchIndexEmpty": "No search index data",
+    "searchIndexDisabled": "OpenSearch search index is not enabled",
+    "denseVector": "Dense",
+    "sparseVector": "Sparse",
+    "denseVectorTitle": "Dense Vector",
+    "sparseVectorTitle": "Sparse Vector",
+    "vectorDimension": "Dimensions: {count}",
+    "sparseVectorNonZero": "Non-zero values: {count}"
   },
   "trace": {
     "title": "Trace",

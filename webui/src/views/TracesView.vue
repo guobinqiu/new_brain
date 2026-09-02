@@ -18,11 +18,11 @@
           <el-button size="small" type="primary" :loading="tracesLoading" @click="loadTraces">{{ t('common.search') }}</el-button>
         </div>
         <template v-if="traces.length">
-          <el-table ref="tracesTableRef" :data="traces" max-height="320" v-loading="tracesLoading" @scroll="onTracesScroll">
+          <el-table ref="tracesTableRef" :data="traces" max-height="320" class="traces-table" v-loading="tracesLoading" @scroll="onTracesScroll">
             <el-table-column :label="t('trace.columns.time')" min-width="150">
               <template #default="{ row }">{{ shortTime(row.created_at) }}</template>
             </el-table-column>
-            <el-table-column :label="t('trace.columns.query')" min-width="160" show-overflow-tooltip>
+            <el-table-column :label="t('trace.columns.query')" min-width="220" show-overflow-tooltip>
               <template #default="{ row }">
                 <span class="trace-query">{{ row.query }}</span>
               </template>
@@ -30,30 +30,30 @@
             <el-table-column :label="t('trace.columns.mode')" width="90">
               <template #default="{ row }">{{ traceModeText(row.mode) }}</template>
             </el-table-column>
-            <el-table-column prop="top_k" :label="t('trace.columns.topK')" width="46" />
-            <el-table-column :label="t('trace.columns.elapsed')" width="72">
+            <el-table-column prop="top_k" :label="t('trace.columns.topK')" width="64" />
+            <el-table-column :label="t('trace.columns.elapsed')" width="84">
               <template #default="{ row }"><strong>{{ ms(row.elapsed_ms) }}</strong></template>
             </el-table-column>
-            <el-table-column :label="t('trace.columns.prepare')" width="72">
-              <template #default="{ row }">{{ stageMs(row, 'prepare_plan') }}</template>
+            <el-table-column :label="t('trace.columns.prepare')" width="84">
+              <template #default="{ row }"><StageCell :stage="stage(row, 'prepare_plan')" /></template>
             </el-table-column>
-            <el-table-column :label="t('trace.columns.dense')" width="72">
-              <template #default="{ row }">{{ stageMs(row, 'dense') }}</template>
+            <el-table-column :label="t('trace.columns.dense')" width="84">
+              <template #default="{ row }"><StageCell :stage="stage(row, 'dense')" /></template>
             </el-table-column>
-            <el-table-column :label="t('trace.columns.sparse')" width="72">
-              <template #default="{ row }">{{ stageMs(row, 'sparse') }}</template>
+            <el-table-column :label="t('trace.columns.sparse')" width="84">
+              <template #default="{ row }"><StageCell :stage="stage(row, 'sparse')" /></template>
             </el-table-column>
-            <el-table-column :label="t('trace.columns.fusion')" width="72">
-              <template #default="{ row }">{{ stageMs(row, 'fusion') }}</template>
+            <el-table-column :label="t('trace.columns.fusion')" width="84">
+              <template #default="{ row }"><StageCell :stage="stage(row, 'fusion')" /></template>
             </el-table-column>
-            <el-table-column :label="t('trace.columns.dedupe')" width="72">
-              <template #default="{ row }">{{ stageMs(row, 'dedupe') }}</template>
+            <el-table-column :label="t('trace.columns.dedupe')" width="84">
+              <template #default="{ row }"><StageCell :stage="stage(row, 'dedupe')" /></template>
             </el-table-column>
-            <el-table-column :label="t('trace.columns.rerank')" width="72">
-              <template #default="{ row }">{{ stageMs(row, 'rerank') }}</template>
+            <el-table-column :label="t('trace.columns.rerank')" width="84">
+              <template #default="{ row }"><StageCell :stage="stage(row, 'rerank')" /></template>
             </el-table-column>
-            <el-table-column :label="t('trace.columns.format')" width="72">
-              <template #default="{ row }">{{ stageMs(row, 'format_response') }}</template>
+            <el-table-column :label="t('trace.columns.format')" width="84">
+              <template #default="{ row }"><StageCell :stage="stage(row, 'format_response')" /></template>
             </el-table-column>
           </el-table>
         </template>
@@ -65,7 +65,7 @@
 </template>
 
 <script setup>
-import { computed, ref, watch, onMounted } from 'vue'
+import { computed, defineComponent, h, ref, watch, onMounted } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
@@ -93,10 +93,26 @@ function defaultRange() {
   return [end - 24 * 60 * 60 * 1000, end]
 }
 
-function stageMs(trace, name) {
-  const stage = (trace.stages || []).find(item => item.name === name)
-  return stage ? ms(stage.elapsed_ms) : '-'
+function stage(trace, name) {
+  return (trace.stages || []).find(item => item.name === name) || null
 }
+
+const StageCell = defineComponent({
+  props: {
+    stage: {
+      type: Object,
+      default: null,
+    },
+  },
+  setup(props) {
+    return () => {
+      if (!props.stage) return '-'
+      return h('div', { class: 'trace-stage-cell' }, [
+        h('strong', ms(props.stage.elapsed_ms)),
+      ])
+    }
+  },
+})
 
 function traceModeText(mode) {
   if (!mode) return '-'
@@ -126,7 +142,7 @@ async function fetchNextTraces() {
       params.end = timeRange.value[1]
     }
     if (tracesNextStart.value != null) params.start = tracesNextStart.value
-    const res = await axios.get('/api/traces', {
+    const res = await axios.get('/api/open/rag/traces', {
       params,
     })
     traces.value = traces.value.concat(res.data?.traces || [])

@@ -15,7 +15,7 @@
 - rerank 能力可通过 Rerank profile 切换。
 - 每个外部系统使用独立 chunks collection，collection 名由 `app_id` 统一生成。
 - 支持通过多个 `file_id` 限定搜索范围。
-- 支持 dense、sparse、hybrid 三种检索模式。
+- 支持 dense、sparse、hybrid 检索模式。
 - 支持可选 rerank。
 - 启动时通过配置文件决定使用哪套组合。
 - 应用层统一鉴权：管理用户使用 User JWT；外部系统业务请求直接使用 AK/SK HMAC 签名。
@@ -195,7 +195,7 @@ sequenceDiagram
   Client->>Entry: 用 file_id 搜索验证索引就绪
 ```
 
-写入入口可以同步执行索引，也可以创建异步任务。两种入口都接收 `presigned_url + s3_url`，并允许外部系统传入 UUID 格式的 `file_id`；不传时由 RAG 生成。管理台本地上传链路先通过上传接口生成 `file_id` 并写入对象存储路径，再调用 `/api/files/jobs`，因此管理台异步索引必须传入上传阶段返回的 `file_id`。文件名默认可从对象存储地址推导，也允许调用方指定展示名。同步索引成功返回代表已经写入向量库。异步索引入队后立即返回 `file_id`，backend 进程内的索引消费器后台完成下载、解析、切分、embedding 并写入向量库；文件状态可通过管理台文件列表查看。同步入口和异步消费器复用同一套索引执行逻辑。对象存储索引使用 `presigned_url` 做一次性下载，不把临时下载 URL 写入 chunk metadata；稳定的 `s3_url` 会写入 chunk metadata 用于追溯。文件表的 `created_at` 在索引请求进入系统时生成，`indexed_at` 在索引成功时生成；chunk 的 `created_at` 在索引写入时生成并写入 chunk metadata。存储层统一保存 UTC 时间，对外返回前再转换成本机或容器时区。
+写入入口可以同步执行索引，也可以创建异步任务。两种入口都接收 `presigned_url + s3_url`，并允许外部系统传入 UUID 格式的 `file_id`；不传时由 RAG 生成。管理台本地上传链路先通过上传接口生成 `file_id` 并写入对象存储路径，再调用 `/api/open/rag/files/jobs`，因此管理台异步索引必须传入上传阶段返回的 `file_id`。文件名默认可从对象存储地址推导，也允许调用方指定展示名。同步索引成功返回代表已经写入向量库。异步索引入队后立即返回 `file_id`，backend 进程内的索引消费器后台完成下载、解析、切分、embedding 并写入向量库；文件状态可通过管理台文件列表查看。同步入口和异步消费器复用同一套索引执行逻辑。对象存储索引使用 `presigned_url` 做一次性下载，不把临时下载 URL 写入 chunk metadata；稳定的 `s3_url` 会写入 chunk metadata 用于追溯。文件表的 `created_at` 在索引请求进入系统时生成，`indexed_at` 在索引成功时生成；chunk 的 `created_at` 在索引写入时生成并写入 chunk metadata。存储层统一保存 UTC 时间，对外返回前再转换成本机或容器时区。
 
 异步索引任务保存在 backend 进程内的 `queue.Queue`（标准库线程安全队列）里，容量 10（硬编码默认值，不走环境变量）。入队端点在请求线程里直接 `put_nowait`，消费器在普通工作线程里阻塞读取任务，两端跨线程安全。任务入队成功即被接受，由进程内消费器串行消费，实际索引并发固定为 1；队列已满时入队请求返回 429。RAG 不假设所有上游系统都有自己的队列、限流和重试能力；内部队列是 RAG 服务的资源保护边界，用来削峰并控制解析、embedding 和向量库写入并发。进程内队列不做持久化，backend 重启后未完成的任务会丢失；原始文件仍在对象存储，可以重新触发索引。每个 `app_id` 对应独立 collection，外部系统只要按 UUID 规约生成 `file_id`，就不会和其他 app 的同名文件发生跨系统冲突。
 
@@ -218,7 +218,7 @@ flowchart TB
   Rerank --> Format
 ```
 
-查询只查当前调用身份对应 app 的 chunks collection。`file_ids` 作为 metadata filter 缩小候选范围；dense / sparse / hybrid 在同一个范围内检索。hybrid 统一为 dense 和 sparse 两路并发后在应用层做 RRF 融合；开启 rerank 时，再对候选结果做二次排序。
+查询只查当前调用身份对应 app 的 chunks collection。`file_ids` 作为 metadata filter 缩小候选范围；dense / sparse / hybrid 在同一个范围内检索。hybrid 统一为 dense 和 sparse 两路并发后在应用层做 RRF 融合；开启 rerank 时，再对候选结果做二次排序。`sparse` 由 profile 选择具体实现，例如 BGE-M3 sparse vector 或 OpenSearch BM25。
 
 搜索入口返回业务搜索结果和本次搜索总耗时。搜索完成后，后端把链路信息写入内存 ring buffer，供诊断入口读取最近搜索请求的总耗时、结果数和阶段耗时。
 
@@ -279,36 +279,36 @@ def start(self):
 
 `load_models()` 只负责模型、分词器和 OCR runtime；`init_connections()` 负责向量库连接、collection 检查和搜索 pipeline 运行绑定。backend 进程调用 `Application.start()` 按顺序执行两个阶段；索引消费器复用同一份 `Application`，不单独加载模型。
 
-### 2.8 API 分层：对内与对外
+### 2.8 API 分层
 
-服务入口按调用方拆成两套路径前缀：
+RAG HTTP 入口统一使用 `/api/open/rag/*` 路径前缀，LLM 入口统一使用 `/api/open/llm/*` 路径前缀。nginx 只负责按前缀转发，不改写路径；直连服务和经过 nginx 的 API 形态一致。
 
-- 对内 `/api/*`：User JWT 登录态，管理台前端使用，契约可随前端发版自由演进。
-- 对外 `/api/open/*`：AK/SK 请求签名认证，供上游系统集成，契约保持稳定。
+RAG 路由按调用方使用不同认证：
 
-每个 open 端点都是对应内部端点的薄别名：路由函数只替换认证依赖（`require_jwt` vs `require_aksk`），业务逻辑收敛在同一个实现函数里，两边行为一致。
+- 管理台前端使用 User JWT。
+- 上游系统使用 AK/SK 请求签名。
 
-对外面收敛：只暴露索引、搜索、删除共 4 个业务端点；管理面（apps、monitor、config、upload、presign、files 列表等）不对外。
+搜索、索引、异步索引、删除文件这几个业务端点同时接受 JWT 或 AK/SK，业务逻辑收敛在同一个实现函数里。管理面接口（apps、monitor、config、upload、presign、files 列表等）只接受 JWT。
 
-上游系统有自己的对象存储时，只需要调用 `POST /api/open/files/jobs`，自己生成 `presigned_url` 传入。管理台前端的本地上传链路是 upload → presign → files/jobs 三步；presign 让内部上传的文件也走统一的 `presigned_url` 契约。
+上游系统有自己的对象存储时，只需要调用 `POST /api/open/rag/files/jobs`，自己生成 `presigned_url` 传入。管理台前端的本地上传链路是 upload → presign → files/jobs 三步；presign 让内部上传的文件也走统一的 `presigned_url` 契约。
 
-对内与对外端点对照：
+主要端点：
 
-| 业务                                  | 对内（JWT，前端用）                                               | 对外（AKSK，上游用）               | 共用实现               |
-| ------------------------------------- | ----------------------------------------------------------------- | ---------------------------------- | ---------------------- |
-| 同步索引                              | `POST /api/files`                                                 | `POST /api/open/files`             | `_index_object()`      |
-| 异步索引                              | `POST /api/files/jobs`                                            | `POST /api/open/files/jobs`        | `_create_index_job()`  |
-| 搜索                                  | `POST /api/search`                                                | `POST /api/open/search`            | `_search()`            |
-| 删文件                                | `DELETE /api/files/{file_id}`                                     | `DELETE /api/open/files/{file_id}` | `_delete_index_file()` |
-| 上传                                  | `POST /api/upload`                                                | ——（内部专用）                     |                        |
-| 生成下载签名                          | `POST /api/presign`                                               | ——（内部专用）                     |                        |
-| 文件列表                              | `GET /api/files`                                                  | ——（内部专用）                     |                        |
-| 向量数据 / 应用 / 监控等管理面       | `POST /api/chunks`、`/api/apps`、`/api/monitor` 等                | ——（不对外）                       |                        |
+| 业务                            | 路径                                      | 认证           | 实现                  |
+| ------------------------------- | ----------------------------------------- | -------------- | --------------------- |
+| 同步索引                        | `POST /api/open/rag/files`                | JWT 或 AK/SK   | `_index_object()`     |
+| 异步索引                        | `POST /api/open/rag/files/jobs`           | JWT 或 AK/SK   | `_create_index_job()` |
+| 搜索                            | `POST /api/open/rag/search`               | JWT 或 AK/SK   | `_search()`           |
+| 删文件                          | `DELETE /api/open/rag/files/{file_id}`    | JWT 或 AK/SK   | `delete_file()`       |
+| 上传                            | `POST /api/open/rag/upload`               | JWT            |                        |
+| 生成下载签名                    | `POST /api/open/rag/presign`              | JWT            |                        |
+| 文件列表                        | `GET /api/open/rag/files`                 | JWT            |                        |
+| 向量数据 / 应用 / 监控等管理面 | `/api/open/rag/chunks`、`/api/open/rag/apps`、`/api/open/rag/monitor` 等 | JWT | |
 
 两处不对称需要说明：
 
-- 删除语义：内部删文件在共用 `_delete_index_file()` 之外还会删除 MinIO/S3 中 `uploads/{app_id}/{file_id}/` 前缀下的原始对象；open 删除只清理当前 app 向量库里的 chunks（见 2.6）。
-- 异步索引请求模型：内部 `/api/files/jobs` 接收 `AdminIndexJobRequest`（继承 `ObjectIndexRequest`，`file_id` 必填，用于回传上传接口生成的文件 ID）；open 侧接收 `ObjectIndexRequest`，`file_id` 可选。两者共用 `_create_index_job()`。
+- 删除语义：JWT 管理台删除会在删索引之外删除 MinIO/S3 中 `uploads/{app_id}/{file_id}/` 前缀下的原始对象；AK/SK 删除只清理当前 app 向量库里的 chunks（见 2.6）。
+- 搜索响应：JWT 管理台响应保留 metadata，AK/SK 响应只返回上游需要的精简字段。
 
 ---
 
@@ -349,7 +349,7 @@ search:
   top_k: <max_results>
   fetch_k: <rerank_candidates>
   dense_weight: <hybrid_dense_weight>
-  sparse_weight: <hybrid_sparse_weight>
+  sparse_weight: <hybrid_second_backend_weight>
   rrf_k: <rrf_constant>
 
 logging:
@@ -539,7 +539,7 @@ class Store:
     def sparse_uses_store(self, sparse: object | None = None) -> bool: ...
 ```
 
-`SearchPipeline` 只依赖 `Store` 接口，不直接依赖 `store.qdrant`、`store.chroma`、全局 store 模块函数或向量库 SDK。各 Store 实现内部使用原生 SDK 完成 collection、索引、写入、删除、列表和查询。`bm25` sparse 使用 `get_search_documents()` 取文本，再交给 `sparse/bm25.py` 排序；`bge_m3` sparse 只用于支持稀疏向量的 store，由对应向量库执行 sparse 查询。
+`SearchPipeline` 只依赖 `Store` 接口，不直接依赖 `store.qdrant`、`store.chroma`、全局 store 模块函数或向量库 SDK。各 Store 实现内部使用原生 SDK 完成 collection、索引、写入、删除、列表和查询。`simple_bm25` sparse 使用 `get_search_documents()` 取文本，再交给 `sparse/simple_bm25.py` 排序；`bge_m3` sparse 只用于支持稀疏向量的 store，由对应向量库执行 sparse 查询；`opensearch_bm25` sparse 由 OpenSearch 执行 BM25 检索。
 
 写入规则：
 
@@ -558,10 +558,10 @@ class Store:
 ```text
 应用内 Sparse Retriever
   -> 先从 store 取候选文本
-  -> 应用内 `bm25` sparse 使用 `tokenizer=jieba` 打分
+  -> `simple_bm25` sparse 使用 `tokenizer=jieba` 打分
 
-Vector Sparse Retriever
-  -> 查询向量库 sparse vector / 内置 sparse 能力
+索引型 Sparse Retriever
+  -> 查询向量库 sparse vector / 向量库内置 sparse / OpenSearch BM25 能力
 ```
 
 这两种都属于检索节点，都会放在 SearchPipeline 的 Retriever 位置；区别只是 sparse 分数在哪里计算。
@@ -578,12 +578,18 @@ benchmark 报告中的 `sparse_impl` 使用 `app` 和 `vector` 区分这两条�
 }
 ```
 
-`bm25` sparse：
+`simple_bm25` sparse：
 
 ```yaml
 sparse:
-  type: <sparse_type>
-  tokenizer: <tokenizer>
+  simple_bm25:
+    enable: true
+    tokenizer: <tokenizer>
+    import_path: sparse.simple_bm25.SimpleBM25Sparse
+  bge_m3:
+    enable: false
+  opensearch_bm25:
+    enable: false
 ```
 
 流程：
@@ -603,7 +609,7 @@ sparse:
 4. 不返回零命中文本
 ```
 
-应用内 `bm25` sparse 直接使用 `rank_bm25` 计算分数，不使用 LangChain `BM25Retriever.invoke()`。原因是 `BM25Retriever.invoke()` 只返回 `Document` 列表，不直接返回 BM25 分数；搜索流程需要分数做过滤、排序和 hybrid 融合。
+应用内 `simple_bm25` sparse 直接使用 `rank_bm25` 计算分数，不使用 LangChain `BM25Retriever.invoke()`。原因是 `BM25Retriever.invoke()` 只返回 `Document` 列表，不直接返回 BM25 分数；搜索流程需要分数做过滤、排序和 hybrid 融合。
 
 向量库检索和应用内 BM25 的 score 来源不同：
 
@@ -616,7 +622,7 @@ vector sparse
   -> 使用向量库 sparse 查询
   -> score 来自向量库
 
-应用内 bm25 sparse
+应用内 simple_bm25 sparse
   -> 使用 rank_bm25 在应用进程里计算
   -> score 来自 BM25 关键词打分
 ```
@@ -830,7 +836,7 @@ SearchPlan(
     rerank=False,
     fetch_k=rerank_candidates,
     dense_weight=hybrid_dense_weight,
-    sparse_weight=hybrid_sparse_weight,
+    sparse_weight=hybrid_second_backend_weight,
     rrf_k=rrf_constant,
     file_ids=["<file_id>"],
 )
@@ -846,7 +852,7 @@ SearchPlan(
 | `rerank`        | 是否使用 rerank                             |
 | `fetch_k`       | rerank 候选池大小                           |
 | `dense_weight`  | 本次 hybrid 查询的 dense 权重               |
-| `sparse_weight` | 本次 hybrid 查询的 sparse 权重              |
+| `sparse_weight` | 本次 hybrid 查询第二路召回权重              |
 | `rrf_k`         | 本次 hybrid 查询的 RRF 参数                 |
 | `file_ids`      | 查询文件范围；不传时搜索当前 app collection |
 
@@ -894,8 +900,8 @@ dense 和 sparse 检索节点使用 LangChain `BaseRetriever`。这些节点会�
 
 ```text
 dense  -> Dense Retriever 调用 Store.search_dense()，由具体 store 实现 dense 查询
-sparse -> 应用内 Sparse Retriever 执行 BM25，或 Vector Sparse Retriever 调用向量库 sparse 查询
-hybrid -> dense + sparse 并发后应用层 RRF 融合；sparse 可以是应用内 BM25，也可以是向量库 sparse
+sparse -> 应用内 Sparse Retriever 执行 simple_bm25，或索引型 Sparse Retriever 调用向量库 sparse / OpenSearch BM25 查询
+hybrid -> dense + sparse 并发后应用层 RRF 融合；sparse 可以是 simple_bm25、bge_m3 或 opensearch_bm25
 ```
 
 并发规则：
@@ -1021,9 +1027,12 @@ RAG backend 支持多节点部署。Nginx 只承担统一入口和负载均衡�
 ```mermaid
 flowchart LR
   Browser["浏览器 / 上游系统"] --> Nginx["Nginx 统一入口"]
-  Nginx -->|"/api/*"| Backends["rag_backends upstream"]
-  Backends --> B1["backend node-233"]
-  Backends --> B2["backend node-90"]
+  Nginx -->|"/api/open/rag/*"| RagBackends["rag upstream"]
+  Nginx -->|"/api/open/llm/*"| LlmBackends["llm upstream"]
+  RagBackends --> B1["rag node-233"]
+  RagBackends --> B2["rag node-90"]
+  LlmBackends --> L1["llm node-233"]
+  LlmBackends --> L2["llm node-90"]
   B1 -->|Loki HTTP API| Loki["Loki"]
   B2 -->|Loki HTTP API| Loki
   P1["Promtail node-233"] --> Loki
@@ -1034,10 +1043,11 @@ flowchart LR
 
 统一入口：
 
-- `/api/*`：转发到 `rag_backends`，由 Nginx 负载均衡。
-- `/`：转发到前端。
+- `/api/open/rag/*`：转发到 `rag` upstream，由 Nginx 负载均衡。
+- `/api/open/llm/*`：转发到 `llm` upstream，由 Nginx 负载均衡。
+- `/`：读取 nginx 容器内的前端静态文件。
 
-节点端口固定为 backend 宿主端口 `6000`。当前静态 upstream 包含：
+RAG 节点端口固定为宿主端口 `6000`。当前静态 upstream 包含：
 
 - `19.16.1.233:6000`
 - `19.16.1.90:6000`
@@ -1053,13 +1063,13 @@ flowchart LR
 
 单节点接口保留：
 
-- `GET /api/monitor`
-- `GET /api/config`
+- `GET /api/open/rag/monitor`
+- `GET /api/open/rag/config`
 
 聚合接口由任意一个 backend 节点执行 fan-out：
 
-- `GET /api/nodes/monitor`
-- `GET /api/nodes/config`
+- `GET /api/open/rag/nodes/monitor`
+- `GET /api/open/rag/nodes/config`
 
 聚合接口并发请求 `RAG_PEERS` 中所有节点，透传调用方的 User JWT。单个节点超时、连接失败或返回非 200 时，该节点标记为 `unreachable`，不会拖垮整体响应。
 
@@ -1086,7 +1096,7 @@ flowchart LR
 - `ok`：节点响应正常，`data` 是对应单节点接口返回。
 - `unreachable`：节点不可达，`data=null`，`error` 保存原因。
 
-`/api/monitor` 和 `/api/config` 顶层都包含 `node_id`，作为聚合展示和配置漂移判断的基础字段。
+`/api/open/rag/monitor` 和 `/api/open/rag/config` 顶层都包含 `node_id`，作为聚合展示和配置漂移判断的基础字段。
 
 ## 前端监控
 
@@ -1095,7 +1105,7 @@ flowchart LR
 监控页读取：
 
 ```text
-GET /api/nodes/monitor
+GET /api/open/rag/nodes/monitor
 ```
 
 页面按节点并列展示：
@@ -1110,7 +1120,7 @@ GET /api/nodes/monitor
 配置页读取：
 
 ```text
-GET /api/nodes/config
+GET /api/open/rag/nodes/config
 ```
 
 页面按节点并列展示当前配置，并以第一个正常节点为基准做轻量配置漂移判断。漂移判断忽略 `node_id`，其余配置不同则标记为配置不一致。
@@ -1132,9 +1142,9 @@ Loki 日志保留 30 天。Docker 本地日志只作为 Promtail 采集来源和
 日志页和链路页通过后端按时间范围查询 Loki：
 
 ```text
-GET /api/logs
-GET /api/logs/labels/container
-GET /api/traces
+GET /api/open/rag/logs
+GET /api/open/rag/logs/labels/container
+GET /api/open/rag/traces
 ```
 
 日志页支持按节点、容器和时间范围过滤。链路页查询 `rag.trace` 的 `search_trace` 结构化日志，按当前 app 和时间范围过滤并展示各阶段耗时。日志和链路列表使用 Loki 时间游标继续加载：首次查询当前时间范围内最新一批记录，继续加载时把上一批最早记录前一纳秒作为下一次查询的 `end`。
@@ -1145,7 +1155,7 @@ GET /api/traces
 
 管理台日志和链路请求进入后端，后端完成 User JWT 校验后查询 Loki。
 
-上游业务接口仍使用 AK/SK 签名，路径保持 `/api/open/*`。多节点监控和 Loki 日志是管理台能力，不改变上游业务 API 契约。
+上游业务接口仍使用 AK/SK 签名，路径保持 `/api/open/rag/*`。多节点监控和 Loki 日志是管理台能力，不改变上游业务 API 契约。
 
 ## 配置与数据目录
 
