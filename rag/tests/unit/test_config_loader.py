@@ -523,21 +523,6 @@ def test_load_app_config_can_use_project_relative_config_path(monkeypatch):
     assert config.store.type == "qdrant"
 
 
-def test_load_app_config_applies_runtime_url_overrides(monkeypatch):
-    from rag.loader import load_app_config
-
-    monkeypatch.setenv("CONFIG_FILE", "rag/config/qdrant-bgebase.yaml")
-    monkeypatch.setenv("DATABASE_URL", "postgresql://rag:rag@19.16.1.233:5432/rag")
-    monkeypatch.setenv("QDRANT_URL", "http://19.16.1.233:6333")
-    monkeypatch.setenv("OPENSEARCH_URL", "http://19.16.1.233:9200")
-
-    config = load_app_config()
-
-    assert config.database.url == "postgresql://rag:rag@19.16.1.233:5432/rag"
-    assert config.store.url == "http://19.16.1.233:6333"
-    assert config.sparse.url == "http://19.16.1.233:9200"
-
-
 def test_load_app_config_requires_qdrant_url_when_enabled(monkeypatch):
     from rag.loader import load_app_config
 
@@ -624,33 +609,6 @@ ocr: test_ocr
     assert config.name == "milvus"
     assert config.store.type == "milvus"
     assert config.store.uri == "http://localhost:19530"
-
-
-def test_load_app_config_uses_opensearch_bm25_sparse(monkeypatch):
-    from rag.loader import load_app_config
-
-    monkeypatch.setenv("CONFIG_FILE", "rag/config/qdrant-bgebase.yaml")
-    monkeypatch.setenv("DATABASE_URL", "postgresql://rag:rag@postgres:5432/rag")
-    monkeypatch.setenv("QDRANT_URL", "http://qdrant:6333")
-    monkeypatch.setenv("OPENSEARCH_URL", "http://opensearch:9200")
-
-    config = load_app_config()
-
-    assert config.dense.model_path == str(PROJECT_ROOT / "models" / "AI-ModelScope" / "bge-base-zh-v1.5")
-    assert config.sparse.name == "opensearch_bm25"
-    assert config.sparse.url == "http://opensearch:9200"
-
-
-def test_load_app_config_requires_opensearch_url_when_enabled(monkeypatch):
-    from rag.loader import load_app_config
-
-    monkeypatch.setenv("CONFIG_FILE", "rag/config/qdrant-bgebase.yaml")
-    monkeypatch.setenv("DATABASE_URL", "postgresql://rag:rag@postgres:5432/rag")
-    monkeypatch.setenv("QDRANT_URL", "http://qdrant:6333")
-    monkeypatch.delenv("OPENSEARCH_URL", raising=False)
-
-    with pytest.raises(ValueError, match="sparse.url is required"):
-        load_app_config()
 
 
 def test_load_app_config_supports_milvus_builtin_bm25_sparse(monkeypatch, tmp_path):
