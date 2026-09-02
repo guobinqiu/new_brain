@@ -4,7 +4,7 @@ from langchain_community.document_loaders import TextLoader
 from rag.ocr.base import OCR
 from rag.parser.common.base import BlockParser
 from rag.parser.common.schema import Block, TextBlock
-from rag.parser.common.text_splitter import clean_cjk_spaces, split_text
+from rag.parser.common.text_splitter import clean_cjk_spaces, split_paragraphs, split_text
 
 LOADERS = {
     ".txt": TextLoader,
@@ -23,8 +23,7 @@ class TextBlockParser(BlockParser):
         text = clean_cjk_spaces(self._load_text(filepath, ext, filename))
         if not text.strip():
             raise ValueError(f"Empty file: {filename}")
-        chunks = split_text(text, self.parser_config.text.chunk_size, self.parser_config.text.chunk_overlap)
-        return [TextBlock(text) for text in chunks]
+        return [TextBlock(paragraph) for paragraph in split_paragraphs(text)]
 
     def _load_text(self, filepath: str, ext: str, filename: str) -> str:
         loader_cls = LOADERS[ext]
@@ -49,4 +48,3 @@ def chunks_to_documents(chunks: list[str], filename: str) -> list[dict]:
             "id": str(uuid.uuid4()),
         })
     return results
-

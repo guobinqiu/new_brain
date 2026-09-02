@@ -19,13 +19,10 @@ def blocks_to_chunks(blocks: list[Block], parser_config: ChunkParserConfig) -> l
 def blocks_to_documents(blocks: list[Block], filename: str, parser_config: ChunkParserConfig) -> list[dict]:
     blocks = normalize_blocks(blocks)
     chunks = []
-    text_blocks = []
     for index, block in enumerate(blocks):
         if isinstance(block, TextBlock):
-            text_blocks.append(block.text)
+            chunks.extend(_text_block_to_documents(block.text, filename, parser_config))
             continue
-        chunks.extend(_text_blocks_to_documents(text_blocks, filename, parser_config))
-        text_blocks = []
         block.header = _table_header(blocks, index, parser_config)
         block.footer = _table_footer(blocks, index, parser_config)
         chunks.append(_document(
@@ -33,16 +30,17 @@ def blocks_to_documents(blocks: list[Block], filename: str, parser_config: Chunk
             filename,
             {},
         ))
-    chunks.extend(_text_blocks_to_documents(text_blocks, filename, parser_config))
     for chunk_index, chunk in enumerate(chunks):
         chunk["metadata"]["chunk_index"] = chunk_index
     return chunks
 
 
-def _text_blocks_to_documents(blocks: list[str], filename: str, parser_config: ChunkParserConfig) -> list[dict]:
-    text = "\n".join(block.strip() for block in blocks if block.strip())
+def _text_block_to_documents(text: str, filename: str, parser_config: ChunkParserConfig) -> list[dict]:
+    text = text.strip()
     if not text:
         return []
+    if len(text) <= parser_config.text.chunk_size:
+        return [_document(text, filename, {})]
     return [
         _document(chunk.strip(), filename, {})
         for chunk in split_text(text, parser_config.text.chunk_size, parser_config.text.chunk_overlap)

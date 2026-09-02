@@ -486,8 +486,9 @@ class TestParserService:
 
         chunks = _parse_file(str(text_file), parser=_unstructured_parser())
 
-        assert len(chunks) == 1
-        assert chunks[0]["content"] == "第一段内容\n第二段内容"
+        assert len(chunks) == 2
+        assert chunks[0]["content"] == "第一段内容"
+        assert chunks[1]["content"] == "第二段内容"
         assert chunks[0]["metadata"]["filename"] == "note.txt"
 
     def test_parse_pdf_embedded_image_with_unstructured_parser(self, tmp_path, monkeypatch):
@@ -967,7 +968,7 @@ class TestParserService:
         assert chunks[1]["content"] == "2. 查询类型对比\n\n| 向量库 | 稠密向量搜索 |\n| --- | --- |\n| Chroma | V |\n\n说明：V 表示支持，X 表示不支持"
         assert chunks[2]["content"] == "说明：V 表示支持，X 表示不支持"
 
-    def test_table_parser_merges_adjacent_text_blocks_before_chunking(self, tmp_path, monkeypatch):
+    def test_table_parser_keeps_adjacent_text_blocks_separate_before_chunking(self, tmp_path, monkeypatch):
         import json
         import rag.parser.mineru
         from rag.schema import ParserConfig
@@ -1005,8 +1006,9 @@ class TestParserService:
             parser=_mineru_parser(chunk_size=100, chunk_overlap=10),
         )
 
-        assert chunks[0]["content"] == "第一段正文\n第二段正文"
-        assert chunks[1]["content"] == "第一段正文\n第二段正文\n\n| 向量库 | 规模 |\n| --- | --- |\n| Qdrant | 中 |"
+        assert chunks[0]["content"] == "第一段正文"
+        assert chunks[1]["content"] == "第二段正文"
+        assert chunks[2]["content"] == "第二段正文\n\n| 向量库 | 规模 |\n| --- | --- |\n| Qdrant | 中 |"
 
     def test_table_parser_does_not_add_neighbor_table_context_to_table(self, tmp_path, monkeypatch):
         import json

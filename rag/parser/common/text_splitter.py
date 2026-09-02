@@ -17,3 +17,7 @@ def split_text(text: str, chunk_size: int, overlap: int) -> list[str]:
         keep_separator=False,
     )
     return splitter.split_text(text)
+
+
+def split_paragraphs(text: str) -> list[str]:
+    return [paragraph.strip() for paragraph in re.split(r"\n\s*\n+", text) if paragraph.strip()]
