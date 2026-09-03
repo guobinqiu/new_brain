@@ -27,7 +27,14 @@ class BGEM3LexicalEncoder:
         device.release_memory()
 
     def embed_query(self, text: str) -> dict[int, float]:
-        return self.embed_documents([text])[0]
+        self._require_ready()
+        output = self._model.encode(
+            [text],
+            return_dense=False,
+            return_sparse=True,
+            return_colbert_vecs=False,
+        )
+        return _normalize_lexical_weights(output["lexical_weights"][0])
 
     def embed_documents(self, texts: list[str]) -> list[dict[int, float]]:
         self._require_ready()
