@@ -53,7 +53,8 @@ class BGEM3LexicalEncoder:
     def _load_model(self):
         from FlagEmbedding import BGEM3FlagModel
 
-        return BGEM3FlagModel(self.model_name, use_fp16=device.auto_device() == "cuda")
+        selected_device = device.auto_device()
+        return BGEM3FlagModel(self.model_name, use_fp16=selected_device == "cuda", devices=selected_device)
 
     def _require_ready(self) -> None:
         if not self.ready or self._model is None:
