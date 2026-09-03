@@ -372,6 +372,42 @@ ocr: test_ocr
     ]
 
 
+def test_load_app_config_parses_qdrant_quantization(monkeypatch, tmp_path):
+    from rag.loader import load_app_config
+
+    path = tmp_path / "qdrant_quantization.yaml"
+    path.write_text(
+        """
+database:
+  type: postgres
+  url: postgresql://rag:rag@localhost:5432/rag
+dense: test_dense
+sparse: null
+store:
+  type: qdrant
+  url: http://localhost:6333
+  quantization:
+    enable: true
+    type: int8
+    quantile: 0.99
+    always_ram: true
+search:
+  default_mode: dense
+rerank: null
+ocr: test_ocr
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CONFIG_FILE", str(path))
+
+    config = load_app_config()
+
+    assert config.store.quantization.enable is True
+    assert config.store.quantization.type == "int8"
+    assert config.store.quantization.quantile == 0.99
+    assert config.store.quantization.always_ram is True
+
+
 def test_load_app_config_supports_single_vector_sparse(monkeypatch, tmp_path):
     from rag.loader import load_app_config
 

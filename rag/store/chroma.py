@@ -21,6 +21,8 @@ SPARSE_VECTOR_KEY = "sparse_embedding"
 
 
 class ChromaStore:
+    backend_name = "chroma"
+
     def __init__(
         self,
         dense: Dense | None = None,

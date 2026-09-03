@@ -223,43 +223,54 @@ def test_qdrant_client_uses_configured_timeout(monkeypatch):
     assert created[0]["timeout"] == 30
 
 
-def test_qdrant_list_chunks_uses_scroll_cursor():
+def test_qdrant_list_chunks_uses_stable_three_key_cursor_across_files():
     from rag.scope import app_collection
 
     calls = []
 
     class FakeRecord:
-        def __init__(self, point_id, chunk_index):
+        def __init__(self, point_id, file_id, chunk_index):
             self.id = point_id
             self.payload = {
-                "content": f"chunk text {chunk_index}",
-                "metadata": {"file_id": "file-a", "filename": "a.txt", "chunk_index": chunk_index},
+                "content": f"{file_id} chunk text {chunk_index}",
+                "metadata": {"file_id": file_id, "filename": f"{file_id}.txt", "chunk_index": chunk_index},
             }
 
     class FakeClient:
         def scroll(self, **kwargs):
             calls.append(kwargs)
-            if len(calls) == 1:
-                return [FakeRecord("point-1", 0), FakeRecord("point-2", 1)], None
-            return [FakeRecord("point-2", 1)], None
+            if kwargs["offset"] is None:
+                return [
+                    FakeRecord("a-0", "file-a", 0),
+                    FakeRecord("b-0", "file-b", 0),
+                    FakeRecord("c-0", "file-c", 0),
+                    FakeRecord("a-1", "file-a", 1),
+                    FakeRecord("b-1", "file-b", 1),
+                ], "next"
+            return [
+                FakeRecord("c-1", "file-c", 1),
+                FakeRecord("a-2", "file-a", 2),
+                FakeRecord("b-2", "file-b", 2),
+                FakeRecord("c-2", "file-c", 2),
+            ], None
 
     store = _started_store(FakeClient())
 
     with app_collection("imsdom"):
-        first_page = store.list_chunks(file_ids=["file-a"], limit=1)
-        page = store.list_chunks(file_ids=["file-a"], limit=2, cursor=first_page["next_cursor"])
+        first_page = store.list_chunks(limit=4)
+        page = store.list_chunks(limit=4, cursor=first_page["next_cursor"])
+        last_page = store.list_chunks(limit=4, cursor=page["next_cursor"])
 
-    assert page["documents"][0]["id"] == "point-2"
-    assert page["next_cursor"] is None
-    assert page["has_more"] is False
+    assert [document["id"] for document in first_page["documents"]] == ["a-0", "a-1", "a-2", "b-0"]
+    assert [document["id"] for document in page["documents"]] == ["b-1", "b-2", "c-0", "c-1"]
+    assert [document["id"] for document in last_page["documents"]] == ["c-2"]
+    assert last_page["next_cursor"] is None
+    assert last_page["has_more"] is False
     assert calls[0]["collection_name"] == "imsdom_chunks"
-    assert calls[0]["limit"] == 2
-    assert calls[0]["order_by"] == "metadata.chunk_index"
+    assert calls[0]["limit"] == 1000
+    assert "order_by" not in calls[0]
     assert calls[0]["offset"] is None
-    assert calls[1]["limit"] == 3
-    assert calls[1]["order_by"] == "metadata.chunk_index"
-    assert calls[1]["offset"] is None
-    assert calls[1]["scroll_filter"].must[1].range.gt == 0
+    assert calls[1]["offset"] == "next"
     assert calls[0]["with_vectors"] is False
 
 
@@ -345,3 +356,42 @@ def test_store_start_creates_sparse_vector_config_when_sparse_uses_store():
     store.ensure_collections("imsdom_chunks")
 
     assert any(call[0] == "create" and "sparse" in call[2] for call in calls)
+
+
+def test_qdrant_create_collection_can_enable_int8_quantization():
+    from rag.schema import QdrantQuantizationConfig
+
+    calls = []
+
+    class FakeClient:
+        def collection_exists(self, collection_name):
+            return False
+
+        def create_collection(self, **kwargs):
+            calls.append(kwargs)
+
+        def get_collection(self, collection_name):
+            return object()
+
+        def count(self, **kwargs):
+            return object()
+
+        def create_payload_index(self, **kwargs):
+            pass
+
+    store = _started_store(FakeClient())
+    store.quantization = QdrantQuantizationConfig(enable=True, type="int8", quantile=0.99, always_ram=True)
+    store.ensure_collections("imsdom_chunks")
+
+    quantization = calls[0]["quantization_config"]
+    assert quantization.scalar.type == "int8"
+    assert quantization.scalar.quantile == 0.99
+    assert quantization.scalar.always_ram is True
+
+
+def test_decode_chunk_cursor_returns_sort_key_tuple():
+    from rag.store.qdrant import _decode_chunk_cursor, _encode_chunk_cursor
+
+    cursor = _encode_chunk_cursor({"id": "chunk-a", "metadata": {"file_id": "file-a", "chunk_index": 3}})
+
+    assert _decode_chunk_cursor(cursor) == ("file-a", 3, "chunk-a")

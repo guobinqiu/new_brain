@@ -6,7 +6,6 @@ import json
 import logging
 import threading
 import time
-from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from typing import Literal
 
@@ -15,36 +14,41 @@ from qdrant_client.http import models
 from qdrant_client.http.exceptions import UnexpectedResponse
 
 from rag.config import QDRANT_URL
+from rag.schema import QdrantQuantizationConfig
 from rag.dense.base import Dense
 from rag.dense.huggingface import HuggingFaceDense
 from rag.scope import app_collection, collection_name_for_app, current_app_id, current_collection
+from rag.search.rank import weighted_reciprocal_rank
 from rag.sparse.base import Sparse
 from rag.store.startup import run_with_startup_retry
 
 
 SearchMode = Literal["dense", "sparse", "hybrid"]
-
-_document_locks: defaultdict[str, threading.Lock] = defaultdict(threading.Lock)
-_document_locks_guard = threading.Lock()
 logger = logging.getLogger("rag.indexing")
 
 
 class QdrantStore:
+    backend_name = "qdrant"
+
     def __init__(
         self,
         dense: Dense | None = None,
         sparse: Sparse | None = None,
         url: str | None = None,
         timeout: int | None = None,
+        quantization: QdrantQuantizationConfig | None = None,
         parallel_sparse_embedding: bool = False,
     ):
         self.dense = dense or HuggingFaceDense()
         self.sparse = sparse
         self.url = url or QDRANT_URL
         self.timeout = timeout
+        self.quantization = quantization
         self.parallel_sparse_embedding = parallel_sparse_embedding
         self.client: QdrantClient | None = None
         self.dense_vector_size: int | None = None
+        self._document_locks: dict[str, threading.Lock] = {}
+        self._document_locks_guard = threading.Lock()
         self._ready = False
 
     def start(self) -> None:
@@ -80,7 +84,7 @@ class QdrantStore:
         if not file_id:
             raise ValueError("file_id is required")
         self._require_ready()
-        with _document_lock(file_id):
+        with self._document_lock(file_id):
             app_id = current_app_id()
             self.delete_file_chunks(file_id)
             points = self._to_points(chunks, file_id)
@@ -104,27 +108,36 @@ class QdrantStore:
         if limit <= 0:
             raise ValueError("limit must be greater than 0")
         limit = min(limit, 200)
-        scroll_filter = _combine_chunk_filters(self.build_file_filter(file_ids), _chunk_cursor_filter(cursor))
-        try:
-            rows, _ = self._client().scroll(
-                collection_name=self._chunks_collection(),
-                scroll_filter=scroll_filter,
-                limit=limit + 1,
-                order_by="metadata.chunk_index",
-                offset=None,
-                with_payload=True,
-                with_vectors=False,
-            )
-        except UnexpectedResponse as exc:
-            if _is_collection_not_found(exc):
-                return {"documents": [], "next_cursor": None, "has_more": False}
-            raise
-        page_rows = rows[:limit]
+        documents = sorted(self.get_search_documents(self.build_file_filter(file_ids)), key=_chunk_sort_key)
+        start = _chunk_cursor_position(documents, cursor)
+        page_rows = documents[start:start + limit]
         return {
-            "documents": [_record_to_document(row) for row in page_rows],
-            "next_cursor": _encode_chunk_cursor(page_rows[-1]) if len(rows) > limit and page_rows else None,
-            "has_more": len(rows) > limit,
+            "documents": page_rows,
+            "next_cursor": _encode_chunk_cursor(page_rows[-1]) if start + limit < len(documents) and page_rows else None,
+            "has_more": start + limit < len(documents),
         }
+
+    def get_search_documents(self, metadata_filter: models.Filter | None) -> list[dict]:
+        documents = []
+        offset = None
+        while True:
+            try:
+                rows, offset = self._client().scroll(
+                    collection_name=self._chunks_collection(),
+                    scroll_filter=metadata_filter,
+                    limit=1000,
+                    offset=offset,
+                    with_payload=True,
+                    with_vectors=False,
+                )
+            except UnexpectedResponse as exc:
+                if _is_collection_not_found(exc):
+                    return []
+                raise
+            documents.extend(_record_to_document(row) for row in rows)
+            if offset is None:
+                break
+        return documents
 
     def get_dense_vector(self, chunk_id: str) -> list[float] | None:
         vectors = self._get_point_vectors(chunk_id)
@@ -172,28 +185,6 @@ class QdrantStore:
     def app_context(self, app_id: str):
         return app_collection(app_id)
 
-    def get_search_documents(self, metadata_filter: models.Filter | None) -> list[dict]:
-        documents = []
-        offset = None
-        while True:
-            try:
-                rows, offset = self._client().scroll(
-                    collection_name=self._chunks_collection(),
-                    scroll_filter=metadata_filter,
-                    limit=1000,
-                    offset=offset,
-                    with_payload=True,
-                    with_vectors=False,
-                )
-            except UnexpectedResponse as exc:
-                if _is_collection_not_found(exc):
-                    return []
-                raise
-            documents.extend(_record_to_document(row) for row in rows)
-            if offset is None:
-                break
-        return documents
-
     def build_file_filter(self, file_ids: list[str] | None = None) -> models.Filter | None:
         if file_ids is None:
             return None
@@ -232,7 +223,7 @@ class QdrantStore:
     ) -> list[dict]:
         dense_items = self.search_dense(query, limit, metadata_filter)
         sparse_items = self.search_sparse(query, limit, metadata_filter)
-        return _weighted_reciprocal_rank(dense_items, sparse_items, limit, dense_weight, sparse_weight, rrf_k)
+        return weighted_reciprocal_rank(((dense_weight, dense_items), (sparse_weight, sparse_items)), limit, rrf_k)
 
     def sparse_uses_store(self, sparse: Sparse | None = None) -> bool:
         from rag.sparse.qdrant_bge_m3 import QdrantBGEM3Sparse
@@ -258,6 +249,7 @@ class QdrantStore:
                 "dense": models.VectorParams(size=dense_size, distance=models.Distance.COSINE),
             },
             sparse_vectors_config=sparse_vectors_config,
+            quantization_config=_quantization_config(self.quantization),
         )
         _wait_collection_ready(client, target_collection)
         self.ensure_payload_indexes(target_collection)
@@ -284,6 +276,14 @@ class QdrantStore:
 
     def _chunks_collection(self) -> str:
         return current_collection()
+
+    def _document_lock(self, file_id: str):
+        with self._document_locks_guard:
+            lock = self._document_locks.get(file_id)
+            if lock is None:
+                lock = threading.Lock()
+                self._document_locks[file_id] = lock
+            return lock
 
     def _ensure_sparse_vector(self, collection_name: str) -> None:
         if not self.sparse_uses_store():
@@ -420,18 +420,22 @@ def _qdrant_sparse_vector(vector) -> models.SparseVector:
     return models.SparseVector(indices=list(vector.indices), values=list(vector.values))
 
 
+def _quantization_config(config: QdrantQuantizationConfig | None):
+    if config is None or not config.enable:
+        return None
+    if config.type != "int8":
+        raise ValueError("qdrant quantization.type only supports int8")
+    scalar = models.ScalarQuantizationConfig(type=models.ScalarType.INT8)
+    if config.quantile is not None:
+        scalar.quantile = config.quantile
+    if config.always_ram is not None:
+        scalar.always_ram = config.always_ram
+    return models.ScalarQuantization(scalar=scalar)
+
+
 def _file_payload_filter(file_ids: list[str]) -> models.Filter:
     return models.Filter(must=[
         models.FieldCondition(key="metadata.file_id", match=models.MatchAny(any=file_ids)),
-    ])
-
-
-def _chunk_cursor_filter(cursor: str | None) -> models.Filter | None:
-    if not cursor:
-        return None
-    data = _decode_chunk_cursor(cursor)
-    return models.Filter(must=[
-        models.FieldCondition(key="metadata.chunk_index", range=models.Range(gt=int(data["chunk_index"]))),
     ])
 
 
@@ -445,19 +449,33 @@ def _combine_chunk_filters(*filters: models.Filter | None) -> models.Filter | No
     return models.Filter(must=must)
 
 
-def _encode_chunk_cursor(row) -> str:
-    payload = row.payload or {}
-    metadata = _metadata_from_payload(payload)
+def _chunk_sort_key(document: dict) -> tuple[str, int, str]:
+    metadata = document["metadata"]
+    return (str(metadata["file_id"]), int(metadata["chunk_index"]), str(document["id"]))
+
+
+def _chunk_cursor_position(documents: list[dict], cursor: str | None) -> int:
+    if not cursor:
+        return 0
+    cursor_key = _decode_chunk_cursor(cursor)
+    for index, document in enumerate(documents):
+        if _chunk_sort_key(document) > cursor_key:
+            return index
+    return len(documents)
+
+
+def _encode_chunk_cursor(document: dict) -> str:
+    metadata = document["metadata"]
     data = {
         "file_id": str(metadata["file_id"]),
         "chunk_index": int(metadata["chunk_index"]),
-        "chunk_id": str(row.id),
+        "chunk_id": str(document["id"]),
     }
     raw = json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
 
 
-def _decode_chunk_cursor(cursor: str) -> dict:
+def _decode_chunk_cursor(cursor: str) -> tuple[str, int, str]:
     padded = cursor + "=" * (-len(cursor) % 4)
     try:
         data = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8"))
@@ -465,7 +483,7 @@ def _decode_chunk_cursor(cursor: str) -> dict:
         raise ValueError("invalid cursor") from exc
     if not isinstance(data, dict) or not {"file_id", "chunk_index", "chunk_id"} <= data.keys():
         raise ValueError("invalid cursor")
-    return data
+    return (str(data["file_id"]), int(data["chunk_index"]), str(data["chunk_id"]))
 
 
 def _record_to_document(row) -> dict:
@@ -506,30 +524,6 @@ def _point_to_item(point) -> dict:
     }
 
 
-def _weighted_reciprocal_rank(
-    dense_items: list[dict],
-    sparse_items: list[dict],
-    limit: int,
-    dense_weight: float = 0.5,
-    sparse_weight: float = 0.5,
-    rrf_k: int = 60,
-) -> list[dict]:
-    by_id: dict[str, dict] = {}
-    scores: dict[str, float] = {}
-    for weight, items in ((dense_weight, dense_items), (sparse_weight, sparse_items)):
-        for rank, item in enumerate(items, start=1):
-            item_id = item["id"]
-            by_id.setdefault(item_id, item)
-            scores[item_id] = scores.get(item_id, 0.0) + weight / (rrf_k + rank)
-    fused = []
-    for item_id, score in scores.items():
-        item = dict(by_id[item_id])
-        item["_score"] = score
-        fused.append(item)
-    fused.sort(key=lambda item: item["_score"], reverse=True)
-    return fused[:limit]
-
-
 def _metadata_from_payload(payload: dict | None) -> dict:
     if not payload:
         return {}
@@ -537,11 +531,6 @@ def _metadata_from_payload(payload: dict | None) -> dict:
     if isinstance(metadata, dict):
         return metadata
     return payload
-
-
-def _document_lock(file_id: str):
-    with _document_locks_guard:
-        return _document_locks[file_id]
 
 
 def _point_id(chunk_id: str) -> str:

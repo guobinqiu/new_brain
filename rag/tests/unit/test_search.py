@@ -63,8 +63,6 @@ class FakeStore:
 
 
 class FakeTracedVectorStore(FakeStore):
-    type = "qdrant"
-
     def encode_dense_query(self, query):
         self.calls.append(("encode_dense_query", query))
         return [0.1, 0.2, 0.3]
@@ -75,8 +73,6 @@ class FakeTracedVectorStore(FakeStore):
 
 
 class FakeVectorSparseStore(FakeStore):
-    type = "qdrant"
-
     def sparse_uses_store(self, sparse=None):
         return True
 
@@ -109,6 +105,15 @@ def test_search_plan_rejects_empty_file_ids():
 
     with pytest.raises(ValueError, match="file_ids cannot be empty"):
         search_mod.SearchPlan("query", file_ids=[])
+
+
+def test_store_backend_uses_store_backend_name_when_config_is_absent():
+    from rag.search.pipeline import _store_backend
+
+    class CustomStore:
+        backend_name = "custom-store"
+
+    assert _store_backend(CustomStore()) == "custom-store"
 
 
 def test_search_plan_limits_file_ids_to_1000():
@@ -284,6 +289,7 @@ def test_executor_search_trace_stages_include_backend_and_retriever_fields():
         search_mod.SearchPlan("query", mode="hybrid", top_k=2, dense_weight=0.5, sparse_weight=0.5),
         sparse=ReadySparse(),
         store=FakeStore(),
+        store_backend="qdrant",
         search_trace=True,
     )
 
@@ -308,6 +314,7 @@ def test_dense_trace_splits_query_embedding_and_vector_query():
     executor = search_mod._SearchExecutor(
         search_mod.SearchPlan("query", mode="dense", top_k=2),
         store=store,
+        store_backend="qdrant",
         search_trace=True,
     )
 
@@ -333,6 +340,7 @@ def test_hybrid_executor_uses_vector_sparse_backend():
         search_mod.SearchPlan("query", mode="hybrid", top_k=3, dense_weight=0.5, sparse_weight=0.5),
         sparse=ReadySparse(),
         store=FakeVectorSparseStore(),
+        store_backend="qdrant",
         search_trace=True,
     )
 

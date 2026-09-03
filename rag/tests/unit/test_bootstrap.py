@@ -4,6 +4,21 @@ import pytest
 pytestmark = pytest.mark.unit
 
 
+def _qdrant_config():
+    from rag.schema import AdminAuthConfig, AppConfig, AuthConfig, DatabaseConfig, DenseConfig, SearchConfig, StoreConfig
+
+    return AppConfig(
+        dense=DenseConfig(name="bge_base", model_path="/models/dense"),
+        sparse=None,
+        store=StoreConfig(type="qdrant", url="http://localhost:6333", timeout=30),
+        database=DatabaseConfig(type="postgres", url="postgresql://rag:rag@localhost:5432/rag"),
+        search=SearchConfig(),
+        rerank=None,
+        ocr=None,
+        auth=AuthConfig(admin=AdminAuthConfig(username="admin", password="admin123")),
+    )
+
+
 def test_application_starts_public_components_in_order():
     import rag.bootstrap as bootstrap
 
@@ -79,7 +94,7 @@ def test_application_selects_production_components():
     from rag.search.pipeline import SearchPipeline
     from rag.store.qdrant import QdrantStore
 
-    application = bootstrap.Application()
+    application = bootstrap.Application(config=_qdrant_config())
 
     assert isinstance(application.dense, HuggingFaceDense)
     assert application.sparse is None
@@ -174,7 +189,7 @@ ocr: test_ocr
 def test_application_passes_store_config_to_qdrant_store():
     import rag.bootstrap as bootstrap
 
-    application = bootstrap.Application()
+    application = bootstrap.Application(config=_qdrant_config())
 
     assert application.store.url == application.config.store.url
     assert application.store.timeout == application.config.store.timeout

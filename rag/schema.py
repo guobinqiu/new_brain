@@ -30,12 +30,21 @@ SparseConfig = SparseBackendConfig
 
 
 @dataclass(frozen=True)
+class QdrantQuantizationConfig:
+    enable: bool = False
+    type: str = "int8"
+    quantile: float | None = None
+    always_ram: bool | None = None
+
+
+@dataclass(frozen=True)
 class StoreConfig:
     type: str
     url: str | None = None
     persist_dir: str | None = None
     uri: str | None = None
     timeout: int = 30
+    quantization: QdrantQuantizationConfig | None = None
     import_path: str | None = None
 
 
@@ -270,6 +279,7 @@ def parse_app_config(raw: dict[str, Any]) -> AppConfig:
             persist_dir=store.get("persist_dir"),
             uri=store.get("uri"),
             timeout=int(store.get("timeout", 30)),
+            quantization=_parse_qdrant_quantization(store.get("quantization")),
             import_path=store.get("import_path"),
         ),
         database=DatabaseConfig(
@@ -323,6 +333,17 @@ def parse_app_config(raw: dict[str, Any]) -> AppConfig:
             model_name=ocr.get("model_name"),
             import_path=ocr.get("import_path"),
         ) if ocr is not None else None,
+    )
+
+
+def _parse_qdrant_quantization(quantization) -> QdrantQuantizationConfig | None:
+    if not isinstance(quantization, dict):
+        return None
+    return QdrantQuantizationConfig(
+        enable=_bool(quantization.get("enable", False)),
+        type=str(quantization.get("type", "int8")),
+        quantile=float(quantization["quantile"]) if quantization.get("quantile") is not None else None,
+        always_ram=_bool(quantization["always_ram"]) if quantization.get("always_ram") is not None else None,
     )
 
 

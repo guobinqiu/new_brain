@@ -11,7 +11,7 @@ from langchain_core.retrievers import BaseRetriever
 from langchain_core.runnables import RunnableLambda, RunnableParallel
 from pydantic import ConfigDict
 from rag.rerank.base import Rerank
-from rag.search.runner import SearchRunner
+from rag.search.rank import weighted_reciprocal_rank
 from rag.search.trace import SearchTrace
 from rag.sparse.base import Sparse
 from rag.sparse.simple_bm25 import SimpleBM25Sparse
@@ -19,9 +19,10 @@ from rag.store.base import Store
 
 
 class SearchPipeline:
-    def __init__(self, store: Store, sparse: Sparse | None = None):
+    def __init__(self, store: Store, sparse: Sparse | None = None, store_backend: str | None = None):
         self.store = store
         self.sparse = sparse
+        self.store_backend = store_backend
         self.ready = False
 
     def start(self) -> None:
@@ -52,6 +53,7 @@ def _clamp_fetch_k(store: Store, fetch_k: int, file_ids: list[str] | None) -> in
 class _SearchRetriever(BaseRetriever):
     store: Any
     sparse: Any = None
+    store_backend: str | None = None
     mode: str
     query: str
     app_id: str | None = None
@@ -80,27 +82,27 @@ class _SearchRetriever(BaseRetriever):
 
     def _trace_fields(self) -> dict[str, str]:
         if self.mode == "dense":
-            return {"backend": _store_backend(self.store), "retriever": "dense"}
+            return {"backend": _store_backend(self.store, self.store_backend), "retriever": "dense"}
         if self.mode == "sparse":
             if self.sparse is not None and self.store.sparse_uses_store(self.sparse):
-                return {"backend": _store_backend(self.store), "retriever": "sparse_vector"}
+                return {"backend": _store_backend(self.store, self.store_backend), "retriever": "sparse_vector"}
             return {
                 "backend": getattr(self.sparse, "backend", "app"),
                 "retriever": getattr(self.sparse, "retriever", "bm25"),
             }
         if self.mode == "sparse_vector":
-            return {"backend": _store_backend(self.store), "retriever": "sparse_vector"}
+            return {"backend": _store_backend(self.store, self.store_backend), "retriever": "sparse_vector"}
         if self.mode == "hybrid":
-            return {"backend": _store_backend(self.store), "retriever": "hybrid"}
+            return {"backend": _store_backend(self.store, self.store_backend), "retriever": "hybrid"}
         return {"backend": "unknown", "retriever": self.mode}
 
     def _retrieve_items(self, context: dict[str, Any]) -> list[dict]:
         if self.mode == "dense":
-            return _retrieve_dense(self.store, context["metadata_filter"], self.query, context["retrieve_limit"], self.trace)
+            return _retrieve_dense(self.store, context["metadata_filter"], self.query, context["retrieve_limit"], self.trace, self.store_backend)
         if self.mode == "sparse":
-            return _retrieve_sparse(self.store, context["metadata_filter"], self.query, context["retrieve_limit"], self.sparse, self.app_id, self.file_ids, self.trace)
+            return _retrieve_sparse(self.store, context["metadata_filter"], self.query, context["retrieve_limit"], self.sparse, self.app_id, self.file_ids, self.trace, self.store_backend)
         if self.mode == "sparse_vector":
-            return _retrieve_sparse(self.store, context["metadata_filter"], self.query, context["retrieve_limit"], self.sparse, self.app_id, self.file_ids, self.trace)
+            return _retrieve_sparse(self.store, context["metadata_filter"], self.query, context["retrieve_limit"], self.sparse, self.app_id, self.file_ids, self.trace, self.store_backend)
         if self.mode == "hybrid":
             return _retrieve_store_hybrid(self.store, context["metadata_filter"], self.query, context["retrieve_limit"])
         raise ValueError(f"unsupported retriever mode: {self.mode}")
@@ -138,13 +140,14 @@ class _SearchExecutor:
         store: Store,
         rerank: Rerank | None = None,
         sparse: Sparse | None = None,
+        store_backend: str | None = None,
         search_trace: bool = False,
     ):
         self.plan = plan
         self.rerank = rerank
         self.sparse = sparse
         self.store = store
-        self.runner = SearchRunner()
+        self.store_backend = store_backend
         self._runtime_retrieve_limit = self.plan.top_k
         self.trace = SearchTrace(search_trace)
 
@@ -226,6 +229,7 @@ class _SearchExecutor:
             app_id=self.plan.app_id,
             file_ids=self.plan.file_ids,
             trace=self.trace,
+            store_backend=self.store_backend,
             name=mode,
         )
 
@@ -236,7 +240,7 @@ class _SearchExecutor:
                 weighted_parts.append((self.plan.dense_weight, _documents_to_items(parts["dense"])))
             if "sparse" in parts:
                 weighted_parts.append((self.plan.sparse_weight, _documents_to_items(parts["sparse"])))
-            items = _weighted_reciprocal_rank(weighted_parts, self._runtime_retrieve_limit, self.plan.rrf_k)
+            items = weighted_reciprocal_rank(weighted_parts, self._runtime_retrieve_limit, self.plan.rrf_k)
             stage["count"] = len(items)
             stage["hit_count"] = len(items)
             return items
@@ -244,27 +248,6 @@ class _SearchExecutor:
     def _validate_sparse_backend(self) -> None:
         if self.sparse is None:
             raise RuntimeError("sparse is not initialized")
-
-    def _retrieve_collection(self, metadata_filter, limit: int) -> list[dict]:
-        if self.plan.mode == "sparse":
-            return _retrieve_sparse(self.store, metadata_filter, self.plan.query, limit, self.sparse, self.plan.app_id, self.plan.file_ids)
-        if self.plan.mode == "hybrid":
-            self._validate_sparse_backend()
-            dense_items, sparse_items = self.runner.run_dense_and_sparse(
-                lambda: _retrieve_dense(self.store, metadata_filter, self.plan.query, limit),
-                lambda: _retrieve_sparse(self.store, metadata_filter, self.plan.query, limit, self.sparse, self.plan.app_id, self.plan.file_ids),
-            )
-            return _weighted_reciprocal_rank(((self.plan.dense_weight, dense_items), (self.plan.sparse_weight, sparse_items)), limit, self.plan.rrf_k)
-        return _retrieve_dense(self.store, metadata_filter, self.plan.query, limit)
-
-    def _retrieve_dense_context(self, context: dict) -> list[dict]:
-        return _retrieve_dense(self.store, context["metadata_filter"], self.plan.query, context["retrieve_limit"])
-
-    def _retrieve_sparse_context(self, context: dict) -> list[dict]:
-        return _retrieve_sparse(self.store, context["metadata_filter"], self.plan.query, context["retrieve_limit"], self.sparse)
-
-    def _retrieve_store_hybrid_context(self, context: dict) -> list[dict]:
-        return _retrieve_store_hybrid(self.store, context["metadata_filter"], self.plan.query, context["retrieve_limit"], self.plan)
 
     def _rerank(self, items: list[dict]) -> list[dict]:
         if self.rerank is None:
@@ -310,12 +293,12 @@ class _SearchExecutor:
         return items
 
 
-def _retrieve_dense(store: Store, metadata_filter, query: str, limit: int, trace=None) -> list[dict]:
+def _retrieve_dense(store: Store, metadata_filter, query: str, limit: int, trace=None, store_backend: str | None = None) -> list[dict]:
     if hasattr(store, "encode_dense_query") and hasattr(store, "query_dense_vector"):
         with _optional_stage(trace, "dense_encode", backend="model", retriever="dense") as stage:
             query_vector = store.encode_dense_query(query)
             stage["dimension"] = len(query_vector) if hasattr(query_vector, "__len__") else None
-        with _optional_stage(trace, "dense_query", backend=_store_backend(store), retriever="dense") as stage:
+        with _optional_stage(trace, "dense_query", backend=_store_backend(store, store_backend), retriever="dense") as stage:
             items = store.query_dense_vector(query_vector, limit, metadata_filter)
             stage["count"] = len(items)
             stage["hit_count"] = len(items)
@@ -332,9 +315,10 @@ def _retrieve_sparse(
     app_id: str | None = None,
     file_ids: list[str] | None = None,
     trace=None,
+    store_backend: str | None = None,
 ) -> list[dict]:
     if store.sparse_uses_store(sparse):
-        return _retrieve_store_sparse(store, metadata_filter, query, limit, trace)
+        return _retrieve_store_sparse(store, metadata_filter, query, limit, trace, store_backend)
     if sparse is None:
         raise RuntimeError("sparse is not initialized")
     search_index = getattr(sparse, "search_index", None)
@@ -354,12 +338,12 @@ def _retrieve_sparse(
         return items
 
 
-def _retrieve_store_sparse(store: Store, metadata_filter, query: str, limit: int, trace=None) -> list[dict]:
+def _retrieve_store_sparse(store: Store, metadata_filter, query: str, limit: int, trace=None, store_backend: str | None = None) -> list[dict]:
     if hasattr(store, "encode_sparse_query") and hasattr(store, "query_sparse_vector"):
         with _optional_stage(trace, "sparse_encode") as stage:
             query_vector = store.encode_sparse_query(query)
             stage.update(_sparse_encode_fields(query_vector))
-        with _optional_stage(trace, "sparse_query", backend=_store_backend(store), retriever=_sparse_retriever(query_vector)) as stage:
+        with _optional_stage(trace, "sparse_query", backend=_store_backend(store, store_backend), retriever=_sparse_retriever(query_vector)) as stage:
             items = store.query_sparse_vector(query_vector, limit, metadata_filter)
             stage["count"] = len(items)
             stage["hit_count"] = len(items)
@@ -369,23 +353,6 @@ def _retrieve_store_sparse(store: Store, metadata_filter, query: str, limit: int
 
 def _retrieve_store_hybrid(store: Store, metadata_filter, query: str, limit: int, plan: SearchPlan) -> list[dict]:
     return store.search_hybrid(query, limit, metadata_filter, plan.dense_weight, plan.sparse_weight, plan.rrf_k)
-
-
-def _weighted_reciprocal_rank(weighted_parts, limit: int, rrf_k: int) -> list[dict]:
-    by_id: dict[str, dict] = {}
-    scores: dict[str, float] = {}
-    for weight, items in weighted_parts:
-        for rank, item in enumerate(items, start=1):
-            item_id = item["id"]
-            by_id.setdefault(item_id, item)
-            scores[item_id] = scores.get(item_id, 0.0) + weight / (rrf_k + rank)
-    fused = []
-    for item_id, score in scores.items():
-        item = dict(by_id[item_id])
-        item["_score"] = score
-        fused.append(item)
-    fused.sort(key=lambda item: item["_score"], reverse=True)
-    return fused[:limit]
 
 
 def _dedupe(items: list[dict]) -> list[dict]:
@@ -444,10 +411,12 @@ def _sparse_retriever(vector) -> str:
     return "bm25" if isinstance(vector, str) else "sparse_vector"
 
 
-def _store_backend(store: Store) -> str:
-    store_type = getattr(store, "type", None)
-    if store_type:
-        return str(store_type)
+def _store_backend(store: Store, configured: str | None = None) -> str:
+    if configured:
+        return configured
+    backend_name = getattr(store, "backend_name", None)
+    if backend_name:
+        return str(backend_name)
     name = store.__class__.__name__.lower()
     if "qdrant" in name or name == "fakestore":
         return "qdrant"

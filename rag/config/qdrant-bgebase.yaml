@@ -19,6 +19,11 @@ store:
     enable: true
     type: qdrant
     timeout: 30
+    quantization:
+      enable: false
+      type: int8
+      quantile: 0.99
+      always_ram: true
     import_path: store.qdrant.QdrantStore
   chroma:
     enable: false

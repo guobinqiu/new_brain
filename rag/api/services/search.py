@@ -110,6 +110,7 @@ def _search(req: SearchRequest, principal):
         rerank=runtime.application.rerank,
         sparse=runtime.application.sparse,
         store=scoped_store(search_principal),
+        store_backend=runtime.application.store_backend,
         search_trace=runtime.application.config.logging.search_trace,
     )
     results = executor.execute()

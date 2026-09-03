@@ -35,7 +35,7 @@ async def lifespan(app: FastAPI):
     logger.info("Application closed", extra={"event": "shutdown"})
 
 
-app = FastAPI(title="Qdrant Knowledge Search API", lifespan=lifespan)
+app = FastAPI(title="Brain RAG API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

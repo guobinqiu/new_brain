@@ -76,6 +76,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
     ocr_model_path = providers.Callable(lambda app_config: app_config.ocr.model_path, config)
 
     qdrant_url = providers.Callable(lambda app_config: app_config.store.url, config)
+    qdrant_quantization = providers.Callable(lambda app_config: app_config.store.quantization, config)
     store_type = providers.Callable(lambda app_config: _store_key(app_config.store.type), config)
     chroma_persist_dir = providers.Callable(lambda app_config: app_config.store.persist_dir, config)
     milvus_uri = providers.Callable(lambda app_config: app_config.store.uri, config)
@@ -140,6 +141,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
             sparse=sparse,
             url=qdrant_url,
             timeout=store_timeout,
+            quantization=qdrant_quantization,
             parallel_sparse_embedding=embedding_parallel_sparse,
         ),
         chroma=providers.Singleton(
@@ -158,7 +160,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
         ),
     )
 
-    search = providers.Singleton(SearchPipeline, store=store, sparse=sparse)
+    search = providers.Singleton(SearchPipeline, store=store, sparse=sparse, store_backend=store_type)
 
     parser = providers.Singleton(
         ParserService,
@@ -238,7 +240,7 @@ def build_store(config: AppConfig, dense: Dense, sparse: Sparse | None = None) -
 
 
 def build_search(config: AppConfig, store: Store, sparse: Sparse | None) -> Search:
-    return create_container(config).search(store=store, sparse=sparse)
+    return create_container(config).search(store=store, sparse=sparse, store_backend=_store_key(config.store.type))
 
 
 def build_rerank(config: AppConfig) -> Rerank | None:

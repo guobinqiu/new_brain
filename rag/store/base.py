@@ -10,6 +10,7 @@ SearchMode = str
 
 
 class Store(Protocol):
+    backend_name: str
     ready: bool
 
     def start(self) -> None:

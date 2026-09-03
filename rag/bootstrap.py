@@ -30,6 +30,7 @@ class Application:
         self.config = config or load_app_config()
         self.config_name = self.config.name
         self.container = create_container(self.config)
+        self.store_backend = self.container.store_type()
         self.dense = dense or self.container.dense()
         self.sparse = sparse if sparse is not None else (self.container.sparse() if self.config.sparse is not None else None)
         self.store = store or self.container.store(dense=self.dense, sparse=self.sparse)

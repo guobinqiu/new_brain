@@ -1,7 +1,7 @@
 [project]
-name = "qdrant-knowledge-backend"
+name = "brain-rag"
 version = "0.1.0"
-description = "Qdrant knowledge search backend"
+description = "Brain RAG backend"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115.0",

@@ -1,7 +1,7 @@
 [project]
-name = "qdrant-knowledge-backend-ecu"
+name = "brain-rag-ecu"
 version = "0.1.0"
-description = "Qdrant knowledge search backend for D20 ECU"
+description = "Brain RAG backend for D20 ECU"
 requires-python = ">=3.10,<3.11"
 dependencies = [
     "fastapi>=0.115.0",

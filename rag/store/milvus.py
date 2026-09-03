@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import json
+import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -11,15 +12,19 @@ from typing import Literal
 from rag.dense.base import Dense
 from rag.dense.huggingface import HuggingFaceDense
 from rag.scope import app_collection, collection_name_for_app, current_collection
+from rag.search.rank import weighted_reciprocal_rank
 from rag.sparse.base import Sparse
 from rag.store.startup import run_with_startup_retry
 
 
 SearchMode = Literal["dense", "sparse", "hybrid"]
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DENSE_METRIC = "COSINE"
 
 
 class MilvusStore:
+    backend_name = "milvus"
+
     def __init__(
         self,
         dense: Dense | None = None,
@@ -35,6 +40,8 @@ class MilvusStore:
         self.parallel_sparse_embedding = parallel_sparse_embedding
         self.client = None
         self.dense_vector_size: int | None = None
+        self._document_locks: dict[str, threading.Lock] = {}
+        self._document_locks_guard = threading.Lock()
         self._ready = False
 
     def start(self) -> None:
@@ -71,12 +78,14 @@ class MilvusStore:
         if not file_id:
             raise ValueError("file_id is required")
         self._require_ready()
-        self.delete_file_chunks(file_id)
-        self._client().insert(
-            collection_name=self._chunks_collection(),
-            data=self._to_file_rows(chunks, file_id),
-            timeout=self.timeout,
-        )
+        with self._document_lock(file_id):
+            self.delete_file_chunks(file_id)
+            self._client().insert(
+                collection_name=self._chunks_collection(),
+                data=self._to_file_rows(chunks, file_id),
+                timeout=self.timeout,
+            )
+            self._client().flush(self._chunks_collection(), timeout=self.timeout)
         return len(chunks)
 
     def delete_file_chunks(self, file_id: str) -> int:
@@ -212,8 +221,9 @@ class MilvusStore:
     ) -> list[dict]:
         if not self.sparse_uses_store():
             raise RuntimeError("sparse is not initialized")
-        rows = self._hybrid_search(query, limit, metadata_filter, dense_weight, sparse_weight)
-        return _documents_from_milvus_rows(rows, "hybrid")
+        dense_items = self.search_dense(query, limit, metadata_filter)
+        sparse_items = self.search_sparse(query, limit, metadata_filter)
+        return weighted_reciprocal_rank(((dense_weight, dense_items), (sparse_weight, sparse_items)), limit, rrf_k)
 
     def sparse_uses_store(self, sparse: Sparse | None = None) -> bool:
         from rag.sparse.milvus_bge_m3 import MilvusBGEM3Sparse
@@ -310,12 +320,12 @@ class MilvusStore:
 
     def _search_params_for_mode(self, mode: SearchMode):
         if mode == "dense":
-            return {"metric_type": "L2", "params": {}}
+            return {"metric_type": DENSE_METRIC, "params": {}}
         sparse_params = self._sparse_search_params()
         if mode == "sparse":
             return sparse_params
         return [
-            {"metric_type": "L2", "params": {}},
+            {"metric_type": DENSE_METRIC, "params": {}},
             sparse_params,
         ]
 
@@ -335,8 +345,8 @@ class MilvusStore:
 
     def _dense_index_params(self) -> dict:
         if _is_lite_uri(self.uri):
-            return {"metric_type": "L2", "index_type": "FLAT", "params": {}}
-        return {"metric_type": "L2", "index_type": "AUTOINDEX", "params": {}}
+            return {"metric_type": DENSE_METRIC, "index_type": "FLAT", "params": {}}
+        return {"metric_type": DENSE_METRIC, "index_type": "AUTOINDEX", "params": {}}
 
     def _sparse_index_params(self):
         if self._sparse_is_builtin_bm25():
@@ -377,44 +387,6 @@ class MilvusStore:
             search_params=self._search_params_for_mode(mode),
             limit=limit,
             filter=metadata_filter,
-            output_fields=["*"],
-            timeout=self.timeout,
-        )
-
-    def _hybrid_search(
-        self,
-        query: str,
-        limit: int,
-        metadata_filter: str,
-        dense_weight: float,
-        sparse_weight: float,
-    ):
-        from pymilvus import AnnSearchRequest, WeightedRanker
-
-        reqs = [
-            AnnSearchRequest(
-                data=[self.dense.embed_query(query)],
-                anns_field="dense",
-                param={"metric_type": "L2", "params": {}},
-                limit=limit,
-                filter=metadata_filter,
-            ),
-            AnnSearchRequest(
-                data=[self._query_data_for_mode("sparse", query)],
-                anns_field="sparse",
-                param=self._sparse_search_params(),
-                limit=limit,
-                filter=metadata_filter,
-            ),
-        ]
-        return self._client().hybrid_search(
-            self._chunks_collection(),
-            reqs=reqs,
-            ranker=WeightedRanker(
-                float(dense_weight),
-                float(sparse_weight),
-            ),
-            limit=limit,
             output_fields=["*"],
             timeout=self.timeout,
         )
@@ -481,10 +453,19 @@ class MilvusStore:
         ids = [row["pk"] for row in rows]
         if ids:
             self._client().delete(self._chunks_collection(), ids=ids, timeout=self.timeout)
+            self._client().flush(self._chunks_collection(), timeout=self.timeout)
         return len(ids)
 
     def _chunks_collection(self) -> str:
         return current_collection()
+
+    def _document_lock(self, file_id: str):
+        with self._document_locks_guard:
+            lock = self._document_locks.get(file_id)
+            if lock is None:
+                lock = threading.Lock()
+                self._document_locks[file_id] = lock
+            return lock
 
 
 def _connection_uri(uri: str | None, project_root: Path = PROJECT_ROOT) -> str | None:
@@ -527,7 +508,7 @@ def _documents_from_milvus_rows(rows, mode: SearchMode) -> list[dict]:
 
 def _milvus_score(distance: float, mode: SearchMode, rank: int) -> float:
     if mode == "dense":
-        return 1.0 / (1.0 + float(distance))
+        return float(distance)
     return 1.0 / rank
 
 

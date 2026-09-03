@@ -25,6 +25,7 @@ def _test_database_url(value: str | None) -> str:
 os.environ.setdefault("CONFIG_FILE", str(BACKEND_DIR / "config" / "qdrant-bgebase.yaml"))
 os.environ["DATABASE_URL"] = os.environ.get("TEST_DATABASE_URL") or _test_database_url(os.environ.get("DATABASE_URL"))
 os.environ.setdefault("QDRANT_URL", "http://localhost:6333")
+os.environ.setdefault("MILVUS_URI", "http://localhost:19530")
 os.environ.setdefault("OPENSEARCH_URL", "http://localhost:9200")
 TEST_APP_ID = "myapp"
 E2E_APP_ID = "myapp"
@@ -43,20 +44,17 @@ def store_test_env(request, tmp_path):
 
     import rag.config as cf
     orig_config_file_env = os.environ.get("CONFIG_FILE")
-    orig_collection_prefix_env = os.environ.get("RAG_COLLECTION_PREFIX")
     orig_s3_bucket_env = os.environ.get("S3_BUCKET")
     orig_config = dict(cf.SEARCH_CONFIG)
     is_e2e = request.node.get_closest_marker("e2e") is not None
     touches_external_store = is_e2e or _is_integration_item(request.node)
+    raw_config = yaml.safe_load(_config_path(os.environ["CONFIG_FILE"]).read_text(encoding="utf-8"))
     if is_e2e:
-        os.environ["RAG_COLLECTION_PREFIX"] = os.environ.get("TEST_COLLECTION_PREFIX", "test")
         os.environ["S3_BUCKET"] = os.environ.get("TEST_S3_BUCKET", "rag-test")
-    app_chunks_collection = f"{TEST_APP_ID}_chunks"
     if touches_external_store:
-        _drop_qdrant_collection(cf.QDRANT_URL, app_chunks_collection)
+        _drop_store_collection(raw_config, TEST_APP_ID, qdrant_url=cf.QDRANT_URL, milvus_uri=os.environ["MILVUS_URI"])
     _reset_rate_limit()
     test_config_path = tmp_path / "app_test.yaml"
-    raw_config = yaml.safe_load(_config_path(os.environ["CONFIG_FILE"]).read_text(encoding="utf-8"))
     raw_config["auth"]["registry_file"] = str(tmp_path / "apps.json")
     raw_config["api"]["rate_limit"] = "10000/minute"
     raw_config["api"]["rate_limit_index"] = "10000/minute"
@@ -68,17 +66,13 @@ def store_test_env(request, tmp_path):
 
     _reset_rate_limit()
     if touches_external_store:
-        _drop_qdrant_collection(cf.QDRANT_URL, app_chunks_collection)
+        _drop_store_collection(raw_config, TEST_APP_ID, qdrant_url=cf.QDRANT_URL, milvus_uri=os.environ["MILVUS_URI"])
     cf.SEARCH_CONFIG.clear()
     cf.SEARCH_CONFIG.update(orig_config)
     if orig_config_file_env is None:
         os.environ.pop("CONFIG_FILE", None)
     else:
         os.environ["CONFIG_FILE"] = orig_config_file_env
-    if orig_collection_prefix_env is None:
-        os.environ.pop("RAG_COLLECTION_PREFIX", None)
-    else:
-        os.environ["RAG_COLLECTION_PREFIX"] = orig_collection_prefix_env
     if orig_s3_bucket_env is None:
         os.environ.pop("S3_BUCKET", None)
     else:
@@ -234,6 +228,28 @@ def initialized_store(store_test_env):
         yield store
 
 
+@pytest.fixture
+def initialized_milvus_store(store_test_env):
+    from rag.dense.huggingface import HuggingFaceDense
+    from rag.scope import app_collection, collection_name_for_app
+    from rag.store.milvus import MilvusStore
+
+    _skip_if_milvus_unavailable(os.environ["MILVUS_URI"])
+    collection_name = collection_name_for_app(TEST_APP_ID)
+    _drop_milvus_collection(os.environ["MILVUS_URI"], collection_name)
+    dense = HuggingFaceDense()
+    dense.start()
+    store = MilvusStore(dense=dense, uri=os.environ["MILVUS_URI"])
+    store.start()
+    store.ensure_app_collection(TEST_APP_ID)
+    try:
+        with app_collection(TEST_APP_ID):
+            yield store
+    finally:
+        store.stop()
+        _drop_milvus_collection(os.environ["MILVUS_URI"], collection_name)
+
+
 class DeterministicReranker:
     """Deterministic reranker: scores (query, content) pairs by content length.
 
@@ -305,6 +321,84 @@ def _drop_qdrant_collection(url: str, collection_name: str) -> None:
             close()
     except Exception:
         pass
+
+
+def _drop_milvus_collection(uri: str, collection_name: str) -> None:
+    try:
+        from rag.store.milvus import _connection_uri
+        from pymilvus import MilvusClient
+
+        client = MilvusClient(uri=_connection_uri(uri))
+        if client.has_collection(collection_name):
+            client.drop_collection(collection_name)
+        close = getattr(client, "close", None)
+        if callable(close):
+            close()
+    except Exception:
+        pass
+
+
+def _skip_if_milvus_unavailable(uri: str) -> None:
+    if not _milvus_available(uri):
+        pytest.skip(f"Milvus is not available at {uri}")
+
+
+def _milvus_available(uri: str) -> bool:
+    try:
+        client = _make_milvus_client(uri)
+        client.list_collections(timeout=2)
+        close = getattr(client, "close", None)
+        if callable(close):
+            close()
+        return True
+    except Exception as exc:
+        if _is_milvus_connection_error(exc):
+            return False
+        raise
+
+
+def _make_milvus_client(uri: str):
+    from rag.store.milvus import _connection_uri
+    from pymilvus import MilvusClient
+
+    return MilvusClient(uri=_connection_uri(uri), timeout=2)
+
+
+def _is_milvus_connection_error(exc: Exception) -> bool:
+    if isinstance(exc, (ConnectionError, TimeoutError, OSError)):
+        return True
+    message = str(exc).lower()
+    return any(marker in message for marker in (
+        "fail connecting",
+        "failed to connect",
+        "connection refused",
+        "server unavailable",
+        "deadline exceeded",
+        "timed out",
+        "timeout",
+    ))
+
+
+def _drop_store_collection(raw_config: dict, app_id: str, *, qdrant_url: str, milvus_uri: str) -> None:
+    collection_name = f"{app_id}_chunks"
+    store_key = _enabled_store_key(raw_config)
+    if store_key == "qdrant":
+        _drop_qdrant_collection(qdrant_url, collection_name)
+    elif store_key in {"milvus", "milvus_lite"}:
+        _drop_milvus_collection(milvus_uri, collection_name)
+
+
+def _enabled_store_key(raw_config: dict) -> str | None:
+    store = raw_config.get("store")
+    if not isinstance(store, dict):
+        return None
+    store_type = store.get("type")
+    if isinstance(store_type, str):
+        return store_type
+    for key, value in store.items():
+        if isinstance(value, dict) and value.get("enable") is True:
+            return str(value.get("type") or key)
+    return None
 
 
 def _reset_rate_limit() -> None:

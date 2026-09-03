@@ -1,3 +1,6 @@
+from concurrent.futures import ThreadPoolExecutor
+import time
+
 import pytest
 
 
@@ -34,6 +37,7 @@ class FakeMilvusClient:
         self.loaded = []
         self.inserted = []
         self.deleted = []
+        self.flushed = []
         self.searches = []
         self.hybrid_searches = []
         self.queries = []
@@ -82,6 +86,9 @@ class FakeMilvusClient:
 
     def delete(self, collection_name, ids, timeout=None):
         self.deleted.append((collection_name, ids, timeout))
+
+    def flush(self, collection_name, timeout=None):
+        self.flushed.append((collection_name, timeout))
 
     def drop_collection(self, collection_name):
         self.collections.discard(collection_name)
@@ -368,23 +375,94 @@ def test_milvus_store_uses_ip_metric_for_embedding_sparse_and_bm25_metric_for_bu
 
 def test_milvus_lite_uses_flat_dense_index_to_avoid_hnsw_faiss_background_build():
     store = _started_store(uri="milvus_data/lite/lite.db")
-    assert store._index_params_for_mode("dense") == {"metric_type": "L2", "index_type": "FLAT", "params": {}}
+    assert store._index_params_for_mode("dense") == {"metric_type": "COSINE", "index_type": "FLAT", "params": {}}
 
     store = _started_store(uri="milvus_data/lite/lite.db", sparse=_store_sparse())
     assert store._index_params_for_mode("hybrid") == [
-        {"metric_type": "L2", "index_type": "FLAT", "params": {}},
+        {"metric_type": "COSINE", "index_type": "FLAT", "params": {}},
         {"metric_type": "IP", "index_type": "SPARSE_INVERTED_INDEX", "params": {"drop_ratio_build": 0.2}},
     ]
 
     store = _started_store(uri="milvus_data/lite/lite.db", sparse=_builtin_bm25_sparse())
     assert store._index_params_for_mode("hybrid") == [
-        {"metric_type": "L2", "index_type": "FLAT", "params": {}},
+        {"metric_type": "COSINE", "index_type": "FLAT", "params": {}},
         {
             "metric_type": "BM25",
             "index_type": "SPARSE_INVERTED_INDEX",
             "params": {"inverted_index_algo": "DAAT_MAXSCORE"},
         },
     ]
+
+
+def test_milvus_store_uses_cosine_metric_for_dense_vectors():
+    store = _started_store()
+
+    assert store._search_params_for_mode("dense") == {"metric_type": "COSINE", "params": {}}
+    assert store._search_params_for_mode("hybrid")[0] == {"metric_type": "COSINE", "params": {}}
+    assert store._index_params_for_mode("dense") == {"metric_type": "COSINE", "index_type": "AUTOINDEX", "params": {}}
+
+
+def test_milvus_hybrid_uses_app_rrf_instead_of_native_hybrid_search():
+    from rag.scope import app_collection
+
+    class HybridClient(FakeMilvusClient):
+        def search(self, collection_name, **kwargs):
+            self.searches.append((collection_name, kwargs))
+            if kwargs["anns_field"] == "dense":
+                return [[
+                    {"id": "dense-only", "distance": 0.9, "entity": {"pk": "dense-only", "text": "dense", "file_id": "file1"}},
+                    {"id": "both", "distance": 0.8, "entity": {"pk": "both", "text": "both", "file_id": "file1"}},
+                ]]
+            return [[
+                {"id": "both", "distance": 1.0, "entity": {"pk": "both", "text": "both", "file_id": "file1"}},
+                {"id": "sparse-only", "distance": 0.7, "entity": {"pk": "sparse-only", "text": "sparse", "file_id": "file1"}},
+            ]]
+
+    client = HybridClient("http://localhost:19530", timeout=30)
+    store = _started_store(client=client, sparse=_store_sparse(), timeout=30)
+
+    with app_collection("imsdom"):
+        results = store.search_hybrid("query", 2, "", dense_weight=0.5, sparse_weight=0.5, rrf_k=60)
+
+    assert client.hybrid_searches == []
+    assert [call[1]["anns_field"] for call in client.searches] == ["dense", "sparse"]
+    assert [item["id"] for item in results] == ["both", "dense-only"]
+
+
+def test_milvus_add_file_chunks_serializes_same_file_writes():
+    from rag.scope import app_collection
+
+    events = []
+
+    class SlowDeleteClient(FakeMilvusClient):
+        def query(self, collection_name, **kwargs):
+            if kwargs.get("output_fields") == ["pk"]:
+                events.append("delete")
+                time.sleep(0.05)
+                return []
+            return super().query(collection_name, **kwargs)
+
+        def insert(self, collection_name, data, timeout=None):
+            events.append("insert")
+            return super().insert(collection_name, data, timeout)
+
+        def flush(self, collection_name, timeout=None):
+            events.append("flush")
+            return super().flush(collection_name, timeout)
+
+    client = SlowDeleteClient("http://localhost:19530", timeout=30)
+    store = _started_store(client=client, timeout=30)
+    chunks = [{"id": "chunk-a", "content": "hello", "metadata": {"filename": "a.txt", "chunk_index": 0}}]
+
+    def add_chunks():
+        with app_collection("imsdom"):
+            return store.add_file_chunks(chunks, "file-a")
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(add_chunks) for _ in range(2)]
+        [future.result() for future in futures]
+
+    assert events == ["delete", "insert", "flush", "delete", "insert", "flush"]
 
 
 def test_milvus_builtin_bm25_hybrid_declares_dense_and_sparse_vector_fields():
@@ -396,7 +474,7 @@ def test_milvus_builtin_bm25_hybrid_declares_dense_and_sparse_vector_fields():
 def test_milvus_standalone_uses_explicit_native_index_params():
     store = _started_store(uri="http://localhost:19530")
 
-    assert store._index_params_for_mode("dense") == {"metric_type": "L2", "index_type": "AUTOINDEX", "params": {}}
+    assert store._index_params_for_mode("dense") == {"metric_type": "COSINE", "index_type": "AUTOINDEX", "params": {}}
 
 
 def test_milvus_ensure_app_collection_creates_collection_without_placeholder_documents(monkeypatch):
@@ -432,3 +510,4 @@ def test_milvus_add_file_chunks_inserts_native_rows():
     assert client.inserted[0][1][0]["text"] == "hello"
     assert client.inserted[0][1][0]["file_id"] == "file1"
     assert client.inserted[0][1][0]["vector"] == [0.1, 0.2, 0.3]
+    assert client.flushed[-1] == ("imsdom_chunks", None)
