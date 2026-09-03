@@ -88,6 +88,7 @@ def components() -> list[dict[str, Any]]:
         {
             "name": "database",
             "status": required_component_status(runtime.application.database, error=runtime.application.component_errors.get("database")),
+            "model": runtime.application.config.database.type,
         },
     ]
 
