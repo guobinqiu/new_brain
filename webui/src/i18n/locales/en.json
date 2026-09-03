@@ -79,7 +79,16 @@
     "components": "Components",
     "traces": "Trace",
     "noTraces": "No searches yet",
-    "noAppSelected": "Select an app first"
+    "noAppSelected": "Select an app first",
+    "componentNames": {
+      "Store": "Store",
+      "Dense": "Dense",
+      "Sparse": "Sparse",
+      "Rerank": "Rerank",
+      "OCR": "OCR",
+      "Parser": "Parser",
+      "database": "Database"
+    }
   },
   "cluster": {
     "desc": "Runtime status for all rag nodes",

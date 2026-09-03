@@ -79,7 +79,16 @@
     "components": "组件",
     "traces": "链路",
     "noTraces": "暂无查询",
-    "noAppSelected": "请先在应用列表中选择一个应用"
+    "noAppSelected": "请先在应用列表中选择一个应用",
+    "componentNames": {
+      "Store": "存储",
+      "Dense": "语义",
+      "Sparse": "关键词",
+      "Rerank": "重排",
+      "OCR": "OCR",
+      "Parser": "解析",
+      "database": "数据库"
+    }
   },
   "cluster": {
     "desc": "所有后端节点运行状态",

@@ -30,7 +30,7 @@
             <div class="component-list">
               <div v-for="item in node.data?.components || []" :key="item.name" class="component-row">
                 <span :class="['status-dot', item.status]"></span>
-                <span class="component-name">{{ item.name }}</span>
+                <span class="component-name">{{ componentNameText(item) }}</span>
                 <strong>{{ componentModelText(item) }}</strong>
               </div>
             </div>
@@ -55,6 +55,10 @@ let monitorPollTimer = null
 function componentModelText(item) {
   if (!item.model) return 'N/A'
   return item.mode ? `${item.model}（${item.mode}）` : item.model
+}
+
+function componentNameText(item) {
+  return t(`monitor.componentNames.${item.name}`, item.name)
 }
 
 async function fetchMonitor() {
