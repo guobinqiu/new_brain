@@ -180,6 +180,8 @@ services:
       -advertise-client-urls=http://etcd:2379
       -listen-client-urls http://0.0.0.0:2379
       --data-dir /etcd
+    ports:
+      - "2379:2379"
     volumes:
       - ../../milvus_data/standalone/etcd:/etcd
     logging: *json-logging
