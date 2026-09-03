@@ -1,1 +1,2 @@
 CREATE DATABASE rag OWNER rag;
+CREATE DATABASE rag_test OWNER rag;

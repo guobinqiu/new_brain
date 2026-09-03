@@ -4,7 +4,7 @@ from dataclasses import dataclass
 @dataclass
 class TextBlock:
     text: str
-    kind: str = "text"
+    kind: str = "paragraph"
 
 
 @dataclass

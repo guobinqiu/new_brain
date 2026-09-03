@@ -66,6 +66,7 @@ embedding:
   dense_batch_size: 16
   sparse_batch_size: 8
   release_memory: after_call
+  parallel: true
 parser:
   mineru:
     enable: true

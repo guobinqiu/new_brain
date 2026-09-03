@@ -31,7 +31,7 @@ def _try_import_symbol(module_path: str, name: str):
 
 def test_search_request_exclude_none_drops_optional_fields():
     """只设 query 时，model_dump(exclude_none=True) 应只含 {"query": "..."}。"""
-    cls = _try_import_symbol("rag.schemas", "SearchRequest")
+    cls = _try_import_symbol("llm.src.rag.schemas", "SearchRequest")
     if cls is None:
         pytest.fail("rag.schemas.SearchRequest not implemented — RED")
     req = cls(query="hi")
@@ -41,7 +41,7 @@ def test_search_request_exclude_none_drops_optional_fields():
 
 def test_search_request_compact_json_serialization():
     """SearchRequest 必须能以紧凑模式序列化（无空格）。"""
-    cls = _try_import_symbol("rag.schemas", "SearchRequest")
+    cls = _try_import_symbol("llm.src.rag.schemas", "SearchRequest")
     if cls is None:
         pytest.fail("rag.schemas.SearchRequest not implemented — RED")
     req = cls(query="退款流程", top_k=5, mode="hybrid", rerank=True)
@@ -56,7 +56,7 @@ def test_search_request_compact_json_serialization():
 
 def test_search_request_default_query_none_excluded():
     """未传 query 时若默认 None，应被 exclude_none 排除。"""
-    cls = _try_import_symbol("rag.schemas", "SearchRequest")
+    cls = _try_import_symbol("llm.src.rag.schemas", "SearchRequest")
     if cls is None:
         pytest.fail("rag.schemas.SearchRequest not implemented — RED")
     # 仅设 top_k
@@ -68,7 +68,7 @@ def test_search_request_default_query_none_excluded():
 
 def test_search_request_top_k_optional_default_in_range():
     """top_k 等可选项有合理默认值时（5 或 None），不应抛。"""
-    cls = _try_import_symbol("rag.schemas", "SearchRequest")
+    cls = _try_import_symbol("llm.src.rag.schemas", "SearchRequest")
     if cls is None:
         pytest.fail("rag.schemas.SearchRequest not implemented — RED")
     req = cls(query="q")
@@ -80,7 +80,7 @@ def test_search_request_top_k_optional_default_in_range():
 
 def test_search_request_fetch_k_must_be_greater_or_equal_top_k():
     """fetch_k < top_k 在物理上不可达：应当抛 ValidationError。"""
-    cls = _try_import_symbol("rag.schemas", "SearchRequest")
+    cls = _try_import_symbol("llm.src.rag.schemas", "SearchRequest")
     if cls is None:
         pytest.fail("rag.schemas.SearchRequest not implemented — RED")
     # pydantic v2 抛 ValidationError
@@ -105,7 +105,7 @@ def test_search_request_fetch_k_must_be_greater_or_equal_top_k():
 
 def test_search_request_fetch_k_equal_to_top_k_allowed():
     """fetch_k == top_k 边界合法。"""
-    cls = _try_import_symbol("rag.schemas", "SearchRequest")
+    cls = _try_import_symbol("llm.src.rag.schemas", "SearchRequest")
     if cls is None:
         pytest.fail("rag.schemas.SearchRequest not implemented — RED")
     # 不应抛
@@ -115,7 +115,7 @@ def test_search_request_fetch_k_equal_to_top_k_allowed():
 
 def test_search_request_file_ids_must_be_non_empty_if_provided():
     """file_ids 若提供，必须是非空数组。"""
-    cls = _try_import_symbol("rag.schemas", "SearchRequest")
+    cls = _try_import_symbol("llm.src.rag.schemas", "SearchRequest")
     if cls is None:
         pytest.fail("rag.schemas.SearchRequest not implemented — RED")
     try:
@@ -139,7 +139,7 @@ def test_search_request_file_ids_must_be_non_empty_if_provided():
 
 def test_search_request_full_payload_round_trip():
     """所有字段都填时，dump → 紧凑 JSON 字节级正确。"""
-    cls = _try_import_symbol("rag.schemas", "SearchRequest")
+    cls = _try_import_symbol("llm.src.rag.schemas", "SearchRequest")
     if cls is None:
         pytest.fail("rag.schemas.SearchRequest not implemented — RED")
     req = cls(
@@ -169,7 +169,7 @@ def test_search_request_full_payload_round_trip():
 
 def test_document_parses_minimal_fields():
     """Document 必须能解析简化后的 id/content 字段。"""
-    Document = _try_import_symbol("rag.schemas", "Document")
+    Document = _try_import_symbol("llm.src.rag.schemas", "Document")
     if Document is None:
         pytest.fail("rag.schemas.Document not implemented — RED")
     raw = {
@@ -181,12 +181,10 @@ def test_document_parses_minimal_fields():
     assert doc.content.startswith("退款")
 
 
-def test_response_has_no_score_field_dependency():
-    """（间接验证）SearchResponse 应能解析无 score 字段的 RAG 响应。
-    Document 的字段集合不含 score（不依赖分数做后续逻辑）。
-    """
-    Response = _try_import_symbol("rag.schemas", "SearchResponse")
-    Document = _try_import_symbol("rag.schemas", "Document")
+def test_response_accepts_result_without_score():
+    """SearchResponse 应能解析无 score 字段的 RAG 响应。"""
+    Response = _try_import_symbol("llm.src.rag.schemas", "SearchResponse")
+    Document = _try_import_symbol("llm.src.rag.schemas", "Document")
     if Response is None or Document is None:
         pytest.fail("rag.schemas.SearchResponse/Document not implemented — RED")
     raw = {
@@ -209,13 +207,12 @@ def test_response_has_no_score_field_dependency():
     assert len(resp.results) == 1
     doc = resp.results[0]
     assert doc.id == "c1"
-    # Document 字段中不暴露 score（不依赖）
-    assert not hasattr(doc, "score") or getattr(doc, "score", None) is None
+    assert "score" not in doc.model_dump()
 
 
 def test_document_parses_simplified_qdrant_open_search_result():
     """Document 应兼容 qdrant `/api/open/rag/search` 的简化 result 结构。"""
-    Document = _try_import_symbol("rag.schemas", "Document")
+    Document = _try_import_symbol("llm.src.rag.schemas", "Document")
     if Document is None:
         pytest.fail("rag.schemas.Document not implemented — RED")
     raw = {
@@ -226,12 +223,12 @@ def test_document_parses_simplified_qdrant_open_search_result():
     doc = Document(**raw)
     assert doc.id == "550e8400-e29b-41d4-a716-446655440000"
     assert doc.content == "命中的 chunk 文本"
-    assert not hasattr(doc, "score") or getattr(doc, "score", None) is None
+    assert "score" not in doc.model_dump()
 
 
 def test_documents_iteration_and_count():
     """SearchResponse.results 是 list[Document]，可迭代。"""
-    Response = _try_import_symbol("rag.schemas", "SearchResponse")
+    Response = _try_import_symbol("llm.src.rag.schemas", "SearchResponse")
     if Response is None:
         pytest.fail("rag.schemas.SearchResponse not implemented — RED")
     raw = {

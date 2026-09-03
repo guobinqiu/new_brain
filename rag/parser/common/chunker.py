@@ -18,6 +18,7 @@ def blocks_to_chunks(blocks: list[Block], parser_config: ChunkParserConfig) -> l
 
 def blocks_to_documents(blocks: list[Block], filename: str, parser_config: ChunkParserConfig) -> list[dict]:
     blocks = normalize_blocks(blocks)
+    blocks = merge_structured_text_blocks(blocks, parser_config)
     chunks = []
     for index, block in enumerate(blocks):
         if isinstance(block, TextBlock):
@@ -33,6 +34,35 @@ def blocks_to_documents(blocks: list[Block], filename: str, parser_config: Chunk
     for chunk_index, chunk in enumerate(chunks):
         chunk["metadata"]["chunk_index"] = chunk_index
     return chunks
+
+
+def merge_structured_text_blocks(blocks: list[Block], parser_config: ChunkParserConfig) -> list[Block]:
+    merged: list[Block] = []
+    text_buffer: list[str] = []
+    buffer_kind = ""
+
+    def flush_text_buffer() -> None:
+        nonlocal buffer_kind
+        if text_buffer:
+            merged.extend(
+                TextBlock(chunk, kind=buffer_kind)
+                for chunk in split_text("\n".join(text_buffer), parser_config.text.chunk_size, parser_config.text.chunk_overlap)
+            )
+            text_buffer.clear()
+            buffer_kind = ""
+
+    for block in blocks:
+        if isinstance(block, TextBlock) and block.kind in {"line", "list_item"}:
+            if buffer_kind and block.kind != buffer_kind:
+                flush_text_buffer()
+            buffer_kind = block.kind
+            text_buffer.append(block.text)
+            continue
+        flush_text_buffer()
+        merged.append(block)
+
+    flush_text_buffer()
+    return merged
 
 
 def _text_block_to_documents(text: str, filename: str, parser_config: ChunkParserConfig) -> list[dict]:

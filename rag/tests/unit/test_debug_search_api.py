@@ -1,9 +1,12 @@
 from dataclasses import replace
 
 import pytest
-from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 from rag.api.runtime import runtime
+from rag.api.schemas import DebugEncodeRequest, DebugSearchRequest
+from rag.api.services import search as service
+from rag.auth import Principal
 
 
 pytestmark = pytest.mark.unit
@@ -67,53 +70,33 @@ class DebugStore:
             }
         ]
 
-    def sparse_uses_store(self, sparse=None):
-        return True
 
-
-def test_debug_dense_search_encodes_query_and_searches_dense(monkeypatch, tmp_path):
-    from rag.auth import Principal, issue_token
-    from rag.schema import AuthConfig, AdminAuthConfig, SparseBackendConfig
-    import main
-
-    auth_config = AuthConfig(
-        admin=AdminAuthConfig(username="admin", password="admin123"),
-        registry_file=str(tmp_path / "apps.json"),
-    )
-    config = replace(
-        runtime.application.config,
-        auth=auth_config,
-        sparse=SparseBackendConfig(name="bge_m3", model_path="model"),
-    )
-    store = DebugStore()
+def _set_application(monkeypatch, *, sparse=None, store=None):
+    config = replace(runtime.application.config)
 
     class Application:
         def __init__(self):
             self.config = config
             self.ready = True
             self.dense = DebugDense()
-            self.sparse = DebugSparse()
-            self.store = store
+            self.sparse = sparse
+            self.store = store or DebugStore()
 
-        def start(self):
-            pass
+    application = Application()
+    monkeypatch.setattr(runtime, "application", application)
+    return application
 
-        def stop(self):
-            pass
 
-    monkeypatch.setattr(runtime, "application", Application())
-    monkeypatch.setattr(runtime, "startup_in_background", False)
-    token = issue_token(auth_config, Principal(type="admin", app_id="admin"))
+def test_debug_dense_search_encodes_query_and_searches_dense(monkeypatch):
+    store = DebugStore()
+    _set_application(monkeypatch, sparse=DebugSparse(), store=store)
 
-    with TestClient(main.app) as client:
-        response = client.post(
-            "/api/open/rag/apps/tenant_a/debug/dense-search",
-            json={"query": "表见代理", "top_k": 3, "file_ids": ["file-a"]},
-            headers={"Authorization": f"Bearer {token}"},
-        )
+    body = service.debug_dense_search(
+        "tenant_a",
+        DebugSearchRequest(query="表见代理", top_k=3, file_ids=["file-a"]),
+        Principal(type="admin", app_id=""),
+    )
 
-    assert response.status_code == 200
-    body = response.json()
     assert body["type"] == "dense"
     assert body["query_vector"] == [0.1, 0.2, 0.3]
     assert body["results"][0]["id"] == "dense-1"
@@ -124,49 +107,16 @@ def test_debug_dense_search_encodes_query_and_searches_dense(monkeypatch, tmp_pa
     ]
 
 
-def test_debug_sparse_search_encodes_query_and_searches_sparse(monkeypatch, tmp_path):
-    from rag.auth import Principal, issue_token
-    from rag.schema import AuthConfig, AdminAuthConfig, SparseBackendConfig
-    import main
-
-    auth_config = AuthConfig(
-        admin=AdminAuthConfig(username="admin", password="admin123"),
-        registry_file=str(tmp_path / "apps.json"),
-    )
-    config = replace(
-        runtime.application.config,
-        auth=auth_config,
-        sparse=SparseBackendConfig(name="bge_m3", model_path="model"),
-    )
+def test_debug_sparse_search_encodes_query_and_searches_sparse(monkeypatch):
     store = DebugStore()
+    _set_application(monkeypatch, sparse=DebugSparse(), store=store)
 
-    class Application:
-        def __init__(self):
-            self.config = config
-            self.ready = True
-            self.dense = DebugDense()
-            self.sparse = DebugSparse()
-            self.store = store
+    body = service.debug_sparse_search(
+        "tenant_a",
+        DebugSearchRequest(query="表见代理", top_k=3),
+        Principal(type="admin", app_id=""),
+    )
 
-        def start(self):
-            pass
-
-        def stop(self):
-            pass
-
-    monkeypatch.setattr(runtime, "application", Application())
-    monkeypatch.setattr(runtime, "startup_in_background", False)
-    token = issue_token(auth_config, Principal(type="admin", app_id="admin"))
-
-    with TestClient(main.app) as client:
-        response = client.post(
-            "/api/open/rag/apps/tenant_a/debug/sparse-search",
-            json={"query": "表见代理", "top_k": 3},
-            headers={"Authorization": f"Bearer {token}"},
-        )
-
-    assert response.status_code == 200
-    body = response.json()
     assert body["type"] == "sparse"
     assert body["query_vector"] == {"indices": [3, 9], "values": [0.3, 0.9]}
     assert body["results"][0]["id"] == "sparse-1"
@@ -177,167 +127,52 @@ def test_debug_sparse_search_encodes_query_and_searches_sparse(monkeypatch, tmp_
     ]
 
 
-def test_debug_dense_encode_only_encodes_query(monkeypatch, tmp_path):
-    from rag.auth import Principal, issue_token
-    from rag.schema import AuthConfig, AdminAuthConfig
-    import main
+def test_debug_dense_encode_only_encodes_query(monkeypatch):
+    application = _set_application(monkeypatch)
 
-    auth_config = AuthConfig(
-        admin=AdminAuthConfig(username="admin", password="admin123"),
-        registry_file=str(tmp_path / "apps.json"),
+    body = service.debug_dense_encode(
+        "tenant_a",
+        DebugEncodeRequest(query="表见代理"),
+        Principal(type="admin", app_id=""),
     )
-    config = replace(runtime.application.config, auth=auth_config)
-    store = DebugStore()
 
-    class Application:
-        def __init__(self):
-            self.config = config
-            self.ready = True
-            self.dense = DebugDense()
-            self.sparse = None
-            self.store = store
-
-        def start(self):
-            pass
-
-        def stop(self):
-            pass
-
-    monkeypatch.setattr(runtime, "application", Application())
-    monkeypatch.setattr(runtime, "startup_in_background", False)
-    token = issue_token(auth_config, Principal(type="admin", app_id="admin"))
-
-    with TestClient(main.app) as client:
-        response = client.post(
-            "/api/open/rag/apps/tenant_a/debug/dense-encode",
-            json={"query": "表见代理"},
-            headers={"Authorization": f"Bearer {token}"},
-        )
-
-    assert response.status_code == 200
-    assert response.json() == {
+    assert body == {
         "type": "dense",
         "query": "表见代理",
         "query_vector": [0.1, 0.2, 0.3],
     }
-    assert store.calls == []
+    assert application.store.calls == []
 
 
-def test_debug_sparse_encode_returns_400_when_sparse_disabled(monkeypatch, tmp_path):
-    from rag.auth import Principal, issue_token
-    from rag.schema import AuthConfig, AdminAuthConfig
-    import main
+def test_debug_sparse_encode_returns_400_when_sparse_disabled(monkeypatch):
+    from fastapi import HTTPException
 
-    auth_config = AuthConfig(
-        admin=AdminAuthConfig(username="admin", password="admin123"),
-        registry_file=str(tmp_path / "apps.json"),
-    )
-    config = replace(runtime.application.config, auth=auth_config)
+    _set_application(monkeypatch, sparse=None)
 
-    class Application:
-        def __init__(self):
-            self.config = config
-            self.ready = True
-            self.dense = DebugDense()
-            self.sparse = None
-            self.store = DebugStore()
-
-        def start(self):
-            pass
-
-        def stop(self):
-            pass
-
-    monkeypatch.setattr(runtime, "application", Application())
-    monkeypatch.setattr(runtime, "startup_in_background", False)
-    token = issue_token(auth_config, Principal(type="admin", app_id="admin"))
-
-    with TestClient(main.app) as client:
-        response = client.post(
-            "/api/open/rag/apps/tenant_a/debug/sparse-encode",
-            json={"query": "表见代理"},
-            headers={"Authorization": f"Bearer {token}"},
+    with pytest.raises(HTTPException) as exc:
+        service.debug_sparse_encode(
+            "tenant_a",
+            DebugEncodeRequest(query="表见代理"),
+            Principal(type="admin", app_id=""),
         )
 
-    assert response.status_code == 400
-    assert response.json()["detail"] == "sparse is not enabled"
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "sparse is not enabled"
 
 
-def test_debug_search_accepts_top_k_up_to_100(monkeypatch, tmp_path):
-    from rag.auth import Principal, issue_token
-    from rag.schema import AuthConfig, AdminAuthConfig
-    import main
-
-    auth_config = AuthConfig(
-        admin=AdminAuthConfig(username="admin", password="admin123"),
-        registry_file=str(tmp_path / "apps.json"),
-    )
-    config = replace(runtime.application.config, auth=auth_config)
+def test_debug_search_accepts_top_k_up_to_100(monkeypatch):
     store = DebugStore()
+    _set_application(monkeypatch, store=store)
 
-    class Application:
-        def __init__(self):
-            self.config = config
-            self.ready = True
-            self.dense = DebugDense()
-            self.sparse = None
-            self.store = store
+    service.debug_dense_search(
+        "tenant_a",
+        DebugSearchRequest(query="表见代理", top_k=100),
+        Principal(type="admin", app_id=""),
+    )
 
-        def start(self):
-            pass
-
-        def stop(self):
-            pass
-
-    monkeypatch.setattr(runtime, "application", Application())
-    monkeypatch.setattr(runtime, "startup_in_background", False)
-    token = issue_token(auth_config, Principal(type="admin", app_id="admin"))
-
-    with TestClient(main.app) as client:
-        response = client.post(
-            "/api/open/rag/apps/tenant_a/debug/dense-search",
-            json={"query": "表见代理", "top_k": 100},
-            headers={"Authorization": f"Bearer {token}"},
-        )
-
-    assert response.status_code == 200
     assert store.calls[-1] == ("search_dense", "表见代理", 100, ("file-filter", ()))
 
 
-def test_debug_search_rejects_top_k_over_100(monkeypatch, tmp_path):
-    from rag.auth import Principal, issue_token
-    from rag.schema import AuthConfig, AdminAuthConfig
-    import main
-
-    auth_config = AuthConfig(
-        admin=AdminAuthConfig(username="admin", password="admin123"),
-        registry_file=str(tmp_path / "apps.json"),
-    )
-    config = replace(runtime.application.config, auth=auth_config)
-
-    class Application:
-        def __init__(self):
-            self.config = config
-            self.ready = True
-            self.dense = DebugDense()
-            self.sparse = None
-            self.store = DebugStore()
-
-        def start(self):
-            pass
-
-        def stop(self):
-            pass
-
-    monkeypatch.setattr(runtime, "application", Application())
-    monkeypatch.setattr(runtime, "startup_in_background", False)
-    token = issue_token(auth_config, Principal(type="admin", app_id="admin"))
-
-    with TestClient(main.app) as client:
-        response = client.post(
-            "/api/open/rag/apps/tenant_a/debug/dense-search",
-            json={"query": "表见代理", "top_k": 101},
-            headers={"Authorization": f"Bearer {token}"},
-        )
-
-    assert response.status_code == 422
+def test_debug_search_rejects_top_k_over_100():
+    with pytest.raises(ValidationError):
+        DebugSearchRequest(query="表见代理", top_k=101)

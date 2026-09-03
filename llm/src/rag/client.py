@@ -165,6 +165,7 @@ class RagClient:
         if status >= 400:
             # 401/403/422 不重试（已由 rag_retry 跳过），5xx 在 rag_retry 已重试
             body_snip = (resp.text or "")[:200]
+            logger.warning("rag response error", status_code=status, body=body_snip)
             return RagResult(
                 success=False,
                 status_code=status,
@@ -192,7 +193,7 @@ class RagClient:
             status_code=status,
             elapsed_ms=data.get("elapsed_ms"),
             doc_count=len(data.get("results", []) or []),
-            documents=data.get("results", []) or [],
+            documents=_documents_for_log(data.get("results", []) or []),
         )
 
         docs: list[Document] = []
@@ -234,6 +235,19 @@ def get_rag_client() -> RagClient:
     if _client is None:
         _client = _build_client_from_settings()
     return _client
+
+
+def _documents_for_log(documents: list[dict]) -> list[dict]:
+    rows = []
+    for index, doc in enumerate(documents, start=1):
+        content = str(doc.get("content") or "")
+        rows.append({
+            "rank": index,
+            "id": doc.get("id"),
+            "score": doc.get("score"),
+            "content": content,
+        })
+    return rows
 
 
 def _reset_client_for_tests() -> None:

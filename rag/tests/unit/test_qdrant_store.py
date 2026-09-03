@@ -5,69 +5,86 @@ from qdrant_client.http.models import SparseVector
 pytestmark = pytest.mark.unit
 
 
-def test_add_file_chunks_writes_file_metadata(monkeypatch):
-    import rag.store as store
+class FakeDense:
+    ready = True
+
+    def __init__(self):
+        self.queries = []
+        self.documents = []
+
+    def embed_query(self, text):
+        self.queries.append(text)
+        return [0.1, 0.2, 0.3]
+
+    def embed_documents(self, texts):
+        self.documents.append(list(texts))
+        return [[0.1, 0.2, 0.3] for _ in texts]
+
+
+class FakeCount:
+    count = 0
+
+
+def _chunk(chunk_id="chunk-1", content="通用知识"):
+    return {
+        "id": chunk_id,
+        "content": content,
+        "metadata": {"filename": "faq.pdf", "chunk_index": 0},
+    }
+
+
+def _started_store(client, dense=None, sparse=None, parallel=False):
+    from rag.store.qdrant import QdrantStore
+
+    store = QdrantStore(dense=dense or FakeDense(), sparse=sparse, parallel_sparse_embedding=parallel)
+    store.client = client
+    store.start()
+    return store
+
+
+def test_add_file_chunks_writes_file_metadata():
     from rag.scope import app_collection
+    from rag.store import qdrant
 
     calls = []
 
-    class FakeDense:
-        def embed_documents(self, texts):
-            calls.append(("embed", texts))
-            return [[0.1, 0.2, 0.3] for _ in texts]
-
     class FakeClient:
+        def count(self, **kwargs):
+            return FakeCount()
+
         def upsert(self, **kwargs):
             calls.append(("upsert", kwargs["collection_name"], kwargs["points"]))
 
-    monkeypatch.setattr(store, "_require_search_ready", lambda: calls.append(("ready",)))
-    monkeypatch.setattr(store, "delete_file_chunks", lambda file_id: calls.append(("delete", file_id)) or 2)
-    monkeypatch.setattr(store, "_get_dense", lambda: FakeDense())
-    monkeypatch.setattr(store, "get_qdrant_client", lambda: FakeClient())
-
-    chunks = [
-        {"id": "chunk-1", "content": "华为给我们一万六千张卡", "metadata": {"filename": "liang.pdf", "chunk_index": 0}},
-    ]
+    store = _started_store(FakeClient())
 
     with app_collection("imsdom"):
-        assert store.add_file_chunks(chunks, file_id="550e8400-e29b-41d4-a716-446655440000") == 1
-    assert calls[0] == ("ready",)
-    assert calls[1] == ("delete", "550e8400-e29b-41d4-a716-446655440000")
+        assert store.add_file_chunks([_chunk(content="华为给我们一万六千张卡")], file_id="550e8400-e29b-41d4-a716-446655440000") == 1
 
-    _, collection_name, points = calls[3]
+    _, collection_name, points = calls[0]
     assert collection_name == "imsdom_chunks"
-    assert points[0].id == store._point_id("chunk-1")
+    assert points[0].id == qdrant._point_id("chunk-1")
     assert points[0].payload["content"] == "华为给我们一万六千张卡"
     assert points[0].payload["metadata"]["file_id"] == "550e8400-e29b-41d4-a716-446655440000"
     assert points[0].payload["metadata"]["chunk_index"] == 0
-    assert points[0].payload["metadata"]["filename"] == "liang.pdf"
+    assert points[0].payload["metadata"]["filename"] == "faq.pdf"
 
 
-def test_add_file_chunks_logs_backend_retriever_and_stage_fields(monkeypatch, caplog):
+def test_add_file_chunks_logs_backend_retriever_and_stage_fields(caplog):
     import logging
-    import rag.store as store
     from rag.scope import app_collection
 
-    class FakeDense:
-        def embed_documents(self, texts):
-            return [[0.1, 0.2, 0.3] for _ in texts]
-
     class FakeClient:
+        def count(self, **kwargs):
+            return FakeCount()
+
         def upsert(self, **kwargs):
             pass
 
-    monkeypatch.setattr(store, "_require_search_ready", lambda: None)
-    monkeypatch.setattr(store, "delete_file_chunks", lambda file_id: None)
-    monkeypatch.setattr(store, "_get_dense", lambda: FakeDense())
-    monkeypatch.setattr(store, "get_qdrant_client", lambda: FakeClient())
-
-    chunks = [
-        {"id": "chunk-1", "content": "华为给我们一万六千张卡", "metadata": {"filename": "liang.pdf", "chunk_index": 0}},
-    ]
+    store = _started_store(FakeClient())
 
     with caplog.at_level(logging.INFO, logger="rag.indexing"):
         with app_collection("imsdom"):
-            store.add_file_chunks(chunks, file_id="file_a")
+            store.add_file_chunks([_chunk(content="华为给我们一万六千张卡")], file_id="file_a")
 
     records = {record.event: record for record in caplog.records if hasattr(record, "event")}
     assert records["dense_embedding_start"].app_id == "imsdom"
@@ -81,8 +98,8 @@ def test_add_file_chunks_logs_backend_retriever_and_stage_fields(monkeypatch, ca
     assert records["qdrant_upsert_done"].status == "ok"
 
 
-def test_ensure_payload_indexes_creates_file_id_and_chunk_index_indexes(monkeypatch):
-    import rag.store as store
+def test_ensure_payload_indexes_creates_file_id_and_chunk_index_indexes():
+    from rag.store import qdrant
 
     calls = []
 
@@ -90,91 +107,107 @@ def test_ensure_payload_indexes_creates_file_id_and_chunk_index_indexes(monkeypa
         def create_payload_index(self, **kwargs):
             calls.append((kwargs["collection_name"], kwargs["field_name"], kwargs["field_schema"]))
 
-    monkeypatch.setattr(store, "get_qdrant_client", lambda: FakeClient())
-
+    store = _started_store(FakeClient())
     store.ensure_payload_indexes("imsdom_chunks")
 
     assert calls == [
-        ("imsdom_chunks", "metadata.file_id", store.models.PayloadSchemaType.KEYWORD),
-        ("imsdom_chunks", "metadata.chunk_index", store.models.PayloadSchemaType.INTEGER),
+        ("imsdom_chunks", "metadata.file_id", qdrant.models.PayloadSchemaType.KEYWORD),
+        ("imsdom_chunks", "metadata.chunk_index", qdrant.models.PayloadSchemaType.INTEGER),
     ]
 
 
-def test_add_file_chunks_writes_sparse_vector_when_sparse_vectors_are_stored(monkeypatch):
-    import rag.store as store
+def test_add_file_chunks_writes_sparse_vector_when_sparse_vectors_are_stored():
     from rag.scope import app_collection
     from rag.sparse.qdrant_bge_m3 import QdrantBGEM3Sparse
 
     calls = []
 
-    class FakeDense:
-        def embed_documents(self, texts):
-            return [[0.1, 0.2, 0.3] for _ in texts]
-
     class FakeSparse(QdrantBGEM3Sparse):
+        ready = True
+
         def __init__(self):
             pass
+
+        def embed_query(self, text):
+            return SparseVector(indices=[1], values=[1.0])
 
         def embed_documents(self, texts):
             return [SparseVector(indices=[1], values=[1.0]) for _ in texts]
 
     class FakeClient:
+        def count(self, **kwargs):
+            return FakeCount()
+
         def upsert(self, **kwargs):
             calls.append(("upsert", kwargs["points"]))
 
-    monkeypatch.setattr(store, "_require_search_ready", lambda: None)
-    monkeypatch.setattr(store, "_sparse_uses_store", lambda: True)
-    monkeypatch.setattr(store, "delete_file_chunks", lambda file_id: None)
-    monkeypatch.setattr(store, "_get_dense", lambda: FakeDense())
-    monkeypatch.setattr(store, "_get_sparse", lambda: FakeSparse())
-    monkeypatch.setattr(store, "get_qdrant_client", lambda: FakeClient())
-
-    chunks = [
-        {"id": "chunk-1", "content": "通用知识", "metadata": {"filename": "faq.pdf", "chunk_index": 0}},
-    ]
+    store = _started_store(FakeClient(), sparse=FakeSparse())
 
     with app_collection("imsdom"):
-        assert store.add_file_chunks(chunks, file_id="file_a") == 1
+        assert store.add_file_chunks([_chunk()], file_id="file_a") == 1
     point = calls[0][1][0]
     assert "dense" in point.vector
     assert "sparse" in point.vector
     assert point.vector["sparse"].indices == [1]
 
 
+def test_add_file_chunks_can_parallelize_dense_and_sparse_embedding():
+    import threading
+    from rag.scope import app_collection
+    from rag.sparse.qdrant_bge_m3 import QdrantBGEM3Sparse
+
+    sparse_started = threading.Event()
+    overlaps = []
+
+    class ParallelDense(FakeDense):
+        def embed_documents(self, texts):
+            overlaps.append(sparse_started.wait(timeout=0.2))
+            return [[0.1, 0.2, 0.3] for _ in texts]
+
+    class FakeSparse(QdrantBGEM3Sparse):
+        ready = True
+
+        def __init__(self):
+            pass
+
+        def embed_documents(self, texts):
+            sparse_started.set()
+            return [SparseVector(indices=[1], values=[1.0]) for _ in texts]
+
+    class FakeClient:
+        def count(self, **kwargs):
+            return FakeCount()
+
+        def upsert(self, **kwargs):
+            pass
+
+    store = _started_store(FakeClient(), dense=ParallelDense(), sparse=FakeSparse(), parallel=True)
+
+    with app_collection("imsdom"):
+        assert store.add_file_chunks([_chunk()], file_id="file_a") == 1
+    assert overlaps == [True]
+
+
 def test_add_file_chunks_requires_file_id():
-    import rag.store as store
+    store = _started_store(client=None)
 
     with pytest.raises(ValueError, match="file_id"):
-        store.add_file_chunks([{"id": "chunk-1", "content": "x", "metadata": {"filename": "x.txt", "chunk_index": 0}}], file_id="")
+        store.add_file_chunks([_chunk(content="x")], file_id="")
 
 
 def test_point_id_keeps_standard_uuid_chunk_id():
     import uuid
-    import rag.store as store
+    from rag.store import qdrant
 
     chunk_id = str(uuid.uuid4())
-    point_id = store._point_id(chunk_id)
+    point_id = qdrant._point_id(chunk_id)
 
     assert point_id == chunk_id
     assert str(uuid.UUID(point_id)) == point_id
 
 
-def test_get_dense_requires_explicit_store_initialization():
-    import rag.store as store
-
-    with pytest.raises(RuntimeError, match="search is not initialized"):
-        store._get_dense()
-
-
-def test_get_dense_vector_size_requires_explicit_store_initialization():
-    import rag.store as store
-
-    with pytest.raises(RuntimeError, match="search is not initialized"):
-        store._get_dense_vector_size()
-
-
 def test_qdrant_client_uses_configured_timeout(monkeypatch):
-    import rag.store as store
+    from rag.store import qdrant
 
     created = []
 
@@ -182,19 +215,15 @@ def test_qdrant_client_uses_configured_timeout(monkeypatch):
         def __init__(self, **kwargs):
             created.append(kwargs)
 
-    monkeypatch.setattr(store, "QdrantClient", FakeClient)
-    store.close_store()
-    try:
-        store._configure_store(url="http://localhost:6333", timeout=30)
-        store.get_qdrant_client()
-    finally:
-        store.close_store()
+    monkeypatch.setattr(qdrant, "QdrantClient", FakeClient)
+
+    store = qdrant.QdrantStore(dense=FakeDense(), url="http://localhost:6333", timeout=30)
+    store._client()
 
     assert created[0]["timeout"] == 30
 
 
-def test_qdrant_list_chunks_uses_scroll_cursor(monkeypatch):
-    import rag.store as store
+def test_qdrant_list_chunks_uses_scroll_cursor():
     from rag.scope import app_collection
 
     calls = []
@@ -214,7 +243,7 @@ def test_qdrant_list_chunks_uses_scroll_cursor(monkeypatch):
                 return [FakeRecord("point-1", 0), FakeRecord("point-2", 1)], None
             return [FakeRecord("point-2", 1)], None
 
-    monkeypatch.setattr(store, "get_qdrant_client", lambda: FakeClient())
+    store = _started_store(FakeClient())
 
     with app_collection("imsdom"):
         first_page = store.list_chunks(file_ids=["file-a"], limit=1)
@@ -234,8 +263,7 @@ def test_qdrant_list_chunks_uses_scroll_cursor(monkeypatch):
     assert calls[0]["with_vectors"] is False
 
 
-def test_qdrant_reads_dense_and_sparse_vectors_by_chunk_id(monkeypatch):
-    import rag.store as store
+def test_qdrant_reads_dense_and_sparse_vectors_by_chunk_id():
     from rag.scope import app_collection
 
     calls = []
@@ -256,8 +284,7 @@ def test_qdrant_reads_dense_and_sparse_vectors_by_chunk_id(monkeypatch):
             calls.append(kwargs)
             return [FakeRecord()]
 
-    monkeypatch.setattr(store, "get_qdrant_client", lambda: FakeClient())
-    monkeypatch.setattr(store, "_ready", True)
+    store = _started_store(FakeClient())
 
     with app_collection("imsdom"):
         dense = store.get_dense_vector("chunk-a")
@@ -273,104 +300,23 @@ def test_qdrant_reads_dense_and_sparse_vectors_by_chunk_id(monkeypatch):
     }
 
 
-def test_init_store_does_not_create_collection(monkeypatch):
-    import rag.store as store
+def test_store_start_does_not_create_collection():
+    dense = FakeDense()
+    store = _started_store(client=None, dense=dense)
 
-    calls = []
-
-    class FakeDense:
-        ready = True
-
-        def start(self):
-            pass
-
-        def stop(self):
-            pass
-
-        def embed_query(self, text):
-            return [0.1, 0.2, 0.3]
-
-        def embed_documents(self, texts):
-            return [[0.1, 0.2, 0.3] for _ in texts]
-
-    monkeypatch.setattr(store, "ensure_collections", lambda collection_name=None: calls.append(("ensure", collection_name)))
-
-    store.init_store(dense=FakeDense())
-
-    assert store.is_search_ready() is True
-    assert calls == []
+    assert store.ready is True
+    assert dense.queries == ["dimension probe"]
 
 
-def test_init_store_loads_model_and_probes_size(monkeypatch):
-    import rag.store as store
-
-    calls = []
-
-    class FakeDense:
-        ready = True
-
-        def start(self):
-            raise AssertionError("store must not start dense")
-
-        def stop(self):
-            self.ready = False
-
-        def embed_query(self, text):
-            calls.append(("probe", text))
-            return [0.1, 0.2, 0.3]
-
-        def embed_documents(self, texts):
-            return [[0.1, 0.2, 0.3] for _ in texts]
-
-    class FakeClient:
-        def collection_exists(self, collection_name):
-            calls.append(("exists", collection_name))
-            return True
-
-        def create_payload_index(self, **kwargs):
-            calls.append(("payload_index", kwargs["collection_name"], kwargs["field_name"]))
-
-    monkeypatch.setattr(store, "get_qdrant_client", lambda: FakeClient())
-
-    store.init_store(dense=FakeDense())
-
-    assert store.is_search_ready() is True
-    assert calls.count(("probe", "dimension probe")) == 1
-    assert all(call[0] != "exists" for call in calls)
-    assert all(call[0] != "payload_index" for call in calls)
-
-
-def test_init_store_creates_sparse_vector_config_when_sparse_uses_store(monkeypatch):
-    import rag.store as store
+def test_store_start_creates_sparse_vector_config_when_sparse_uses_store():
     from rag.sparse.qdrant_bge_m3 import QdrantBGEM3Sparse
 
     calls = []
-
-    class FakeDense:
-        ready = True
-
-        def start(self):
-            pass
-
-        def stop(self):
-            pass
-
-        def embed_query(self, text):
-            return [0.1, 0.2, 0.3]
-
-        def embed_documents(self, texts):
-            return [[0.1, 0.2, 0.3] for _ in texts]
 
     class FakeSparse(QdrantBGEM3Sparse):
         ready = True
 
         def __init__(self):
-            pass
-
-        def start(self):
-            pass
-
-        def stop(self):
             pass
 
         def embed_query(self, text):
@@ -395,10 +341,7 @@ def test_init_store_creates_sparse_vector_config_when_sparse_uses_store(monkeypa
         def create_payload_index(self, **kwargs):
             pass
 
-    sparse = FakeSparse()
-    monkeypatch.setattr(store, "get_qdrant_client", lambda: FakeClient())
-
-    store.init_store(dense=FakeDense(), sparse=sparse)
+    store = _started_store(FakeClient(), sparse=FakeSparse())
     store.ensure_collections("imsdom_chunks")
 
     assert any(call[0] == "create" and "sparse" in call[2] for call in calls)

@@ -26,7 +26,27 @@ def _build_request(**client_kwargs):
         from llm.src.rag.schemas import SearchRequest  # type: ignore
     except Exception as exc:
         pytest.fail(f"rag.client / rag.schemas not implemented — RED ({exc})")
-    return RagClient(**client_kwargs), SearchRequest
+    app_id = client_kwargs.pop("app_id", "myapp")
+    access_key = client_kwargs.pop("access_key", "ak")
+    secret_key = client_kwargs.pop("secret", client_kwargs.pop("secret_key", "sk"))
+    return _CredentialClient(RagClient(**client_kwargs), app_id, access_key, secret_key), SearchRequest
+
+
+class _CredentialClient:
+    def __init__(self, client, app_id: str, access_key: str, secret_key: str):
+        self._client = client
+        self._app_id = app_id
+        self._access_key = access_key
+        self._secret_key = secret_key
+
+    async def search(self, req, **kwargs):
+        kwargs.setdefault("app_id", self._app_id)
+        kwargs.setdefault("access_key", self._access_key)
+        kwargs.setdefault("secret_key", self._secret_key)
+        return await self._client.search(req, **kwargs)
+
+    async def aclose(self):
+        await self._client.aclose()
 
 
 # ──────────────────────────── header / body bytes ────────────────────────────
@@ -399,9 +419,6 @@ async def test_client_aclose_releases_resources():
 
     client = RagClient(
         base_url="http://rag.local",
-        app_id="a",
-        access_key="k",
-        secret="s",
     )
     await client.aclose()
     # 第二次 aclose 不应抛

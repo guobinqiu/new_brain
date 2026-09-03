@@ -92,58 +92,55 @@ def _chunk(chunk_id, filename, content):
 
 
 def test_chroma_store_adds_searches_and_deletes_file_chunks(tmp_path):
-    from rag.store import chroma
     from rag.scope import app_collection
+    from rag.store.chroma import ChromaStore
 
-    chroma.close_store()
+    dense = FakeDense()
+    dense.start()
+    store = ChromaStore(
+        dense=dense,
+        sparse=None,
+        persist_dir=str(tmp_path),
+    )
+    store.start()
+
     try:
-        dense = FakeDense()
-        dense.start()
-        chroma.init_store(
-            dense=dense,
-            sparse=None,
-            persist_dir=str(tmp_path),
-        )
-
-        chroma.ensure_app_collection("chromait")
+        store.ensure_app_collection("chromait")
         with app_collection("chromait"):
-            chroma.add_file_chunks(
+            store.add_file_chunks(
                 [_chunk("alpha-1", "alpha.txt", "alpha knowledge")],
                 file_id="chromafilealpha",
             )
 
-            docs = chroma.get_search_documents(chroma.build_file_filter(["chromafilealpha"]))
+            docs = store.get_search_documents(store.build_file_filter(["chromafilealpha"]))
             assert docs[0]["metadata"]["filename"] == "alpha.txt"
 
-            results = chroma.search_dense(
+            results = store.search_dense(
                 "alpha",
                 1,
-                chroma.build_file_filter(["chromafilealpha"]),
+                store.build_file_filter(["chromafilealpha"]),
             )
             assert results[0]["content"] == "alpha knowledge"
 
-            assert chroma.delete_file_chunks("chromafilealpha") == 1
-            assert chroma.get_search_documents(chroma.build_file_filter(["chromafilealpha"])) == []
+            assert store.delete_file_chunks("chromafilealpha") == 1
+            assert store.get_search_documents(store.build_file_filter(["chromafilealpha"])) == []
     finally:
-        chroma.close_store()
+        store.stop()
 
 
 def test_chroma_local_store_rejects_store_sparse_with_clear_error(tmp_path):
-    from rag.store import chroma
-    from rag.scope import app_collection
+    from rag.store.chroma import ChromaStore
 
-    chroma.close_store()
-    try:
-        dense = FakeDense()
-        dense.start()
-        sparse = FakeChromaSparse()
-        sparse.start()
-        with pytest.raises(RuntimeError, match="本地 Chroma 不支持 vector sparse"):
-            chroma.init_store(
-                dense=dense,
-                sparse=sparse,
-                persist_dir=str(tmp_path),
-            )
-            chroma.ensure_app_collection("chromasparseit")
-    finally:
-        chroma.close_store()
+    dense = FakeDense()
+    dense.start()
+    sparse = FakeChromaSparse()
+    sparse.start()
+    store = ChromaStore(
+        dense=dense,
+        sparse=sparse,
+        persist_dir=str(tmp_path),
+    )
+    store.start()
+
+    with pytest.raises(RuntimeError, match="本地 Chroma 不支持 vector sparse"):
+        store.ensure_app_collection("chromasparseit")

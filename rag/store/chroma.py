@@ -3,27 +3,20 @@ from __future__ import annotations
 
 import base64
 import json
-import uuid
-from collections import defaultdict
 from pathlib import Path
 from typing import Literal
+
 from chromadb.utils.embedding_functions import SparseEmbeddingFunction
+
 from rag.config import SEARCH_CONFIG
-from rag.scope import app_collection, collection_name_for_app, current_collection
 from rag.dense.base import Dense
 from rag.dense.huggingface import HuggingFaceDense
+from rag.scope import app_collection, collection_name_for_app, current_collection
 from rag.sparse.base import Sparse
 
 
 SearchMode = Literal["dense", "sparse", "hybrid"]
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-
-_dense: Dense | None = None
-_sparse: Sparse | None = None
-_persist_dir: str | None = None
-_stores: dict[SearchMode, object] = {}
-_client = None
-_ready = False
 SPARSE_VECTOR_KEY = "sparse_embedding"
 
 
@@ -37,75 +30,139 @@ class ChromaStore:
         self.dense = dense or HuggingFaceDense()
         self.sparse = sparse
         self.persist_dir = persist_dir
+        self.client = None
+        self._ready = False
 
     def start(self) -> None:
-        init_store(
-            dense=self.dense,
-            sparse=self.sparse,
-            persist_dir=self.persist_dir,
-        )
+        if not self.dense.ready:
+            raise RuntimeError("dense is not initialized")
+        if self.sparse is not None and not self.sparse.ready:
+            raise RuntimeError("sparse is not initialized")
+        self._ready = True
 
     def stop(self) -> None:
-        close_store()
+        self.client = None
+        self._ready = False
 
     def drop_collections(self) -> None:
-        _configure_store(self.persist_dir)
-        drop_collections()
+        collection_name = self._chunks_collection()
+        try:
+            self._client().delete_collection(collection_name)
+        except Exception:
+            pass
 
     @property
     def ready(self) -> bool:
-        return is_search_ready()
+        return self._ready
 
     def add_file_chunks(self, chunks: list[dict], file_id: str) -> int:
-        return add_file_chunks(chunks, file_id)
+        if not chunks:
+            return 0
+        if not file_id:
+            raise ValueError("file_id is required")
+        self._require_ready()
+        self.delete_file_chunks(file_id)
+        self._collection().add(
+            ids=[_point_id(chunk["id"]) for chunk in chunks],
+            documents=[chunk["content"] for chunk in chunks],
+            metadatas=[_metadata_for_chunk(chunk, file_id) for chunk in chunks],
+            embeddings=self.dense.embed_documents([chunk["content"] for chunk in chunks]),
+        )
+        return len(chunks)
 
     def delete_file_chunks(self, file_id: str) -> int:
-        return delete_file_chunks(file_id)
+        return self._delete_by_filter(_file_payload_filter([file_id]))
 
     def get_total_chunks(self, file_ids: list[str] | None = None) -> int:
-        return get_total_chunks(file_ids)
+        return len(self.get_search_documents(self.build_file_filter(file_ids)))
 
     def list_chunks(self, file_ids: list[str] | None = None, limit: int = 50, cursor: str | None = None) -> dict:
-        return list_chunks(file_ids=file_ids, limit=limit, cursor=cursor)
+        if limit <= 0:
+            raise ValueError("limit must be greater than 0")
+        limit = min(limit, 200)
+        rows = self._collection_get(self.build_file_filter(file_ids))
+        documents = sorted(_rows_to_documents(rows), key=_chunk_sort_key)
+        start = _chunk_cursor_position(documents, cursor)
+        page_rows = documents[start:start + limit]
+        return {
+            "documents": page_rows,
+            "next_cursor": _encode_chunk_cursor(page_rows[-1]) if start + limit < len(documents) and page_rows else None,
+            "has_more": start + limit < len(documents),
+        }
 
     def get_dense_vector(self, chunk_id: str) -> list[float] | None:
-        return get_dense_vector(chunk_id)
+        rows = self._collection().get(ids=[chunk_id], include=["embeddings"])
+        embeddings = rows.get("embeddings")
+        if embeddings is None or len(embeddings) == 0:
+            return None
+        vector = embeddings[0]
+        return vector.tolist() if hasattr(vector, "tolist") else list(vector)
 
     def get_sparse_vector(self, chunk_id: str) -> dict | None:
-        return get_sparse_vector(chunk_id)
+        raise NotImplementedError("sparse vector is not supported by current store")
 
     def supports_dense_vector(self) -> bool:
         return True
 
     def supports_sparse_vector(self, sparse: Sparse | None = None) -> bool:
-        return _sparse_uses_store(sparse)
+        return self.sparse_uses_store(sparse)
 
     def ensure_app_collection(self, app_id: str) -> str:
-        _configure_store(self.persist_dir)
-        return ensure_app_collection(app_id)
+        collection_name = collection_name_for_app(app_id)
+        with app_collection(app_id):
+            self._ensure_collection()
+        return collection_name
 
     def app_collection_exists(self, app_id: str) -> bool:
-        _configure_store(self.persist_dir)
-        return app_collection_exists(app_id)
+        collection_name = collection_name_for_app(app_id)
+        names = [getattr(collection, "name", collection) for collection in self._client().list_collections()]
+        return collection_name in names
 
     def drop_app_collection(self, app_id: str) -> bool:
-        _configure_store(self.persist_dir)
-        return drop_app_collection(app_id)
+        collection_name = collection_name_for_app(app_id)
+        if not self.app_collection_exists(app_id):
+            return False
+        self._client().delete_collection(collection_name)
+        return True
 
     def app_context(self, app_id: str):
         return app_collection(app_id)
 
     def get_search_documents(self, metadata_filter: dict | None) -> list[dict]:
-        return get_search_documents(metadata_filter)
+        rows = self._collection_get(metadata_filter)
+        return _rows_to_documents(rows)
 
     def build_file_filter(self, file_ids: list[str] | None = None) -> dict | None:
-        return build_file_filter(file_ids)
+        if file_ids is None:
+            return None
+        if not file_ids:
+            raise ValueError("file_ids cannot be empty")
+        return _file_payload_filter(file_ids)
+
+    def encode_dense_query(self, query: str):
+        return self.dense.embed_query(query)
+
+    def query_dense_vector(self, query_vector, limit: int, metadata_filter: dict | None) -> list[dict]:
+        rows = self._collection().query(
+            query_embeddings=[query_vector],
+            n_results=limit,
+            where=metadata_filter,
+            include=["documents", "metadatas", "distances"],
+        )
+        return _query_rows_to_items(rows)
 
     def search_dense(self, query: str, limit: int, metadata_filter: dict | None) -> list[dict]:
-        return search_dense(query, limit, metadata_filter)
+        return self.query_dense_vector(self.encode_dense_query(query), limit, metadata_filter)
+
+    def encode_sparse_query(self, query: str):
+        return query
+
+    def query_sparse_vector(self, query_vector, limit: int, metadata_filter: dict | None) -> list[dict]:
+        docs = self._search_sparse_or_hybrid("sparse", query_vector, limit, metadata_filter)
+        return _documents_with_scores_to_items(docs)
 
     def search_sparse(self, query: str, limit: int, metadata_filter: dict | None) -> list[dict]:
-        return search_sparse(query, limit, metadata_filter)
+        return self.query_sparse_vector(self.encode_sparse_query(query), limit, metadata_filter)
 
     def search_hybrid(
         self,
@@ -116,140 +173,110 @@ class ChromaStore:
         sparse_weight: float,
         rrf_k: int,
     ) -> list[dict]:
-        return search_hybrid(query, limit, metadata_filter, dense_weight, sparse_weight, rrf_k)
+        docs = self._search_sparse_or_hybrid("hybrid", query, limit, metadata_filter, dense_weight, sparse_weight, rrf_k)
+        return _documents_with_scores_to_items(docs)
 
     def sparse_uses_store(self, sparse: Sparse | None = None) -> bool:
-        return _sparse_uses_store(sparse)
+        candidate = self.sparse if sparse is None else sparse
+        return isinstance(candidate, SparseEmbeddingFunction)
 
+    def _client(self):
+        if self.client is None:
+            import chromadb
 
-def close_store():
-    global _client, _ready
-    _stores.clear()
-    _client = None
-    _ready = False
+            self.client = chromadb.PersistentClient(path=_persist_path(self.persist_dir))
+        return self.client
 
+    def _require_ready(self) -> None:
+        if not self._ready:
+            raise RuntimeError("search is not initialized")
 
-def drop_collections() -> None:
-    client = _get_chroma_client()
-    collection_name = _chunks_collection()
-    try:
-        client.delete_collection(collection_name)
-    except Exception:
-        pass
-    _stores.clear()
+    def _ensure_collection(self) -> None:
+        collection_name = self._chunks_collection()
+        if self.sparse_uses_store():
+            try:
+                self._client().get_or_create_collection(
+                    name=collection_name,
+                    schema=self._chroma_schema(),
+                    embedding_function=None,
+                )
+            except Exception as exc:
+                if "Sparse vector indexing is not enabled in local" in str(exc):
+                    raise RuntimeError(
+                        "本地 Chroma 不支持 vector sparse。Chroma 本地配置请使用 sparse.type=bm25。"
+                    ) from exc
+                raise
+            return
+        self._client().get_or_create_collection(name=collection_name, embedding_function=None)
 
+    def _chroma_schema(self):
+        from chromadb import K, Schema, SparseVectorIndexConfig
 
-def ensure_app_collection(app_id: str) -> str:
-    collection_name = collection_name_for_app(app_id)
-    with app_collection(app_id):
-        _ensure_collection()
-    return collection_name
+        return Schema().create_index(
+            SparseVectorIndexConfig(
+                embedding_function=self.sparse,
+                source_key=K.DOCUMENT,
+            ),
+            key=SPARSE_VECTOR_KEY,
+        )
 
+    def _search_sparse_or_hybrid(
+        self,
+        mode: SearchMode,
+        query: str,
+        limit: int,
+        metadata_filter: dict,
+        dense_weight: float | None = None,
+        sparse_weight: float | None = None,
+        rrf_k: int | None = None,
+    ):
+        from chromadb import K, Knn, Rrf, Search
 
-def app_collection_exists(app_id: str) -> bool:
-    collection_name = collection_name_for_app(app_id)
-    names = [getattr(collection, "name", collection) for collection in _get_chroma_client().list_collections()]
-    return collection_name in names
+        if mode == "sparse":
+            rank = Knn(query=query, key=SPARSE_VECTOR_KEY, limit=limit)
+        else:
+            rank = Rrf(
+                ranks=[
+                    Knn(query=self.dense.embed_query(query), limit=limit, return_rank=True),
+                    Knn(query=query, key=SPARSE_VECTOR_KEY, limit=limit, return_rank=True),
+                ],
+                weights=[
+                    float(dense_weight if dense_weight is not None else _search_config_value("dense_weight", 0.5)),
+                    float(sparse_weight if sparse_weight is not None else _search_config_value("sparse_weight", 0.5)),
+                ],
+                k=int(rrf_k if rrf_k is not None else _search_config_value("rrf_k", 60)),
+            )
+        search = Search(where=metadata_filter, rank=rank, limit=limit, select=[K.DOCUMENT, K.SCORE, "metadata"])
+        rows = self._collection().search(search).rows()
+        records = rows[0] if rows else []
+        results = []
+        for rank_index, record in enumerate(records):
+            if record["document"] is None:
+                continue
+            results.append({
+                "id": record["id"],
+                "content": record["document"],
+                "metadata": record["metadata"] or {},
+                "_score": 1.0 / (rank_index + 1),
+            })
+        return results
 
+    def _delete_by_filter(self, metadata_filter: dict) -> int:
+        before = len((self._collection_get(metadata_filter).get("ids") or []))
+        if before:
+            self._collection().delete(where=metadata_filter)
+        return before
 
-def drop_app_collection(app_id: str) -> bool:
-    collection_name = collection_name_for_app(app_id)
-    if not app_collection_exists(app_id):
-        return False
-    _get_chroma_client().delete_collection(collection_name)
-    _stores.clear()
-    return True
+    def _collection_get(self, metadata_filter: dict | None) -> dict:
+        if metadata_filter is None:
+            return self._collection().get(include=["documents", "metadatas"])
+        return self._collection().get(where=metadata_filter, include=["documents", "metadatas"])
 
+    def _collection(self):
+        return self._client().get_collection(self._chunks_collection())
 
-def init_store(
-    dense: Dense | None = None,
-    sparse: Sparse | None = None,
-    persist_dir: str | None = None,
-):
-    global _ready
-    _configure_store(persist_dir)
-    _init_dense(dense)
-    _init_sparse(sparse)
-    _ready = True
-
-
-def init_search():
-    init_store()
-
-
-def _configure_store(
-    persist_dir: str | None = None,
-):
-    global _persist_dir
-    if persist_dir is not None:
-        _persist_dir = persist_dir
-
-
-def is_search_ready() -> bool:
-    return _ready
-
-
-def _require_search_ready():
-    if not _ready:
-        raise RuntimeError("search is not initialized")
-
-
-def _init_dense(dense: Dense | None = None) -> Dense:
-    global _dense
-    if _dense is None:
-        _dense = dense or HuggingFaceDense()
-    if not _dense.ready:
-        raise RuntimeError("dense is not initialized")
-    return _dense
-
-
-def _init_sparse(sparse: Sparse | None = None) -> Sparse | None:
-    global _sparse
-    _sparse = sparse
-    if _sparse is not None and not _sparse.ready:
-        raise RuntimeError("sparse is not initialized")
-    return _sparse
-
-
-def _get_dense() -> Dense:
-    if _dense is None:
-        raise RuntimeError("search is not initialized")
-    return _dense
-
-
-def _get_langchain_dense():
-    return _get_dense()
-
-
-def _get_sparse() -> Sparse | None:
-    return _sparse
-
-
-def _sparse_uses_store(sparse: Sparse | None = None) -> bool:
-    candidate = _get_sparse() if sparse is None else sparse
-    return isinstance(candidate, SparseEmbeddingFunction)
-
-
-def sparse_uses_store(sparse: Sparse | None = None) -> bool:
-    return _sparse_uses_store(sparse)
-
-
-def _store_for(mode: SearchMode):
-    _require_search_ready()
-    return _collection()
-
-
-def _get_store_unchecked(mode: SearchMode):
-    return _collection()
-
-
-def _get_chroma_client():
-    global _client
-    if _client is None:
-        import chromadb
-
-        _client = chromadb.PersistentClient(path=_persist_path(_persist_dir))
-    return _client
+    def _chunks_collection(self) -> str:
+        return current_collection()
 
 
 def _persist_path(persist_dir: str | None, project_root: Path = PROJECT_ROOT) -> str | None:
@@ -262,38 +289,6 @@ def _persist_path(persist_dir: str | None, project_root: Path = PROJECT_ROOT) ->
     return str(path)
 
 
-def _ensure_collection() -> None:
-    client = _get_chroma_client()
-    collection_name = _chunks_collection()
-    if _sparse_uses_store():
-        try:
-            client.get_or_create_collection(
-                name=collection_name,
-                schema=_chroma_schema(),
-                embedding_function=None,
-            )
-        except Exception as exc:
-            if "Sparse vector indexing is not enabled in local" in str(exc):
-                raise RuntimeError(
-                    "本地 Chroma 不支持 vector sparse。Chroma 本地配置请使用 sparse.type=bm25。"
-                ) from exc
-            raise
-        return
-    client.get_or_create_collection(name=collection_name, embedding_function=None)
-
-
-def _chroma_schema():
-    from chromadb import K, Schema, SparseVectorIndexConfig
-
-    return Schema().create_index(
-        SparseVectorIndexConfig(
-            embedding_function=_get_sparse(),
-            source_key=K.DOCUMENT,
-        ),
-        key=SPARSE_VECTOR_KEY,
-    )
-
-
 def _distance_to_score(distance: float) -> float:
     return 1.0 / (1.0 + float(distance))
 
@@ -302,129 +297,8 @@ def _search_config_value(key: str, default):
     return SEARCH_CONFIG.get(key, default)
 
 
-def search_dense(query: str, limit: int, metadata_filter: dict | None) -> list[dict]:
-    rows = _collection().query(
-        query_embeddings=[_get_dense().embed_query(query)],
-        n_results=limit,
-        where=metadata_filter,
-        include=["documents", "metadatas", "distances"],
-    )
-    return _query_rows_to_items(rows)
-
-
-def search_sparse(query: str, limit: int, metadata_filter: dict | None) -> list[dict]:
-    docs = _search_sparse_or_hybrid("sparse", query, limit, metadata_filter)
-    return _documents_with_scores_to_items(docs)
-
-
-def search_hybrid(
-    query: str,
-    limit: int,
-    metadata_filter: dict | None,
-    dense_weight: float,
-    sparse_weight: float,
-    rrf_k: int,
-) -> list[dict]:
-    docs = _search_sparse_or_hybrid("hybrid", query, limit, metadata_filter, dense_weight, sparse_weight, rrf_k)
-    return _documents_with_scores_to_items(docs)
-
-
-def _search_sparse_or_hybrid(
-    mode: SearchMode,
-    query: str,
-    limit: int,
-    metadata_filter: dict,
-    dense_weight: float | None = None,
-    sparse_weight: float | None = None,
-    rrf_k: int | None = None,
-):
-    from chromadb import K, Knn, Rrf, Search
-
-    if mode == "sparse":
-        rank = Knn(query=query, key=SPARSE_VECTOR_KEY, limit=limit)
-    else:
-        rank = Rrf(
-            ranks=[
-                Knn(query=_get_dense().embed_query(query), limit=limit, return_rank=True),
-                Knn(query=query, key=SPARSE_VECTOR_KEY, limit=limit, return_rank=True),
-            ],
-            weights=[
-                float(dense_weight if dense_weight is not None else _search_config_value("dense_weight", 0.5)),
-                float(sparse_weight if sparse_weight is not None else _search_config_value("sparse_weight", 0.5)),
-            ],
-            k=int(rrf_k if rrf_k is not None else _search_config_value("rrf_k", 60)),
-        )
-    search = Search(where=metadata_filter, rank=rank, limit=limit, select=[K.DOCUMENT, K.SCORE, "metadata"])
-    rows = _collection().search(search).rows()
-    records = rows[0] if rows else []
-    results = []
-    for rank_index, record in enumerate(records):
-        if record["document"] is None:
-            continue
-        results.append({
-            "id": record["id"],
-            "content": record["document"],
-            "metadata": record["metadata"] or {},
-            "_score": 1.0 / (rank_index + 1),
-        })
-    return results
-
-
-def add_file_chunks(chunks: list[dict], file_id: str) -> int:
-    if not chunks:
-        return 0
-    if not file_id:
-        raise ValueError("file_id is required")
-    _require_search_ready()
-    delete_file_chunks(file_id)
-    _collection().add(
-        ids=[_point_id(chunk["id"]) for chunk in chunks],
-        documents=[chunk["content"] for chunk in chunks],
-        metadatas=[_metadata_for_chunk(chunk, file_id) for chunk in chunks],
-        embeddings=_get_dense().embed_documents([chunk["content"] for chunk in chunks]),
-    )
-    return len(chunks)
-
-
-def delete_file_chunks(file_id: str) -> int:
-    return _delete_by_filter(_file_payload_filter([file_id]))
-
-
-def get_total_chunks(file_ids: list[str] | None = None) -> int:
-    return len(get_search_documents(build_file_filter(file_ids)))
-
-
-def get_search_documents(metadata_filter: dict | None) -> list[dict]:
-    rows = _collection_get(metadata_filter)
-    return _rows_to_documents(rows)
-
-
-def list_chunks(file_ids: list[str] | None = None, limit: int = 50, cursor: str | None = None) -> dict:
-    if limit <= 0:
-        raise ValueError("limit must be greater than 0")
-    limit = min(limit, 200)
-    rows = _collection_get(build_file_filter(file_ids))
-    documents = sorted(_rows_to_documents(rows), key=_chunk_sort_key)
-    start = _chunk_cursor_position(documents, cursor)
-    page_rows = documents[start:start + limit]
-    return {
-        "documents": page_rows,
-        "next_cursor": _encode_chunk_cursor(page_rows[-1]) if start + limit < len(documents) and page_rows else None,
-        "has_more": start + limit < len(documents),
-    }
-
-
-def get_dense_vector(chunk_id: str) -> list[float] | None:
-    rows = _collection().get(ids=[chunk_id], include=["embeddings"])
-    embeddings = rows.get("embeddings")
-    if embeddings is None or len(embeddings) == 0:
-        return None
-    vector = embeddings[0]
-    return vector.tolist() if hasattr(vector, "tolist") else list(vector)
-
-
-def get_sparse_vector(chunk_id: str) -> dict | None:
-    raise NotImplementedError("sparse vector is not supported by current store")
+def _documents_with_scores_to_items(docs: list[dict]) -> list[dict]:
+    return docs
 
 
 def _rows_to_documents(rows: dict) -> list[dict]:
@@ -479,14 +353,6 @@ def _decode_chunk_cursor(cursor: str) -> tuple[str, int, str]:
     return (str(data["file_id"]), int(data["chunk_index"]), str(data["chunk_id"]))
 
 
-def build_file_filter(file_ids: list[str] | None = None) -> dict | None:
-    if file_ids is None:
-        return None
-    if not file_ids:
-        raise ValueError("file_ids cannot be empty")
-    return _file_payload_filter(file_ids)
-
-
 def _metadata_for_chunk(chunk: dict, file_id: str) -> dict:
     metadata = dict(chunk.get("metadata") or {})
     metadata["file_id"] = file_id
@@ -499,27 +365,6 @@ def _metadata_for_chunk(chunk: dict, file_id: str) -> dict:
 
 def _file_payload_filter(file_ids: list[str]) -> dict:
     return {"file_id": {"$in": file_ids}}
-
-
-def _delete_by_filter(metadata_filter: dict) -> int:
-    before = len((_collection_get(metadata_filter).get("ids") or []))
-    if before:
-        _collection().delete(where=metadata_filter)
-    return before
-
-
-def _collection_get(metadata_filter: dict | None) -> dict:
-    if metadata_filter is None:
-        return _collection().get(include=["documents", "metadatas"])
-    return _collection().get(where=metadata_filter, include=["documents", "metadatas"])
-
-
-def _collection():
-    return _get_chroma_client().get_collection(_chunks_collection())
-
-
-def _chunks_collection() -> str:
-    return current_collection()
 
 
 def _query_rows_to_items(rows: dict) -> list[dict]:

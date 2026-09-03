@@ -27,7 +27,8 @@ def test_chroma_store_keeps_absolute_persist_dir(tmp_path):
 
 
 def test_chroma_list_chunks_uses_stable_cursor_order(monkeypatch):
-    from rag.store import chroma
+    from rag.scope import app_collection
+    from rag.store.chroma import ChromaStore
 
     calls = []
 
@@ -45,10 +46,17 @@ def test_chroma_list_chunks_uses_stable_cursor_order(monkeypatch):
                 ],
             }
 
-    monkeypatch.setattr(chroma, "_collection", lambda: FakeCollection())
+    class FakeClient:
+        def get_collection(self, name):
+            return FakeCollection()
 
-    first_page = chroma.list_chunks(file_ids=None, limit=1)
-    page = chroma.list_chunks(file_ids=None, limit=2, cursor=first_page["next_cursor"])
+    store = ChromaStore()
+    store.client = FakeClient()
+    store._ready = True
+
+    with app_collection("imsdom"):
+        first_page = store.list_chunks(file_ids=None, limit=1)
+        page = store.list_chunks(file_ids=None, limit=2, cursor=first_page["next_cursor"])
 
     assert [document["id"] for document in first_page["documents"]] == ["chunk-1"]
     assert [document["id"] for document in page["documents"]] == ["chunk-2", "chunk-4"]

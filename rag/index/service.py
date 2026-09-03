@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import uuid
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
+from contextvars import copy_context
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
@@ -24,11 +26,32 @@ def index_file(application, file_id: str, path: str | Path, filename: str, extra
         if extra_metadata:
             chunk_metadata.update(extra_metadata)
         chunk_metadata.setdefault("created_at", created_at)
-    count = application.store.add_file_chunks(chunks, file_id=file_id)
     sparse = getattr(application, "sparse", None)
-    if sparse is not None and hasattr(sparse, "add_file_chunks"):
+    if _uses_independent_sparse_index(application.store, sparse):
         sparse.delete_file_chunks(file_id)
-        sparse.add_file_chunks(chunks, file_id=file_id)
+        return _add_store_and_sparse_chunks(application.store, sparse, chunks, file_id)
+    return application.store.add_file_chunks(chunks, file_id=file_id)
+
+
+def _uses_independent_sparse_index(store, sparse) -> bool:
+    if sparse is None:
+        return False
+    if not callable(getattr(sparse, "add_file_chunks", None)) or not callable(getattr(sparse, "delete_file_chunks", None)):
+        return False
+    sparse_uses_store = getattr(store, "sparse_uses_store", None)
+    if callable(sparse_uses_store) and sparse_uses_store(sparse):
+        return False
+    return True
+
+
+def _add_store_and_sparse_chunks(store, sparse, chunks: list[dict], file_id: str) -> int:
+    store_context = copy_context()
+    sparse_context = copy_context()
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        store_future = executor.submit(store_context.run, store.add_file_chunks, chunks, file_id)
+        sparse_future = executor.submit(sparse_context.run, sparse.add_file_chunks, chunks, file_id)
+        count = store_future.result()
+        sparse_future.result()
     return count
 
 

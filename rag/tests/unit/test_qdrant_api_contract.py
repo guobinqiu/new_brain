@@ -197,9 +197,47 @@ def test_index_file_writes_configured_indexed_sparse_backend(tmp_path):
     count = index_file(Application(), "file-1", path, "a.txt")
 
     assert count == 1
-    assert [call[0] for call in calls] == ["store", "sparse_delete", "sparse_add"]
-    assert calls[1] == ("sparse_delete", "file-1")
-    assert calls[2][1] == "file-1"
+    assert calls[0] == ("sparse_delete", "file-1")
+    assert "store" in [call[0] for call in calls]
+    assert "sparse_add" in [call[0] for call in calls]
+
+
+def test_index_file_writes_store_and_indexed_sparse_backend_concurrently(tmp_path):
+    import threading
+    from rag.index.service import index_file
+
+    sparse_started = threading.Event()
+    overlaps = []
+
+    class Parser:
+        def parse_file(self, path, *, original_filename, ocr):
+            return [{"id": "chunk-1", "content": "hello", "metadata": {"filename": original_filename, "chunk_index": 0}}]
+
+    class Store:
+        def add_file_chunks(self, chunks, file_id):
+            overlaps.append(sparse_started.wait(timeout=0.2))
+            return len(chunks)
+
+    class Sparse:
+        def delete_file_chunks(self, file_id):
+            pass
+
+        def add_file_chunks(self, chunks, file_id):
+            sparse_started.set()
+
+    class Application:
+        parser = Parser()
+        store = Store()
+        sparse = Sparse()
+        ocr = object()
+
+    path = tmp_path / "a.txt"
+    path.write_text("hello", encoding="utf-8")
+
+    count = index_file(Application(), "file-1", path, "a.txt")
+
+    assert count == 1
+    assert overlaps == [True]
 
 
 def test_create_index_job_returns_429_when_queue_rejects(monkeypatch):

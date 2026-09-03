@@ -9,26 +9,35 @@ from rag.index.service import index_presigned_object
 
 logger = logging.getLogger("rag.index_consumer")
 
-# 模块级单例，由 ``InlineIndexConsumer.start`` 注册；``index_queue()`` 负责读取，
-# enqueue_index_job（queue.py）通过它拿到活队列。
-_consumer = None
-
 # 进程内队列不是真 broker，这两个值不进运维配置面，硬编码默认值。
 _DEFAULT_MAX_PENDING_JOBS = 10      # 等待队列容量：满了入队端点返回 429
 _DEFAULT_JOB_RETRY_MAX = 2          # 可重试失败最多重入队 2 次，仍失败则放弃
 
 
+class _ConsumerRegistry:
+    def __init__(self) -> None:
+        self.consumer = None
+
+    def queue(self) -> _queue.Queue:
+        if self.consumer is None:
+            raise RuntimeError("no inline index consumer registered")
+        return self.consumer.queue
+
+    def register(self, consumer) -> None:
+        self.consumer = consumer
+
+
+_registry = _ConsumerRegistry()
+
+
 def index_queue() -> _queue.Queue:
     """返回已注册消费器持有的 queue.Queue。"""
-    if _consumer is None:
-        raise RuntimeError("no inline index consumer registered")
-    return _consumer.queue
+    return _registry.queue()
 
 
 def _register_consumer(consumer) -> None:
-    """模块级单例注册；传 ``None`` 清空（测试隔离用）。"""
-    global _consumer
-    _consumer = consumer
+    """注册进程内消费器；传 ``None`` 清空（测试隔离用）。"""
+    _registry.register(consumer)
 
 
 class InlineIndexConsumer:

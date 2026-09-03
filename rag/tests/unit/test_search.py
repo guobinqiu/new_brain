@@ -1,5 +1,6 @@
 import json
 import logging
+from contextlib import nullcontext
 from io import StringIO
 
 import pytest
@@ -33,6 +34,14 @@ class FakeStore:
         self.calls.append(("build_file_filter", tuple(file_ids or [])))
         return ("file-filter", tuple(file_ids or []))
 
+    def app_collection_exists(self, app_id):
+        self.calls.append(("app_collection_exists", app_id))
+        return True
+
+    def app_context(self, app_id):
+        self.calls.append(("app_context", app_id))
+        return nullcontext()
+
     def search_dense(self, query, limit, metadata_filter):
         self.calls.append(("search_dense", query, limit, metadata_filter))
         return [{"id": "dense-1", "content": "dense", "metadata": {}, "_score": 0.8}]
@@ -51,6 +60,18 @@ class FakeStore:
 
     def sparse_uses_store(self, sparse=None):
         return False
+
+
+class FakeTracedVectorStore(FakeStore):
+    type = "qdrant"
+
+    def encode_dense_query(self, query):
+        self.calls.append(("encode_dense_query", query))
+        return [0.1, 0.2, 0.3]
+
+    def query_dense_vector(self, query_vector, limit, metadata_filter):
+        self.calls.append(("query_dense_vector", query_vector, limit, metadata_filter))
+        return [{"id": "dense-1", "content": "dense", "metadata": {}, "_score": 0.8}]
 
 
 class FakeVectorSparseStore(FakeStore):
@@ -280,6 +301,31 @@ def test_executor_search_trace_stages_include_backend_and_retriever_fields():
     assert stages["fusion"]["hit_count"] == 2
 
 
+def test_dense_trace_splits_query_embedding_and_vector_query():
+    import rag.search as search_mod
+
+    store = FakeTracedVectorStore()
+    executor = search_mod._SearchExecutor(
+        search_mod.SearchPlan("query", mode="dense", top_k=2),
+        store=store,
+        search_trace=True,
+    )
+
+    assert [item["id"] for item in executor.execute()] == ["dense-1"]
+
+    stages = {stage["name"]: stage for stage in executor.trace.result["stages"]}
+    assert stages["dense_encode"]["backend"] == "model"
+    assert stages["dense_encode"]["retriever"] == "dense"
+    assert stages["dense_query"]["backend"] == "qdrant"
+    assert stages["dense_query"]["retriever"] == "dense"
+    assert stages["dense_query"]["hit_count"] == 1
+    assert store.calls == [
+        ("build_file_filter", ()),
+        ("encode_dense_query", "query"),
+        ("query_dense_vector", [0.1, 0.2, 0.3], 2, ("file-filter", ())),
+    ]
+
+
 def test_hybrid_executor_uses_vector_sparse_backend():
     import rag.search as search_mod
 
@@ -318,8 +364,7 @@ def test_hybrid_executor_uses_indexed_sparse_backend():
     assert results[1]["metadata"] == {"app_id": "imsdom", "file_ids": ["file_a"]}
 
 
-@pytest.mark.parametrize("mode", ["sparse", "hybrid"])
-def test_search_service_rejects_sparse_modes_when_sparse_is_disabled(monkeypatch, mode):
+def test_search_service_rejects_sparse_mode_when_sparse_is_disabled(monkeypatch):
     from fastapi import HTTPException
 
     from rag.api.runtime import runtime
@@ -331,10 +376,29 @@ def test_search_service_rejects_sparse_modes_when_sparse_is_disabled(monkeypatch
     monkeypatch.setattr(runtime.application, "sparse", None)
 
     with pytest.raises(HTTPException) as exc:
-        service.search(SearchRequest(query="query", app_id="imsdom", mode=mode), Principal(type="admin", app_id=""))
+        service.search(SearchRequest(query="query", app_id="imsdom", mode="sparse"), Principal(type="admin", app_id=""))
 
     assert exc.value.status_code == 400
     assert exc.value.detail == "sparse is not enabled"
+
+
+def test_search_service_falls_back_hybrid_to_dense_when_sparse_is_disabled(monkeypatch):
+    from rag.api.runtime import runtime
+    from rag.api.schemas import SearchRequest
+    from rag.api.services import search as service
+    from rag.auth import Principal
+
+    store = FakeStore()
+    monkeypatch.setattr(service, "require_ready", lambda: None)
+    monkeypatch.setattr(runtime.application, "sparse", None)
+    monkeypatch.setattr(runtime.application, "rerank", None)
+    monkeypatch.setattr(runtime.application, "store", store)
+
+    body = service.search(SearchRequest(query="query", app_id="imsdom", mode="hybrid"), Principal(type="admin", app_id=""))
+
+    assert body["mode"] == "dense"
+    assert [item["id"] for item in body["results"]] == ["dense-1"]
+    assert ("search_dense", "query", 5, ("file-filter", ())) in store.calls
 
 
 def test_executor_does_not_log_search_trace_when_disabled(monkeypatch):

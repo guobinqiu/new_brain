@@ -63,7 +63,19 @@ class Store(Protocol):
     def build_file_filter(self, file_ids: list[str] | None = None):
         ...
 
+    def encode_dense_query(self, query: str):
+        ...
+
+    def query_dense_vector(self, query_vector, limit: int, metadata_filter: object) -> list[dict]:
+        ...
+
     def search_dense(self, query: str, limit: int, metadata_filter: object) -> list[dict]:
+        ...
+
+    def encode_sparse_query(self, query: str):
+        ...
+
+    def query_sparse_vector(self, query_vector, limit: int, metadata_filter: object) -> list[dict]:
         ...
 
     def search_sparse(self, query: str, limit: int, metadata_filter: object) -> list[dict]:

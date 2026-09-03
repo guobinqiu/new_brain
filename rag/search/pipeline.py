@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from contextlib import nullcontext
 from typing import Any
 
 from langchain_core.callbacks import CallbackManagerForRetrieverRun
@@ -24,7 +25,6 @@ class SearchPipeline:
         self.ready = False
 
     def start(self) -> None:
-        set_default_store(self.store)
         if self.sparse is not None and not self.sparse.ready:
             raise RuntimeError("sparse is not initialized")
         self.ready = True
@@ -96,11 +96,11 @@ class _SearchRetriever(BaseRetriever):
 
     def _retrieve_items(self, context: dict[str, Any]) -> list[dict]:
         if self.mode == "dense":
-            return _retrieve_dense(self.store, context["metadata_filter"], self.query, context["retrieve_limit"])
+            return _retrieve_dense(self.store, context["metadata_filter"], self.query, context["retrieve_limit"], self.trace)
         if self.mode == "sparse":
-            return _retrieve_sparse(self.store, context["metadata_filter"], self.query, context["retrieve_limit"], self.sparse, self.app_id, self.file_ids)
+            return _retrieve_sparse(self.store, context["metadata_filter"], self.query, context["retrieve_limit"], self.sparse, self.app_id, self.file_ids, self.trace)
         if self.mode == "sparse_vector":
-            return _retrieve_sparse(self.store, context["metadata_filter"], self.query, context["retrieve_limit"], self.sparse, self.app_id, self.file_ids)
+            return _retrieve_sparse(self.store, context["metadata_filter"], self.query, context["retrieve_limit"], self.sparse, self.app_id, self.file_ids, self.trace)
         if self.mode == "hybrid":
             return _retrieve_store_hybrid(self.store, context["metadata_filter"], self.query, context["retrieve_limit"])
         raise ValueError(f"unsupported retriever mode: {self.mode}")
@@ -135,15 +135,15 @@ class _SearchExecutor:
     def __init__(
         self,
         plan: SearchPlan,
+        store: Store,
         rerank: Rerank | None = None,
         sparse: Sparse | None = None,
-        store: Store | None = None,
         search_trace: bool = False,
     ):
         self.plan = plan
         self.rerank = rerank
         self.sparse = sparse
-        self.store = store or _active_store()
+        self.store = store
         self.runner = SearchRunner()
         self._runtime_retrieve_limit = self.plan.top_k
         self.trace = SearchTrace(search_trace)
@@ -310,7 +310,16 @@ class _SearchExecutor:
         return items
 
 
-def _retrieve_dense(store: Store, metadata_filter, query: str, limit: int) -> list[dict]:
+def _retrieve_dense(store: Store, metadata_filter, query: str, limit: int, trace=None) -> list[dict]:
+    if hasattr(store, "encode_dense_query") and hasattr(store, "query_dense_vector"):
+        with _optional_stage(trace, "dense_encode", backend="model", retriever="dense") as stage:
+            query_vector = store.encode_dense_query(query)
+            stage["dimension"] = len(query_vector) if hasattr(query_vector, "__len__") else None
+        with _optional_stage(trace, "dense_query", backend=_store_backend(store), retriever="dense") as stage:
+            items = store.query_dense_vector(query_vector, limit, metadata_filter)
+            stage["count"] = len(items)
+            stage["hit_count"] = len(items)
+            return items
     return store.search_dense(query, limit, metadata_filter)
 
 
@@ -322,21 +331,39 @@ def _retrieve_sparse(
     sparse: Sparse | None = None,
     app_id: str | None = None,
     file_ids: list[str] | None = None,
+    trace=None,
 ) -> list[dict]:
     if store.sparse_uses_store(sparse):
-        return _retrieve_store_sparse(store, metadata_filter, query, limit)
+        return _retrieve_store_sparse(store, metadata_filter, query, limit, trace)
     if sparse is None:
         raise RuntimeError("sparse is not initialized")
     search_index = getattr(sparse, "search_index", None)
     if search_index is not None:
-        return search_index(query, limit, app_id=app_id, file_ids=file_ids)
+        with _optional_stage(trace, "sparse_query", backend=getattr(sparse, "backend", "app"), retriever=getattr(sparse, "retriever", "bm25")) as stage:
+            items = search_index(query, limit, app_id=app_id, file_ids=file_ids)
+            stage["count"] = len(items)
+            stage["hit_count"] = len(items)
+            return items
     documents = store.get_search_documents(metadata_filter)
     if not sparse.ready:
         raise RuntimeError("sparse is not initialized")
-    return sparse.search(query, documents, limit)
+    with _optional_stage(trace, "sparse_query", backend=getattr(sparse, "backend", "app"), retriever=getattr(sparse, "retriever", "bm25")) as stage:
+        items = sparse.search(query, documents, limit)
+        stage["count"] = len(items)
+        stage["hit_count"] = len(items)
+        return items
 
 
-def _retrieve_store_sparse(store: Store, metadata_filter, query: str, limit: int) -> list[dict]:
+def _retrieve_store_sparse(store: Store, metadata_filter, query: str, limit: int, trace=None) -> list[dict]:
+    if hasattr(store, "encode_sparse_query") and hasattr(store, "query_sparse_vector"):
+        with _optional_stage(trace, "sparse_encode") as stage:
+            query_vector = store.encode_sparse_query(query)
+            stage.update(_sparse_encode_fields(query_vector))
+        with _optional_stage(trace, "sparse_query", backend=_store_backend(store), retriever=_sparse_retriever(query_vector)) as stage:
+            items = store.query_sparse_vector(query_vector, limit, metadata_filter)
+            stage["count"] = len(items)
+            stage["hit_count"] = len(items)
+            return items
     return store.search_sparse(query, limit, metadata_filter)
 
 
@@ -394,6 +421,29 @@ def _documents_to_items(documents: list[Document]) -> list[dict]:
     return [dict(document.metadata["_rag_item"]) for document in documents]
 
 
+def _optional_stage(trace, name: str, **fields):
+    if trace is None:
+        return nullcontext(fields)
+    return trace.stage(name, **fields)
+
+
+def _sparse_dimension(vector) -> int | None:
+    indices = getattr(vector, "indices", None)
+    if indices is None and isinstance(vector, dict):
+        indices = vector.get("indices") or vector.keys()
+    return len(indices) if indices is not None else None
+
+
+def _sparse_encode_fields(vector) -> dict[str, Any]:
+    if isinstance(vector, str):
+        return {"backend": "app", "retriever": "query"}
+    return {"backend": "model", "retriever": "sparse_vector", "dimension": _sparse_dimension(vector)}
+
+
+def _sparse_retriever(vector) -> str:
+    return "bm25" if isinstance(vector, str) else "sparse_vector"
+
+
 def _store_backend(store: Store) -> str:
     store_type = getattr(store, "type", None)
     if store_type:
@@ -406,17 +456,3 @@ def _store_backend(store: Store) -> str:
     if "chroma" in name:
         return "chroma"
     return name.removesuffix("store") or "unknown"
-
-
-_default_store: Store | None = None
-
-
-def set_default_store(store: Store) -> None:
-    global _default_store
-    _default_store = store
-
-
-def _active_store() -> Store:
-    if _default_store is None:
-        raise RuntimeError("store is not initialized")
-    return _default_store

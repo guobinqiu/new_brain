@@ -104,3 +104,27 @@ def test_table_uses_first_single_cell_row_as_title():
     assert len(blocks) == 1
     assert blocks[0].text.startswith("5. 运维复杂度对比\n| 向量库 | 安装难度 | 集群管理 |")
     assert "| 5. 运维复杂度对比 | 列2 | 列3 |" not in blocks[0].text
+
+
+def test_xlsx_sheets_are_read_as_table_blocks(tmp_path):
+    from openpyxl import Workbook
+    from rag.parser.common.excel import xlsx_to_table_blocks
+
+    xlsx_file = tmp_path / "table.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "数据库能力"
+    sheet.append(["向量库", "能力"])
+    sheet.append(["Qdrant", "过滤"])
+    sheet.append([])
+    sheet.append(["组件", "状态"])
+    sheet.append(["Milvus", "可选"])
+    workbook.save(str(xlsx_file))
+
+    blocks = xlsx_to_table_blocks(str(xlsx_file), MineruParserConfig())
+
+    assert len(blocks) == 2
+    assert blocks[0].text.startswith("工作表：数据库能力\n| 向量库 | 能力 |")
+    assert "| Qdrant | 过滤 |" in blocks[0].text
+    assert blocks[1].text.startswith("工作表：数据库能力\n| 组件 | 状态 |")
+    assert "| Milvus | 可选 |" in blocks[1].text

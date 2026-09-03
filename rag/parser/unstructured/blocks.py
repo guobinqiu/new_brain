@@ -1,4 +1,5 @@
 import importlib
+import os
 
 from rag.parser.common.schema import Block, TableBlock, TextBlock
 from rag.parser.common.table_transform import table_html_to_blocks
@@ -6,7 +7,7 @@ from rag.schema import UnstructuredParserConfig
 
 
 def partition_blocks(filepath: str, config: UnstructuredParserConfig) -> list[Block]:
-    return elements_to_blocks(partition_file(filepath, config), config)
+    return elements_to_blocks(partition_file(filepath, config), config, os.path.splitext(filepath)[1].lower())
 
 
 def partition_file(filepath: str, config: UnstructuredParserConfig):
@@ -22,7 +23,7 @@ def partition_file(filepath: str, config: UnstructuredParserConfig):
     )
 
 
-def elements_to_blocks(elements, config: UnstructuredParserConfig) -> list[Block]:
+def elements_to_blocks(elements, config: UnstructuredParserConfig, ext: str = "") -> list[Block]:
     blocks: list[Block] = []
     for element in elements:
         text = element_text(element)
@@ -35,8 +36,19 @@ def elements_to_blocks(elements, config: UnstructuredParserConfig) -> list[Block
             else:
                 blocks.append(TableBlock(text))
         else:
-            blocks.append(TextBlock(text))
+            blocks.append(TextBlock(text, kind=element_text_kind(element, ext)))
     return blocks
+
+
+def element_text_kind(element, ext: str) -> str:
+    category = getattr(element, "category", None) or element.__class__.__name__
+    if ext == ".pdf":
+        return "line"
+    if category == "Title":
+        return "section_title"
+    if category == "ListItem":
+        return "list_item"
+    return "paragraph"
 
 
 def element_text(element) -> str:

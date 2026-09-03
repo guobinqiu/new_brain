@@ -3,8 +3,10 @@ import sys
 import json
 import time
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 import pytest
+import yaml
 from fastapi.testclient import TestClient
 from rag.auth import sign_request
 
@@ -12,67 +14,75 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
+
+def _test_database_url(value: str | None) -> str:
+    if not value:
+        return "postgresql://rag:rag@localhost:5432/rag_test"
+    parts = urlsplit(value)
+    return urlunsplit((parts.scheme, parts.netloc, "/rag_test", parts.query, parts.fragment))
+
+
 os.environ.setdefault("CONFIG_FILE", str(BACKEND_DIR / "config" / "qdrant-bgebase.yaml"))
-os.environ.setdefault("DATABASE_URL", "postgresql://rag:rag@localhost:5432/rag")
+os.environ["DATABASE_URL"] = os.environ.get("TEST_DATABASE_URL") or _test_database_url(os.environ.get("DATABASE_URL"))
 os.environ.setdefault("QDRANT_URL", "http://localhost:6333")
 os.environ.setdefault("OPENSEARCH_URL", "http://localhost:9200")
-TEST_APP_ID = "test_imsdom"
+TEST_APP_ID = "myapp"
+E2E_APP_ID = "myapp"
+
+
+def _is_integration_item(item) -> bool:
+    return item.get_closest_marker("integration") is not None or "/tests/integration/" in str(item.path)
 
 
 @pytest.fixture(autouse=True)
 def store_test_env(request, tmp_path):
-    """Save and restore Qdrant store module state for each test."""
+    """Save and restore test runtime state."""
     if request.node.get_closest_marker("benchmark"):
         yield
         return
 
-    import rag.store as st
     import rag.config as cf
     orig_config_file_env = os.environ.get("CONFIG_FILE")
+    orig_collection_prefix_env = os.environ.get("RAG_COLLECTION_PREFIX")
+    orig_s3_bucket_env = os.environ.get("S3_BUCKET")
     orig_config = dict(cf.SEARCH_CONFIG)
-    orig_client = st._client
-    orig_dense = st._dense
-    orig_sparse = st._sparse
-    stores = getattr(st, "_stores", None)
-    orig_stores = dict(stores) if stores is not None else None
-    orig_dense_vector_size = st._dense_vector_size
-    orig_ready = st._ready
-    import rag.search as search_module
-    orig_default_store = search_module._default_store
-
-    st.close_store()
-    search_module._default_store = None
+    is_e2e = request.node.get_closest_marker("e2e") is not None
+    touches_external_store = is_e2e or _is_integration_item(request.node)
+    if is_e2e:
+        os.environ["RAG_COLLECTION_PREFIX"] = os.environ.get("TEST_COLLECTION_PREFIX", "test")
+        os.environ["S3_BUCKET"] = os.environ.get("TEST_S3_BUCKET", "rag-test")
     app_chunks_collection = f"{TEST_APP_ID}_chunks"
-    _drop_qdrant_collection(cf.QDRANT_URL, app_chunks_collection)
-    test_config_path = tmp_path / "qdrant_test.yaml"
-    test_config_path.write_text(
-        (BACKEND_DIR / "config" / "qdrant-bgebase.yaml")
-        .read_text(encoding="utf-8")
-        .replace("auth:\n  admin:", f"auth:\n  registry_file: {tmp_path / 'apps.json'}\n  admin:"),
-        encoding="utf-8",
-    )
+    if touches_external_store:
+        _drop_qdrant_collection(cf.QDRANT_URL, app_chunks_collection)
+    _reset_rate_limit()
+    test_config_path = tmp_path / "app_test.yaml"
+    raw_config = yaml.safe_load(_config_path(os.environ["CONFIG_FILE"]).read_text(encoding="utf-8"))
+    raw_config["auth"]["registry_file"] = str(tmp_path / "apps.json")
+    raw_config["api"]["rate_limit"] = "10000/minute"
+    raw_config["api"]["rate_limit_index"] = "10000/minute"
+    _isolate_index_backends(raw_config, tmp_path)
+    test_config_path.write_text(yaml.safe_dump(raw_config, allow_unicode=True, sort_keys=False), encoding="utf-8")
     os.environ["CONFIG_FILE"] = str(test_config_path)
 
     yield
 
-    _drop_qdrant_collection(cf.QDRANT_URL, app_chunks_collection)
-    st.close_store()
+    _reset_rate_limit()
+    if touches_external_store:
+        _drop_qdrant_collection(cf.QDRANT_URL, app_chunks_collection)
     cf.SEARCH_CONFIG.clear()
     cf.SEARCH_CONFIG.update(orig_config)
-    st._client = orig_client
-    st._dense = orig_dense
-    st._sparse = orig_sparse
-    stores = getattr(st, "_stores", None)
-    if stores is not None and orig_stores is not None:
-        stores.clear()
-        stores.update(orig_stores)
-    st._dense_vector_size = orig_dense_vector_size
-    st._ready = orig_ready
-    search_module._default_store = orig_default_store
     if orig_config_file_env is None:
         os.environ.pop("CONFIG_FILE", None)
     else:
         os.environ["CONFIG_FILE"] = orig_config_file_env
+    if orig_collection_prefix_env is None:
+        os.environ.pop("RAG_COLLECTION_PREFIX", None)
+    else:
+        os.environ["RAG_COLLECTION_PREFIX"] = orig_collection_prefix_env
+    if orig_s3_bucket_env is None:
+        os.environ.pop("S3_BUCKET", None)
+    else:
+        os.environ["S3_BUCKET"] = orig_s3_bucket_env
 
 
 @pytest.fixture
@@ -83,14 +93,13 @@ def chroma_test_env(store_test_env):
 
 @pytest.fixture
 def api_client(store_test_env):
-    """FastAPI TestClient with isolated store module state."""
+    """FastAPI TestClient with the configured application."""
     import main
     from rag.api.runtime import runtime
 
     from rag.bootstrap import Application
-    from rag.database.base import FakeDatabase
     orig_application = runtime.application
-    runtime.set_application(Application(database=FakeDatabase(), sparse=FakeOpenSearchBM25Sparse()))
+    runtime.set_application(Application())
     orig_startup_in_background = runtime.startup_in_background
     runtime.startup_in_background = False
 
@@ -118,9 +127,8 @@ def anonymous_api_client(store_test_env):
     from rag.api.runtime import runtime
 
     from rag.bootstrap import Application
-    from rag.database.base import FakeDatabase
     orig_application = runtime.application
-    runtime.set_application(Application(database=FakeDatabase(), sparse=FakeOpenSearchBM25Sparse()))
+    runtime.set_application(Application())
     orig_startup_in_background = runtime.startup_in_background
     runtime.startup_in_background = False
 
@@ -146,6 +154,7 @@ class AppApiClient:
             body = json_dumps(json).encode("utf-8")
         timestamp = str(int(time.time()))
         headers = {
+            "Authorization": "",
             "content-type": "application/json",
             "x-app-id": self.app_id,
             "x-access-key": self.access_key,
@@ -156,87 +165,18 @@ class AppApiClient:
         return self._client.post(path, content=body, headers=headers, **kwargs)
 
 
-class FakeOpenSearchBM25Sparse:
-    backend = "opensearch"
-    retriever = "bm25"
-
-    def __init__(self):
-        self.ready = False
-        self._chunks = {}
-
-    def start(self):
-        self.ready = True
-
-    def stop(self):
-        self.ready = False
-
-    def add_file_chunks(self, chunks, file_id):
-        from rag.scope import current_app_id
-
-        app_id = current_app_id()
-        rows = self._chunks.setdefault(app_id, [])
-        rows.extend(
-            {
-                "id": chunk["id"],
-                "content": chunk.get("content", ""),
-                "metadata": {**dict(chunk.get("metadata") or {}), "file_id": file_id},
-            }
-            for chunk in chunks
-        )
-
-    def delete_file_chunks(self, file_id):
-        from rag.scope import current_app_id
-
-        app_id = current_app_id()
-        self._chunks[app_id] = [
-            chunk
-            for chunk in self._chunks.get(app_id, [])
-            if chunk.get("metadata", {}).get("file_id") != file_id
-        ]
-
-    def search(self, query, limit, *, app_id=None, file_ids=None):
-        from rag.scope import current_app_id
-
-        app_id = app_id or current_app_id()
-        query_lower = query.lower()
-        file_id_set = set(file_ids or [])
-        results = []
-        for chunk in self._chunks.get(app_id, []):
-            if file_id_set and chunk.get("metadata", {}).get("file_id") not in file_id_set:
-                continue
-            if query_lower in chunk.get("content", "").lower():
-                results.append({**chunk, "_score": 1.0})
-        return results[:limit]
-
-    def list_chunks(self, file_ids=None, limit=50, cursor=None):
-        from rag.scope import current_app_id
-
-        app_id = current_app_id()
-        file_id_set = set(file_ids or [])
-        rows = [
-            chunk
-            for chunk in self._chunks.get(app_id, [])
-            if not file_id_set or chunk.get("metadata", {}).get("file_id") in file_id_set
-        ]
-        rows.sort(key=lambda chunk: (chunk.get("metadata", {}).get("chunk_index") or 0, chunk.get("id") or ""))
-        offset = int(cursor or 0)
-        page_rows = rows[offset:offset + limit]
-        next_offset = offset + limit
-        return {
-            "documents": page_rows,
-            "next_cursor": str(next_offset) if next_offset < len(rows) else None,
-            "has_more": next_offset < len(rows),
-        }
-
-
 @pytest.fixture
 def app_api_client(api_client):
-    app_resp = api_client.post("/api/open/rag/apps", json={"app_id": TEST_APP_ID})
+    _drop_runtime_app_data(E2E_APP_ID)
+    app_resp = api_client.post("/api/open/rag/apps", json={"app_id": E2E_APP_ID})
     assert app_resp.status_code == 201, app_resp.text
-    db_resp = api_client.post(f"/api/open/rag/apps/{TEST_APP_ID}/database")
+    db_resp = api_client.post(f"/api/open/rag/apps/{E2E_APP_ID}/database")
     assert db_resp.status_code == 200, db_resp.text
     credential = app_resp.json()
-    return AppApiClient(api_client, TEST_APP_ID, credential["access_key"], credential["secret_key"])
+    try:
+        yield AppApiClient(api_client, E2E_APP_ID, credential["access_key"], credential["secret_key"])
+    finally:
+        _drop_runtime_app_data(E2E_APP_ID)
 
 
 def json_dumps(value) -> str:
@@ -281,22 +221,21 @@ def uploaded_chunks(initialized_store, test_txt_path):
 @pytest.fixture
 def initialized_store(store_test_env):
     """Store module after explicit startup initialization."""
-    import rag.store as store
     from rag.scope import app_collection
     from dense.huggingface import HuggingFaceDense
-    from rag.search import set_default_store
+    from rag.store.qdrant import QdrantStore
 
     dense = HuggingFaceDense()
     dense.start()
-    store.init_store(dense=dense)
-    set_default_store(store)
+    store = QdrantStore(dense=dense)
+    store.start()
     store.ensure_app_collection(TEST_APP_ID)
     with app_collection(TEST_APP_ID):
         yield store
 
 
-class FakeReranker:
-    """Deterministic fake: scores (query, content) pairs by content length.
+class DeterministicReranker:
+    """Deterministic reranker: scores (query, content) pairs by content length.
 
     Longer content gets a higher score. Replaces ``BAAI/bge-reranker-base``
     so tests never download or load the real CrossEncoder model.
@@ -306,7 +245,7 @@ class FakeReranker:
         return [float(len(p[1])) for p in pairs]
 
 
-class RealisticFakeReranker:
+class CrossEncoderLikeReranker:
     """Mimics sentence-transformers 5.x CrossEncoder: has predict(), no score().
 
     sentence-transformers 5.6.1 renamed ``CrossEncoder.score()`` to
@@ -325,14 +264,14 @@ class RealisticFakeReranker:
 
 @pytest.fixture(autouse=True)
 def mock_reranker(request, monkeypatch):
-    """Mock CrossEncoder loading so tests never download bge-reranker-base."""
-    if request.node.get_closest_marker("benchmark"):
+    """Replace CrossEncoder loading in non-e2e tests."""
+    if request.node.get_closest_marker("benchmark") or request.node.get_closest_marker("e2e"):
         yield
         return
 
     from rag.rerank.cross_encoder import CrossEncoderRerank
 
-    monkeypatch.setattr(CrossEncoderRerank, "_load_reranker", lambda self: FakeReranker())
+    monkeypatch.setattr(CrossEncoderRerank, "_load_reranker", lambda self: DeterministicReranker())
     yield
 
 
@@ -366,6 +305,72 @@ def _drop_qdrant_collection(url: str, collection_name: str) -> None:
             close()
     except Exception:
         pass
+
+
+def _reset_rate_limit() -> None:
+    try:
+        from rag.api.rate_limit import reset_rate_limit
+
+        reset_rate_limit()
+    except Exception:
+        pass
+
+
+def _drop_runtime_app_data(app_id: str) -> None:
+    try:
+        from rag.api.runtime import runtime
+
+        app = runtime.application
+        app.store.drop_app_collection(app_id)
+        sparse = getattr(app, "sparse", None)
+        if sparse is not None and hasattr(sparse, "drop_app_collection"):
+            sparse.drop_app_collection(app_id)
+        app.database.purge_app(app_id)
+        app.database.delete_app(app_id)
+    except Exception:
+        pass
+    _drop_test_storage_data(app_id)
+
+
+def _drop_test_storage_data(app_id: str) -> None:
+    try:
+        from rag.api.services.files import minio_client, storage_prefix
+
+        bucket = os.environ.get("S3_BUCKET", "rag-test")
+        client = minio_client()
+        if not client.bucket_exists(bucket):
+            return
+        for item in client.list_objects(bucket, prefix=storage_prefix(app_id), recursive=True):
+            client.remove_object(bucket, item.object_name)
+    except Exception:
+        pass
+
+
+def _isolate_index_backends(raw_config: dict, tmp_path: Path) -> None:
+    store = raw_config.get("store")
+    if isinstance(store, dict):
+        chroma = store.get("chroma")
+        if isinstance(chroma, dict):
+            chroma["persist_dir"] = str(tmp_path / "chroma_data")
+        milvus_lite = store.get("milvus_lite")
+        if isinstance(milvus_lite, dict):
+            milvus_lite["uri"] = str(tmp_path / "milvus_lite.db")
+    sparse = raw_config.get("sparse")
+    if isinstance(sparse, dict):
+        opensearch_bm25 = sparse.get("opensearch_bm25")
+        if isinstance(opensearch_bm25, dict):
+            opensearch_bm25["index_prefix"] = "test"
+        elif (sparse.get("type") or sparse.get("name")) == "opensearch_bm25":
+            sparse["index_prefix"] = "test"
+
+
+def _config_path(value: str) -> Path:
+    path = Path(value)
+    if path.is_absolute() or path.exists():
+        return path
+    if path.parts and path.parts[0] == "rag":
+        return BACKEND_DIR.parent / path
+    return BACKEND_DIR / "config" / value
 
 
 # ---------------------------------------------------------------------------

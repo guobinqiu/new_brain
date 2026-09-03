@@ -96,9 +96,13 @@ def database_principal(principal: Principal, app_id: str | None) -> Principal:
 def scoped_store(principal: Principal):
     scoped_methods = {
         "delete_file_chunks",
+        "encode_dense_query",
+        "encode_sparse_query",
         "get_search_documents",
         "get_total_chunks",
         "list_chunks",
+        "query_dense_vector",
+        "query_sparse_vector",
         "search_dense",
         "search_hybrid",
         "search_sparse",

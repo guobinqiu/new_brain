@@ -61,6 +61,7 @@ async def rag_prefetch_node(state: dict[str, Any]) -> dict[str, Any]:
 
     if not result.documents:
         # Still inject a marker so LLM knows RAG was attempted but found nothing
+        logger.info("rag_prefetch empty", query=query, status_code=result.status_code, error=result.error)
         return {"rag_context": "[RAG 检索完成，未找到相关文档]"}
 
     # Format documents as context
@@ -80,5 +81,18 @@ async def rag_prefetch_node(state: dict[str, Any]) -> dict[str, Any]:
         except Exception as e:
             logger.debug("writer.push rag_context failed", error=str(e)[:200])
 
-    logger.info("rag_prefetch done", query_len=len(query), doc_count=len(result.documents))
+    logger.info(
+        "rag_prefetch done",
+        query=query,
+        doc_count=len(result.documents),
+        elapsed_ms=result.elapsed_ms,
+        documents=[
+            {
+                "rank": index,
+                "id": doc.id,
+                "content": doc.content,
+            }
+            for index, doc in enumerate(result.documents, start=1)
+        ],
+    )
     return {"rag_context": context}

@@ -2,6 +2,9 @@ import pytest
 from uuid import UUID
 
 
+pytestmark = pytest.mark.integration
+
+
 def _create_minimal_pdf(path: str, text: str):
     """Create a valid minimal PDF containing *text* (ASCII-safe only)."""
     # Escape PDF string specials
@@ -373,7 +376,7 @@ class TestParserService:
 
         chunks = _parse_file(str(xlsx_file))
 
-        assert calls == ["xlsx"]
+        assert calls == []
         table_chunks = [chunk for chunk in chunks if "| Qdrant | 过滤 |" in chunk["content"]]
         assert len(table_chunks) == 1
         assert "工作表：数据库能力" in table_chunks[0]["content"]
@@ -416,7 +419,7 @@ class TestParserService:
         chunks = _parse_file(str(xlsx_file))
 
         combined = "\n".join(chunk["content"] for chunk in chunks)
-        assert calls == ["xlsx", "png"]
+        assert calls == ["png"]
         assert "Excel 图片说明" in combined
         assert "Excel 图片文字" in combined
 
@@ -968,7 +971,7 @@ class TestParserService:
         assert chunks[1]["content"] == "2. 查询类型对比\n\n| 向量库 | 稠密向量搜索 |\n| --- | --- |\n| Chroma | V |\n\n说明：V 表示支持，X 表示不支持"
         assert chunks[2]["content"] == "说明：V 表示支持，X 表示不支持"
 
-    def test_table_parser_keeps_adjacent_text_blocks_separate_before_chunking(self, tmp_path, monkeypatch):
+    def test_table_parser_merges_pdf_layout_text_before_chunking(self, tmp_path, monkeypatch):
         import json
         import rag.parser.mineru
         from rag.schema import ParserConfig
@@ -1006,9 +1009,8 @@ class TestParserService:
             parser=_mineru_parser(chunk_size=100, chunk_overlap=10),
         )
 
-        assert chunks[0]["content"] == "第一段正文"
-        assert chunks[1]["content"] == "第二段正文"
-        assert chunks[2]["content"] == "第二段正文\n\n| 向量库 | 规模 |\n| --- | --- |\n| Qdrant | 中 |"
+        assert chunks[0]["content"] == "第一段正文\n第二段正文"
+        assert chunks[1]["content"] == "第一段正文\n第二段正文\n\n| 向量库 | 规模 |\n| --- | --- |\n| Qdrant | 中 |"
 
     def test_table_parser_does_not_add_neighbor_table_context_to_table(self, tmp_path, monkeypatch):
         import json

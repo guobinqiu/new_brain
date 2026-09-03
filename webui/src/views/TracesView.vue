@@ -40,8 +40,20 @@
             <el-table-column :label="t('trace.columns.dense')" width="84">
               <template #default="{ row }"><StageCell :stage="stage(row, 'dense')" /></template>
             </el-table-column>
+            <el-table-column :label="t('trace.columns.denseEncode')" width="92">
+              <template #default="{ row }"><StageCell :stage="stage(row, 'dense_encode')" /></template>
+            </el-table-column>
+            <el-table-column :label="t('trace.columns.denseQuery')" width="92">
+              <template #default="{ row }"><StageCell :stage="stage(row, 'dense_query')" /></template>
+            </el-table-column>
             <el-table-column :label="t('trace.columns.sparse')" width="84">
               <template #default="{ row }"><StageCell :stage="stage(row, 'sparse')" /></template>
+            </el-table-column>
+            <el-table-column :label="t('trace.columns.sparseEncode')" width="92">
+              <template #default="{ row }"><StageCell :stage="stage(row, 'sparse_encode')" /></template>
+            </el-table-column>
+            <el-table-column :label="t('trace.columns.sparseQuery')" width="92">
+              <template #default="{ row }"><StageCell :stage="stage(row, 'sparse_query')" /></template>
             </el-table-column>
             <el-table-column :label="t('trace.columns.fusion')" width="84">
               <template #default="{ row }"><StageCell :stage="stage(row, 'fusion')" /></template>

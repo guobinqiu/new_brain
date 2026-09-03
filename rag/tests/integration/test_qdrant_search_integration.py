@@ -90,4 +90,4 @@ class TestQdrantSearchIntegration:
             store=store,
         ).execute()
 
-        assert [result["id"] for result in results] == [store._point_id(sparse_chunk_id)]
+        assert [result["id"] for result in results] == [sparse_chunk_id]

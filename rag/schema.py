@@ -67,6 +67,7 @@ class EmbeddingConfig:
     dense_batch_size: int = 4
     sparse_batch_size: int = 4
     release_memory: EmbeddingReleasePolicy = "per_batch"
+    parallel: bool = False
 
 
 @dataclass(frozen=True)
@@ -289,6 +290,7 @@ def parse_app_config(raw: dict[str, Any]) -> AppConfig:
             dense_batch_size=int(embedding.get("dense_batch_size", 4)),
             sparse_batch_size=int(embedding.get("sparse_batch_size", 4)),
             release_memory=embedding.get("release_memory", "per_batch"),
+            parallel=_bool(embedding.get("parallel", False)),
         ),
         parser=parser_config,
         logging=LoggingConfig(

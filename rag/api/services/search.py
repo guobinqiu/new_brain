@@ -86,13 +86,17 @@ def debug_sparse_search(app_id: str, req: DebugSearchRequest, principal):
 def _search(req: SearchRequest, principal):
     require_ready()
     search_principal = database_principal(principal, req.app_id)
-    if req.mode in {"sparse", "hybrid"} and runtime.application.sparse is None:
-        raise HTTPException(status_code=400, detail="sparse is not enabled")
+    mode = req.mode
+    if runtime.application.sparse is None:
+        if mode == "sparse":
+            raise HTTPException(status_code=400, detail="sparse is not enabled")
+        if mode == "hybrid":
+            mode = "dense"
     effective_rerank = bool(req.rerank and runtime.application.rerank is not None)
     plan = SearchPlan(
         req.query,
         app_id=search_principal.app_id,
-        mode=req.mode,
+        mode=mode,
         top_k=req.top_k,
         rerank=effective_rerank,
         fetch_k=req.fetch_k,
@@ -112,7 +116,7 @@ def _search(req: SearchRequest, principal):
     elapsed_ms = executor.trace.result["elapsed_ms"] if executor.trace.result else 0
     return {
         "results": results,
-        "mode": req.mode,
+        "mode": mode,
         "rerank": effective_rerank,
         "fetch_k": req.fetch_k,
         "dense_weight": req.dense_weight,

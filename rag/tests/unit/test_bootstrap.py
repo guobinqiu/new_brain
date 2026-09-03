@@ -76,19 +76,17 @@ def test_application_splits_model_loading_from_runtime_connections():
 def test_application_selects_production_components():
     import rag.bootstrap as bootstrap
     from rag.dense.huggingface import HuggingFaceDense
-    from rag.ocr.paddle import PaddleOCR
     from rag.search.pipeline import SearchPipeline
-    from rag.sparse.opensearch_bm25 import OpenSearchBM25Sparse
     from rag.store.qdrant import QdrantStore
 
     application = bootstrap.Application()
 
     assert isinstance(application.dense, HuggingFaceDense)
-    assert isinstance(application.sparse, OpenSearchBM25Sparse)
+    assert application.sparse is None
     assert isinstance(application.store, QdrantStore)
     assert isinstance(application.search, SearchPipeline)
     assert application.rerank is None
-    assert isinstance(application.ocr, PaddleOCR)
+    assert application.ocr is None
     assert application.parser.__class__.__name__ == "ParserService"
 
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from contextlib import contextmanager
 from contextvars import ContextVar
 
@@ -10,7 +11,11 @@ _current_app_id: ContextVar[str | None] = ContextVar("current_app_id", default=N
 
 
 def collection_name_for_app(app_id: str) -> str:
-    return f"{validate_app_id(app_id)}_chunks"
+    collection_name = f"{validate_app_id(app_id)}_chunks"
+    prefix = os.getenv("RAG_COLLECTION_PREFIX", "").strip("_")
+    if not prefix:
+        return collection_name
+    return f"{prefix}_{collection_name}"
 
 
 def current_collection() -> str:

@@ -5,19 +5,20 @@ import time
 from dataclasses import replace
 
 import pytest
-from fastapi.testclient import TestClient
 
-from rag.api.services import common as service
 from rag.api.runtime import runtime
+from rag.api.schemas import AppCreateRequest
+from rag.api.services import apps as service
+from rag.auth import Principal
+from rag.database.base import FakeDatabase
 
 
 pytestmark = pytest.mark.unit
 
 
-def test_app_registry_creates_persistent_credentials_and_authenticates(monkeypatch, tmp_path):
-    from rag.auth import authenticate_client_signature
-    from rag.auth import AppRegistry
-    from rag.schema import AuthConfig, AdminAuthConfig
+def test_app_registry_creates_persistent_credentials_and_authenticates(tmp_path):
+    from rag.auth import AppRegistry, authenticate_client_signature
+    from rag.schema import AdminAuthConfig, AuthConfig
 
     path = tmp_path / "apps.json"
     registry = AppRegistry(path)
@@ -56,109 +57,51 @@ def test_app_registry_creates_persistent_credentials_and_authenticates(monkeypat
     assert principal.app_id == "tenant_a"
 
 
-def test_create_app_api_generates_credentials(monkeypatch, tmp_path):
-    from rag.auth import Principal, issue_token
-    from rag.database.base import FakeDatabase
-    from rag.schema import AuthConfig, AdminAuthConfig
-    import main
-
-    auth_config = AuthConfig(
-        admin=AdminAuthConfig(username="admin", password="admin123"),
-        registry_file=str(tmp_path / "apps.json"),
-    )
-    config = replace(runtime.application.config, auth=auth_config)
+def _set_application(monkeypatch, *, database=None, store=None, sparse=None, ready=True):
+    config = replace(runtime.application.config)
 
     class Application:
         def __init__(self):
             self.config = config
-            self.ready = False
-            self.database = FakeDatabase()
-
-        def start(self):
-            pass
-
-        def stop(self):
-            pass
+            self.ready = ready
+            self.database = database or FakeDatabase()
+            self.store = store
+            self.sparse = sparse
 
     application = Application()
     monkeypatch.setattr(runtime, "application", application)
-    monkeypatch.setattr(runtime, "startup_in_background", False)
-    token = issue_token(auth_config, Principal(type="admin", app_id="admin"))
+    return application
 
-    with TestClient(main.app) as client:
-        response = client.post(
-            "/api/open/rag/apps",
-            json={"app_id": "tenant_a"},
-            headers={"Authorization": f"Bearer {token}"},
-        )
 
-    assert response.status_code == 201
-    body = response.json()
+def test_create_app_service_generates_credentials_and_lists_apps(monkeypatch):
+    _set_application(monkeypatch)
+
+    body = service.create_app(AppCreateRequest(app_id="tenant_a"), Principal(type="admin", app_id="admin"))
+
     assert body["app_id"] == "tenant_a"
     assert body["access_key"]
     assert body["secret_key"]
 
-    list_response = client.get("/api/open/rag/apps", headers={"Authorization": f"Bearer {token}"})
-
-    assert list_response.status_code == 200
-    apps = list_response.json()["apps"]
+    apps = service.list_apps(Principal(type="admin", app_id="admin"))["apps"]
     assert {item["app_id"] for item in apps} == {"tenant_a"}
     assert all(item["secret_key"] for item in apps)
 
 
-def test_create_app_api_returns_duplicate_error(monkeypatch, tmp_path):
-    from rag.auth import Principal, issue_token
-    from rag.database.base import FakeDatabase
-    from rag.schema import AuthConfig, AdminAuthConfig
-    import main
+def test_create_app_service_returns_duplicate_error(monkeypatch):
+    from fastapi import HTTPException
 
-    auth_config = AuthConfig(
-        admin=AdminAuthConfig(username="admin", password="admin123"),
-        registry_file=str(tmp_path / "apps.json"),
-    )
-    config = replace(runtime.application.config, auth=auth_config)
+    database = FakeDatabase()
+    database.create_app("tenant_a")
+    _set_application(monkeypatch, database=database)
 
-    class Application:
-        def __init__(self):
-            self.config = config
-            self.ready = False
-            self.database = FakeDatabase()
+    with pytest.raises(HTTPException) as exc:
+        service.create_app(AppCreateRequest(app_id="tenant_a"), Principal(type="admin", app_id="admin"))
 
-        def start(self):
-            pass
-
-        def stop(self):
-            pass
-
-    application = Application()
-    application.database.create_app("tenant_a")
-    monkeypatch.setattr(runtime, "application", application)
-    monkeypatch.setattr(runtime, "startup_in_background", False)
-    token = issue_token(auth_config, Principal(type="admin", app_id="admin"))
-
-    with TestClient(main.app) as client:
-        response = client.post(
-            "/api/open/rag/apps",
-            json={"app_id": "tenant_a"},
-            headers={"Authorization": f"Bearer {token}"},
-        )
-
-    assert response.status_code == 400
-    assert response.json()["detail"] == "app_id already exists"
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "app_id already exists"
 
 
-def test_delete_app_api_removes_credentials(monkeypatch, tmp_path):
-    from rag.auth import Principal, issue_token
-    from rag.database.base import FakeDatabase
-    from rag.schema import AuthConfig, AdminAuthConfig
-    import main
-
-    auth_config = AuthConfig(
-        admin=AdminAuthConfig(username="admin", password="admin123"),
-        registry_file=str(tmp_path / "apps.json"),
-    )
-    config = replace(runtime.application.config, auth=auth_config)
-
+def test_delete_app_service_removes_credentials_and_purges_app(monkeypatch):
     class Database(FakeDatabase):
         def __init__(self):
             super().__init__()
@@ -168,43 +111,18 @@ def test_delete_app_api_removes_credentials(monkeypatch, tmp_path):
             self.purged.append(app_id)
             return super().purge_app(app_id)
 
-    class Application:
-        def __init__(self):
-            self.config = config
-            self.ready = False
-            self.database = Database()
+    database = Database()
+    database.create_app("tenant_a")
+    _set_application(monkeypatch, database=database)
 
-        def start(self):
-            pass
+    body = service.delete_app("tenant_a", Principal(type="admin", app_id="admin"))
 
-        def stop(self):
-            pass
-
-    application = Application()
-    application.database.create_app("tenant_a")
-    monkeypatch.setattr(runtime, "application", application)
-    monkeypatch.setattr(runtime, "startup_in_background", False)
-    token = issue_token(auth_config, Principal(type="admin", app_id="admin"))
-
-    with TestClient(main.app) as client:
-        response = client.delete("/api/open/rag/apps/tenant_a", headers={"Authorization": f"Bearer {token}"})
-
-    assert response.status_code == 200
-    assert response.json() == {"deleted": True}
-    assert application.database.purged == ["tenant_a"]
+    assert body == {"deleted": True}
+    assert database.purged == ["tenant_a"]
+    assert database.get_app("tenant_a") is None
 
 
-def test_app_database_status_and_empty_delete(monkeypatch, tmp_path):
-    from rag.auth import Principal, issue_token
-    from rag.schema import AuthConfig, AdminAuthConfig
-    import main
-
-    auth_config = AuthConfig(
-        admin=AdminAuthConfig(username="admin", password="admin123"),
-        registry_file=str(tmp_path / "apps.json"),
-    )
-    config = replace(runtime.application.config, auth=auth_config)
-
+def test_app_database_status_and_empty_delete(monkeypatch):
     class Store:
         def __init__(self):
             self.exists = True
@@ -220,51 +138,27 @@ def test_app_database_status_and_empty_delete(monkeypatch, tmp_path):
             return 0
 
     class Database:
+        ready = True
+
         def __init__(self):
             self.purged = []
 
         def purge_app(self, app_id):
             self.purged.append(app_id)
 
-    class Application:
-        def __init__(self):
-            self.config = config
-            self.ready = True
-            self.store = Store()
-            self.database = Database()
+    store = Store()
+    database = Database()
+    _set_application(monkeypatch, database=database, store=store, ready=True)
 
-        def start(self):
-            pass
+    status = service.app_database_status("tenant_a", Principal(type="admin", app_id="admin"))
+    deleted = service.delete_app_database("tenant_a", Principal(type="admin", app_id="admin"))
 
-        def stop(self):
-            pass
-
-    application = Application()
-    monkeypatch.setattr(runtime, "application", application)
-    monkeypatch.setattr(runtime, "startup_in_background", False)
-    token = issue_token(auth_config, Principal(type="admin", app_id="admin"))
-
-    with TestClient(main.app) as client:
-        status = client.get("/api/open/rag/apps/tenant_a/database", headers={"Authorization": f"Bearer {token}"})
-        deleted = client.delete("/api/open/rag/apps/tenant_a/database", headers={"Authorization": f"Bearer {token}"})
-
-    assert status.status_code == 200
-    assert status.json() == {"app_id": "tenant_a", "exists": True, "chunk_count": 0, "empty": True}
-    assert deleted.status_code == 200
-    assert deleted.json() == {"app_id": "tenant_a", "deleted": True}
-    assert application.database.purged == ["tenant_a"]
+    assert status == {"app_id": "tenant_a", "exists": True, "chunk_count": 0, "empty": True}
+    assert deleted == {"app_id": "tenant_a", "deleted": True}
+    assert database.purged == ["tenant_a"]
 
 
-def test_app_database_initialize_creates_sparse_collection(monkeypatch, tmp_path):
-    from rag.auth import Principal, issue_token
-    from rag.schema import AuthConfig, AdminAuthConfig
-    import main
-
-    auth_config = AuthConfig(
-        admin=AdminAuthConfig(username="admin", password="admin123"),
-        registry_file=str(tmp_path / "apps.json"),
-    )
-    config = replace(runtime.application.config, auth=auth_config)
+def test_app_database_initialize_creates_sparse_collection(monkeypatch):
     calls = []
 
     class Store:
@@ -277,41 +171,15 @@ def test_app_database_initialize_creates_sparse_collection(monkeypatch, tmp_path
             calls.append(("sparse", app_id))
             return app_id
 
-    class Application:
-        def __init__(self):
-            self.config = config
-            self.ready = True
-            self.store = Store()
-            self.sparse = Sparse()
+    _set_application(monkeypatch, store=Store(), sparse=Sparse(), ready=True)
 
-        def start(self):
-            pass
+    body = service.initialize_app_database("tenant_a", Principal(type="admin", app_id="admin"))
 
-        def stop(self):
-            pass
-
-    monkeypatch.setattr(runtime, "application", Application())
-    monkeypatch.setattr(runtime, "startup_in_background", False)
-    token = issue_token(auth_config, Principal(type="admin", app_id="admin"))
-
-    with TestClient(main.app) as client:
-        response = client.post("/api/open/rag/apps/tenant_a/database", headers={"Authorization": f"Bearer {token}"})
-
-    assert response.status_code == 200
+    assert body == {"app_id": "tenant_a", "initialized": True}
     assert calls == [("store", "tenant_a"), ("sparse", "tenant_a")]
 
 
-def test_app_database_status_requires_sparse_collection_when_available(monkeypatch, tmp_path):
-    from rag.auth import Principal, issue_token
-    from rag.schema import AuthConfig, AdminAuthConfig
-    import main
-
-    auth_config = AuthConfig(
-        admin=AdminAuthConfig(username="admin", password="admin123"),
-        registry_file=str(tmp_path / "apps.json"),
-    )
-    config = replace(runtime.application.config, auth=auth_config)
-
+def test_app_database_status_requires_sparse_collection_when_available(monkeypatch):
     class Store:
         def app_collection_exists(self, app_id):
             return True
@@ -323,41 +191,15 @@ def test_app_database_status_requires_sparse_collection_when_available(monkeypat
         def app_collection_exists(self, app_id):
             return False
 
-    class Application:
-        def __init__(self):
-            self.config = config
-            self.ready = True
-            self.store = Store()
-            self.sparse = Sparse()
+    _set_application(monkeypatch, store=Store(), sparse=Sparse(), ready=True)
 
-        def start(self):
-            pass
+    body = service.app_database_status("tenant_a", Principal(type="admin", app_id="admin"))
 
-        def stop(self):
-            pass
-
-    monkeypatch.setattr(runtime, "application", Application())
-    monkeypatch.setattr(runtime, "startup_in_background", False)
-    monkeypatch.setattr(service, "scoped_store", lambda principal: runtime.application.store)
-    token = issue_token(auth_config, Principal(type="admin", app_id="admin"))
-
-    with TestClient(main.app) as client:
-        response = client.get("/api/open/rag/apps/tenant_a/database", headers={"Authorization": f"Bearer {token}"})
-
-    assert response.status_code == 200
-    assert response.json() == {"app_id": "tenant_a", "exists": False, "chunk_count": 0, "empty": True}
+    assert body == {"app_id": "tenant_a", "exists": False, "chunk_count": 0, "empty": True}
 
 
-def test_app_database_delete_allows_non_empty_database(monkeypatch, tmp_path):
-    from rag.auth import Principal, issue_token
-    from rag.schema import AuthConfig, AdminAuthConfig
-    import main
-
-    auth_config = AuthConfig(
-        admin=AdminAuthConfig(username="admin", password="admin123"),
-        registry_file=str(tmp_path / "apps.json"),
-    )
-    config = replace(runtime.application.config, auth=auth_config)
+def test_app_database_delete_allows_non_empty_database(monkeypatch):
+    from rag.api.services import common as common_service
 
     class Store:
         def app_collection_exists(self, app_id):
@@ -367,34 +209,19 @@ def test_app_database_delete_allows_non_empty_database(monkeypatch, tmp_path):
             return True
 
     class Database:
+        ready = True
+
         def __init__(self):
             self.purged = []
 
         def purge_app(self, app_id):
             self.purged.append(app_id)
 
-    class Application:
-        def __init__(self):
-            self.config = config
-            self.ready = True
-            self.store = Store()
-            self.database = Database()
+    database = Database()
+    _set_application(monkeypatch, database=database, store=Store(), ready=True)
+    monkeypatch.setattr(common_service, "scoped_store", lambda principal: type("ScopedStore", (), {"get_total_chunks": lambda self, file_ids=None: 2})())
 
-        def start(self):
-            pass
+    body = service.delete_app_database("tenant_a", Principal(type="admin", app_id="admin"))
 
-        def stop(self):
-            pass
-
-    application = Application()
-    monkeypatch.setattr(runtime, "application", application)
-    monkeypatch.setattr(runtime, "startup_in_background", False)
-    monkeypatch.setattr(service, "scoped_store", lambda principal: type("ScopedStore", (), {"get_total_chunks": lambda self, file_ids=None: 2})())
-    token = issue_token(auth_config, Principal(type="admin", app_id="admin"))
-
-    with TestClient(main.app) as client:
-        response = client.delete("/api/open/rag/apps/tenant_a/database", headers={"Authorization": f"Bearer {token}"})
-
-    assert response.status_code == 200
-    assert response.json() == {"app_id": "tenant_a", "deleted": True}
-    assert application.database.purged == ["tenant_a"]
+    assert body == {"app_id": "tenant_a", "deleted": True}
+    assert database.purged == ["tenant_a"]

@@ -86,6 +86,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
     embedding_dense_batch_size = providers.Callable(lambda app_config: app_config.embedding.dense_batch_size, config)
     embedding_sparse_batch_size = providers.Callable(lambda app_config: app_config.embedding.sparse_batch_size, config)
     embedding_release_memory = providers.Callable(lambda app_config: app_config.embedding.release_memory, config)
+    embedding_parallel_sparse = providers.Callable(lambda app_config: app_config.embedding.parallel, config)
     tokenizer = providers.Selector(
         sparse_tokenizer,
         jieba=providers.Factory(JiebaTokenizer),
@@ -139,6 +140,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
             sparse=sparse,
             url=qdrant_url,
             timeout=store_timeout,
+            parallel_sparse_embedding=embedding_parallel_sparse,
         ),
         chroma=providers.Singleton(
             ChromaStore,
@@ -152,6 +154,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
             sparse=sparse,
             uri=milvus_uri,
             timeout=store_timeout,
+            parallel_sparse_embedding=embedding_parallel_sparse,
         ),
     )
 
@@ -222,11 +225,13 @@ def build_store(config: AppConfig, dense: Dense, sparse: Sparse | None = None) -
         if _store_key(config.store.type) == "qdrant":
             kwargs["url"] = config.store.url
             kwargs["timeout"] = config.store.timeout
+            kwargs["parallel_sparse_embedding"] = config.embedding.parallel
         elif _store_key(config.store.type) == "chroma":
             kwargs["persist_dir"] = config.store.persist_dir
         elif _store_key(config.store.type) == "milvus":
             kwargs["uri"] = config.store.uri
             kwargs["timeout"] = config.store.timeout
+            kwargs["parallel_sparse_embedding"] = config.embedding.parallel
         return cls(**kwargs)
     container = create_container(config)
     return container.store(dense=dense, sparse=sparse)

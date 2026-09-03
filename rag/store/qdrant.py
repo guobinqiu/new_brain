@@ -4,35 +4,25 @@ from __future__ import annotations
 import base64
 import json
 import logging
-import os
 import threading
 import time
-import uuid
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from typing import Literal
 
-from rag.config import (
-    DENSE_MODEL_DIR,
-    QDRANT_URL,
-)
+from qdrant_client import QdrantClient
+from qdrant_client.http import models
+from qdrant_client.http.exceptions import UnexpectedResponse
+
+from rag.config import QDRANT_URL
 from rag.dense.base import Dense
 from rag.dense.huggingface import HuggingFaceDense
-from qdrant_client import QdrantClient
-from qdrant_client.http.exceptions import UnexpectedResponse
-from qdrant_client.http import models
-from rag.sparse.base import Sparse
 from rag.scope import app_collection, collection_name_for_app, current_app_id, current_collection
+from rag.sparse.base import Sparse
 from rag.store.startup import run_with_startup_retry
 
 
 SearchMode = Literal["dense", "sparse", "hybrid"]
-
-_client: QdrantClient | None = None
-_dense: Dense | None = None
-_sparse: Sparse | None = None
-_dense_vector_size: int | None = None
-_timeout: int | None = None
-_ready = False
 
 _document_locks: defaultdict[str, threading.Lock] = defaultdict(threading.Lock)
 _document_locks_guard = threading.Lock()
@@ -46,81 +36,190 @@ class QdrantStore:
         sparse: Sparse | None = None,
         url: str | None = None,
         timeout: int | None = None,
+        parallel_sparse_embedding: bool = False,
     ):
         self.dense = dense or HuggingFaceDense()
         self.sparse = sparse
         self.url = url or QDRANT_URL
         self.timeout = timeout
+        self.parallel_sparse_embedding = parallel_sparse_embedding
+        self.client: QdrantClient | None = None
+        self.dense_vector_size: int | None = None
+        self._ready = False
 
     def start(self) -> None:
-        init_store(
-            dense=self.dense,
-            sparse=self.sparse,
-            url=self.url,
-            timeout=self.timeout,
-        )
+        """启动阶段完成存储运行时初始化；请求阶段不做懒初始化。"""
+        if not self.dense.ready:
+            raise RuntimeError("dense is not initialized")
+        if self.sparse is not None and not self.sparse.ready:
+            raise RuntimeError("sparse is not initialized")
+        self.dense_vector_size = len(self.dense.embed_query("dimension probe"))
+        self._ready = True
 
     def stop(self) -> None:
-        close_store()
+        if self.client is not None:
+            close = getattr(self.client, "close", None)
+            if callable(close):
+                close()
+        self.client = None
+        self._ready = False
 
     def drop_collections(self) -> None:
-        _configure_store(self.url, self.timeout)
-        drop_collections()
+        collection_name = self._chunks_collection()
+        client = self._client()
+        if client.collection_exists(collection_name):
+            client.delete_collection(collection_name)
 
     @property
     def ready(self) -> bool:
-        return is_search_ready()
+        return self._ready
 
     def add_file_chunks(self, chunks: list[dict], file_id: str) -> int:
-        return add_file_chunks(chunks, file_id)
+        if not chunks:
+            return 0
+        if not file_id:
+            raise ValueError("file_id is required")
+        self._require_ready()
+        with _document_lock(file_id):
+            app_id = current_app_id()
+            self.delete_file_chunks(file_id)
+            points = self._to_points(chunks, file_id)
+            started = time.perf_counter()
+            logger.info("Qdrant upsert start", extra={"event": "qdrant_upsert_start", "stage": "index", "backend": "qdrant", "retriever": "vector", "app_id": app_id, "file_id": file_id, "chunk_count": len(chunks), "point_count": len(points)})
+            self._client().upsert(
+                collection_name=self._chunks_collection(),
+                points=points,
+            )
+            total_ms = round((time.perf_counter() - started) * 1000, 1)
+            logger.info("Qdrant upsert done", extra={"event": "qdrant_upsert_done", "stage": "index", "backend": "qdrant", "retriever": "vector", "app_id": app_id, "file_id": file_id, "chunk_count": len(chunks), "point_count": len(points), "total_ms": total_ms, "status": "ok"})
+        return len(chunks)
 
     def delete_file_chunks(self, file_id: str) -> int:
-        return delete_file_chunks(file_id)
+        return self._delete_by_filter(_file_payload_filter(file_ids=[file_id]))
 
     def get_total_chunks(self, file_ids: list[str] | None = None) -> int:
-        return get_total_chunks(file_ids)
+        return self._count_documents(self.build_file_filter(file_ids))
 
     def list_chunks(self, file_ids: list[str] | None = None, limit: int = 50, cursor: str | None = None) -> dict:
-        return list_chunks(file_ids=file_ids, limit=limit, cursor=cursor)
+        if limit <= 0:
+            raise ValueError("limit must be greater than 0")
+        limit = min(limit, 200)
+        scroll_filter = _combine_chunk_filters(self.build_file_filter(file_ids), _chunk_cursor_filter(cursor))
+        try:
+            rows, _ = self._client().scroll(
+                collection_name=self._chunks_collection(),
+                scroll_filter=scroll_filter,
+                limit=limit + 1,
+                order_by="metadata.chunk_index",
+                offset=None,
+                with_payload=True,
+                with_vectors=False,
+            )
+        except UnexpectedResponse as exc:
+            if _is_collection_not_found(exc):
+                return {"documents": [], "next_cursor": None, "has_more": False}
+            raise
+        page_rows = rows[:limit]
+        return {
+            "documents": [_record_to_document(row) for row in page_rows],
+            "next_cursor": _encode_chunk_cursor(page_rows[-1]) if len(rows) > limit and page_rows else None,
+            "has_more": len(rows) > limit,
+        }
 
     def get_dense_vector(self, chunk_id: str) -> list[float] | None:
-        return get_dense_vector(chunk_id)
+        vectors = self._get_point_vectors(chunk_id)
+        if vectors is None:
+            return None
+        dense = vectors.get("dense") if isinstance(vectors, dict) else vectors
+        return list(dense) if dense is not None else None
 
     def get_sparse_vector(self, chunk_id: str) -> dict | None:
-        return get_sparse_vector(chunk_id)
+        vectors = self._get_point_vectors(chunk_id)
+        if not isinstance(vectors, dict):
+            return None
+        sparse = vectors.get("sparse")
+        if sparse is None:
+            return None
+        indices = getattr(sparse, "indices", None)
+        values = getattr(sparse, "values", None)
+        if indices is None and isinstance(sparse, dict):
+            indices = sparse.get("indices")
+            values = sparse.get("values")
+        return {"indices": list(indices or []), "values": list(values or [])}
 
     def supports_dense_vector(self) -> bool:
         return True
 
     def supports_sparse_vector(self, sparse: Sparse | None = None) -> bool:
-        return _sparse_uses_store(sparse)
+        return self.sparse_uses_store(sparse)
 
     def ensure_app_collection(self, app_id: str) -> str:
-        _configure_store(self.url, self.timeout)
-        return ensure_app_collection(app_id)
+        collection_name = collection_name_for_app(app_id)
+        run_with_startup_retry(lambda: self.ensure_collections(collection_name))
+        return collection_name
 
     def app_collection_exists(self, app_id: str) -> bool:
-        _configure_store(self.url, self.timeout)
-        return app_collection_exists(app_id)
+        return self._client().collection_exists(collection_name_for_app(app_id))
 
     def drop_app_collection(self, app_id: str) -> bool:
-        _configure_store(self.url, self.timeout)
-        return drop_app_collection(app_id)
+        collection_name = collection_name_for_app(app_id)
+        client = self._client()
+        if not client.collection_exists(collection_name):
+            return False
+        client.delete_collection(collection_name)
+        return True
 
     def app_context(self, app_id: str):
         return app_collection(app_id)
 
-    def get_search_documents(self, metadata_filter: models.Filter) -> list[dict]:
-        return get_search_documents(metadata_filter)
+    def get_search_documents(self, metadata_filter: models.Filter | None) -> list[dict]:
+        documents = []
+        offset = None
+        while True:
+            try:
+                rows, offset = self._client().scroll(
+                    collection_name=self._chunks_collection(),
+                    scroll_filter=metadata_filter,
+                    limit=1000,
+                    offset=offset,
+                    with_payload=True,
+                    with_vectors=False,
+                )
+            except UnexpectedResponse as exc:
+                if _is_collection_not_found(exc):
+                    return []
+                raise
+            documents.extend(_record_to_document(row) for row in rows)
+            if offset is None:
+                break
+        return documents
 
     def build_file_filter(self, file_ids: list[str] | None = None) -> models.Filter | None:
-        return build_file_filter(file_ids)
+        if file_ids is None:
+            return None
+        if not file_ids:
+            raise ValueError("file_ids cannot be empty")
+        return _file_payload_filter(file_ids=file_ids)
+
+    def encode_dense_query(self, query: str):
+        return self.dense.embed_query(query)
+
+    def query_dense_vector(self, query_vector, limit: int, metadata_filter: models.Filter) -> list[dict]:
+        return self._query_points(query_vector, "dense", limit, metadata_filter)
 
     def search_dense(self, query: str, limit: int, metadata_filter: models.Filter) -> list[dict]:
-        return search_dense(query, limit, metadata_filter)
+        return self.query_dense_vector(self.encode_dense_query(query), limit, metadata_filter)
+
+    def encode_sparse_query(self, query: str):
+        if self.sparse is None:
+            raise RuntimeError("sparse is not initialized")
+        return _qdrant_sparse_vector(self.sparse.embed_query(query))
+
+    def query_sparse_vector(self, query_vector, limit: int, metadata_filter: models.Filter) -> list[dict]:
+        return self._query_points(query_vector, "sparse", limit, metadata_filter)
 
     def search_sparse(self, query: str, limit: int, metadata_filter: models.Filter) -> list[dict]:
-        return search_sparse(query, limit, metadata_filter)
+        return self.query_sparse_vector(self.encode_sparse_query(query), limit, metadata_filter)
 
     def search_hybrid(
         self,
@@ -131,170 +230,164 @@ class QdrantStore:
         sparse_weight: float,
         rrf_k: int,
     ) -> list[dict]:
-        return search_hybrid(query, limit, metadata_filter, dense_weight, sparse_weight, rrf_k)
+        dense_items = self.search_dense(query, limit, metadata_filter)
+        sparse_items = self.search_sparse(query, limit, metadata_filter)
+        return _weighted_reciprocal_rank(dense_items, sparse_items, limit, dense_weight, sparse_weight, rrf_k)
 
     def sparse_uses_store(self, sparse: Sparse | None = None) -> bool:
-        return _sparse_uses_store(sparse)
+        from rag.sparse.qdrant_bge_m3 import QdrantBGEM3Sparse
 
+        return isinstance(self.sparse if sparse is None else sparse, QdrantBGEM3Sparse)
 
-def close_store():
-    """释放 Qdrant client;保留已加载的模型引用。"""
-    global _client, _ready
-    if _client is not None:
-        close = getattr(_client, "close", None)
-        if callable(close):
-            close()
-    _client = None
-    _ready = False
+    def ensure_collections(self, collection_name: str | None = None) -> None:
+        client = self._client()
+        dense_size = self._get_dense_vector_size()
+        target_collection = collection_name or self._chunks_collection()
+        if client.collection_exists(target_collection):
+            self._ensure_sparse_vector(target_collection)
+            self.ensure_payload_indexes(target_collection)
+            return
+        sparse_vectors_config = (
+            {"sparse": models.SparseVectorParams()}
+            if self.sparse_uses_store()
+            else None
+        )
+        client.create_collection(
+            collection_name=target_collection,
+            vectors_config={
+                "dense": models.VectorParams(size=dense_size, distance=models.Distance.COSINE),
+            },
+            sparse_vectors_config=sparse_vectors_config,
+        )
+        _wait_collection_ready(client, target_collection)
+        self.ensure_payload_indexes(target_collection)
 
+    def ensure_payload_indexes(self, collection_name: str | None = None) -> None:
+        client = self._client()
+        target_collection = collection_name or self._chunks_collection()
+        _ensure_payload_index(client, target_collection, "metadata.file_id", models.PayloadSchemaType.KEYWORD)
+        _ensure_payload_index(client, target_collection, "metadata.chunk_index", models.PayloadSchemaType.INTEGER)
 
-def drop_collections() -> None:
-    client = get_qdrant_client()
-    collection_name = _chunks_collection()
-    if client.collection_exists(collection_name):
-        client.delete_collection(collection_name)
+    def _client(self) -> QdrantClient:
+        if self.client is None:
+            self.client = QdrantClient(url=self.url, timeout=self.timeout, check_compatibility=False)
+        return self.client
 
+    def _require_ready(self) -> None:
+        if not self._ready:
+            raise RuntimeError("search is not initialized")
 
-def ensure_app_collection(app_id: str) -> str:
-    collection_name = collection_name_for_app(app_id)
-    run_with_startup_retry(lambda: ensure_collections(collection_name))
-    return collection_name
+    def _get_dense_vector_size(self) -> int:
+        if self.dense_vector_size is None:
+            raise RuntimeError("search is not initialized")
+        return self.dense_vector_size
 
+    def _chunks_collection(self) -> str:
+        return current_collection()
 
-def app_collection_exists(app_id: str) -> bool:
-    return get_qdrant_client().collection_exists(collection_name_for_app(app_id))
+    def _ensure_sparse_vector(self, collection_name: str) -> None:
+        if not self.sparse_uses_store():
+            return
+        collection = self._client().get_collection(collection_name)
+        sparse_vectors = collection.config.params.sparse_vectors or {}
+        if "sparse" in sparse_vectors:
+            return
+        self._client().update_collection(
+            collection_name=collection_name,
+            sparse_vectors_config={"sparse": models.SparseVectorParams()},
+        )
 
+    def _query_points(self, query, vector_name: str, limit: int, metadata_filter: models.Filter | None) -> list[dict]:
+        self._require_ready()
+        try:
+            response = self._client().query_points(
+                collection_name=self._chunks_collection(),
+                query=query,
+                using=vector_name,
+                query_filter=metadata_filter,
+                limit=limit,
+                with_payload=True,
+                with_vectors=False,
+            )
+        except UnexpectedResponse as exc:
+            if _is_collection_not_found(exc):
+                return []
+            raise
+        return [_point_to_item(point) for point in response.points]
 
-def drop_app_collection(app_id: str) -> bool:
-    collection_name = collection_name_for_app(app_id)
-    client = get_qdrant_client()
-    if not client.collection_exists(collection_name):
-        return False
-    client.delete_collection(collection_name)
-    return True
+    def _get_point_vectors(self, chunk_id: str):
+        self._require_ready()
+        rows = self._client().retrieve(
+            collection_name=self._chunks_collection(),
+            ids=[_point_id(chunk_id)],
+            with_payload=False,
+            with_vectors=True,
+        )
+        if not rows:
+            return None
+        return getattr(rows[0], "vector", None)
 
+    def _delete_by_filter(self, metadata_filter: models.Filter) -> int:
+        before = self._count_documents(metadata_filter)
+        if before:
+            try:
+                self._client().delete(collection_name=self._chunks_collection(), points_selector=models.FilterSelector(filter=metadata_filter))
+            except UnexpectedResponse as exc:
+                if _is_collection_not_found(exc):
+                    return 0
+                raise
+        return before
 
-def init_store(
-    dense: Dense | None = None,
-    sparse: Sparse | None = None,
-    url: str | None = None,
-    timeout: int | None = None,
-):
-    """启动阶段完成存储运行时初始化;请求阶段不做懒初始化。"""
-    global _ready
-    _configure_store(url, timeout)
-    _init_dense(dense)
-    _init_sparse(sparse)
-    _init_dense_vector_size()
-    _ready = True
+    def _count_documents(self, metadata_filter: models.Filter | None) -> int:
+        try:
+            result = self._client().count(collection_name=self._chunks_collection(), count_filter=metadata_filter, exact=True)
+        except UnexpectedResponse as exc:
+            if _is_collection_not_found(exc):
+                return 0
+            raise
+        return int(result.count)
 
+    def _to_points(self, chunks: list[dict], file_id: str) -> list[models.PointStruct]:
+        app_id = current_app_id()
+        contents = [chunk["content"] for chunk in chunks]
+        if self.sparse_uses_store() and self.parallel_sparse_embedding:
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                dense_future = executor.submit(self._dense_vectors_for_documents, contents, file_id, app_id)
+                sparse_future = executor.submit(self._logged_sparse_vectors_for_documents, contents, file_id, app_id)
+                dense_vectors = dense_future.result()
+                sparse_vectors = sparse_future.result()
+        else:
+            dense_vectors = self._dense_vectors_for_documents(contents, file_id, app_id)
+            sparse_vectors = self._logged_sparse_vectors_for_documents(contents, file_id, app_id) if self.sparse_uses_store() else [None] * len(chunks)
+        points = []
+        for chunk, dense_vector, sparse_vector in zip(chunks, dense_vectors, sparse_vectors):
+            point_id = _point_id(chunk["id"])
+            vector = {"dense": dense_vector}
+            if sparse_vector is not None:
+                vector["sparse"] = sparse_vector
+            points.append(models.PointStruct(id=point_id, vector=vector, payload=_payload_for_chunk(chunk, file_id)))
+        return points
 
-def init_search():
-    init_store()
+    def _dense_vectors_for_documents(self, contents: list[str], file_id: str, app_id: str) -> list[list[float]]:
+        started = time.perf_counter()
+        logger.info("Dense embedding start", extra={"event": "dense_embedding_start", "stage": "embedding", "backend": "model", "retriever": "dense", "app_id": app_id, "file_id": file_id, "chunk_count": len(contents)})
+        dense_vectors = self.dense.embed_documents(contents)
+        total_ms = round((time.perf_counter() - started) * 1000, 1)
+        logger.info("Dense embedding done", extra={"event": "dense_embedding_done", "stage": "embedding", "backend": "model", "retriever": "dense", "app_id": app_id, "file_id": file_id, "chunk_count": len(contents), "total_ms": total_ms, "status": "ok"})
+        return dense_vectors
 
+    def _logged_sparse_vectors_for_documents(self, contents: list[str], file_id: str, app_id: str) -> list[models.SparseVector]:
+        started = time.perf_counter()
+        logger.info("Sparse embedding start", extra={"event": "sparse_embedding_start", "stage": "embedding", "backend": "model", "retriever": "sparse_vector", "app_id": app_id, "file_id": file_id, "chunk_count": len(contents)})
+        sparse_vectors = self._sparse_vectors_for_documents(contents)
+        total_ms = round((time.perf_counter() - started) * 1000, 1)
+        logger.info("Sparse embedding done", extra={"event": "sparse_embedding_done", "stage": "embedding", "backend": "model", "retriever": "sparse_vector", "app_id": app_id, "file_id": file_id, "chunk_count": len(contents), "total_ms": total_ms, "status": "ok"})
+        return sparse_vectors
 
-def _configure_store(
-    url: str | None = None,
-    timeout: int | None = None,
-):
-    global QDRANT_URL, _timeout
-    if url is not None:
-        QDRANT_URL = url
-    _timeout = timeout
-
-
-def is_search_ready() -> bool:
-    return _ready
-
-
-def _require_search_ready():
-    if not _ready:
-        raise RuntimeError("search is not initialized")
-
-
-def _chunks_collection() -> str:
-    return current_collection()
-
-
-def _init_dense(dense: Dense | None = None) -> Dense:
-    global _dense
-    if _dense is None:
-        _dense = dense or HuggingFaceDense()
-    if not _dense.ready:
-        raise RuntimeError("dense is not initialized")
-    return _dense
-
-
-def _init_dense_vector_size() -> int:
-    global _dense_vector_size
-    if _dense_vector_size is None:
-        _dense_vector_size = len(_init_dense().embed_query("dimension probe"))
-    return _dense_vector_size
-
-
-def _init_sparse(sparse: Sparse | None = None) -> Sparse | None:
-    global _sparse
-    _sparse = sparse
-    if _sparse is not None and not _sparse.ready:
-        raise RuntimeError("sparse is not initialized")
-    return _sparse
-
-
-def _get_dense() -> Dense:
-    if _dense is None:
-        raise RuntimeError("search is not initialized")
-    return _dense
-
-
-def _get_sparse() -> Sparse | None:
-    return _sparse
-
-
-def _sparse_uses_store(sparse: Sparse | None = None) -> bool:
-    from rag.sparse.qdrant_bge_m3 import QdrantBGEM3Sparse
-
-    return isinstance(_get_sparse() if sparse is None else sparse, QdrantBGEM3Sparse)
-
-
-def sparse_uses_store(sparse: Sparse | None = None) -> bool:
-    return _sparse_uses_store(sparse)
-
-
-def _get_dense_vector_size() -> int:
-    if _dense_vector_size is None:
-        raise RuntimeError("search is not initialized")
-    return _dense_vector_size
-
-
-def get_qdrant_client() -> QdrantClient:
-    global _client
-    if _client is None:
-        _client = QdrantClient(url=os.getenv("QDRANT_URL", QDRANT_URL), timeout=_timeout, check_compatibility=False)
-    return _client
-
-
-def ensure_collections(collection_name: str | None = None):
-    client = get_qdrant_client()
-    dense_size = _get_dense_vector_size()
-    target_collection = collection_name or _chunks_collection()
-    if client.collection_exists(target_collection):
-        _ensure_sparse_vector(client, target_collection)
-        ensure_payload_indexes(target_collection)
-        return
-    sparse_vectors_config = (
-        {"sparse": models.SparseVectorParams()}
-        if _sparse_uses_store()
-        else None
-    )
-    client.create_collection(
-        collection_name=target_collection,
-        vectors_config={
-            "dense": models.VectorParams(size=dense_size, distance=models.Distance.COSINE),
-        },
-        sparse_vectors_config=sparse_vectors_config,
-    )
-    _wait_collection_ready(client, target_collection)
-    ensure_payload_indexes(target_collection)
+    def _sparse_vectors_for_documents(self, texts: list[str]) -> list[models.SparseVector]:
+        if self.sparse is None:
+            raise RuntimeError("sparse is not initialized")
+        return [_qdrant_sparse_vector(vector) for vector in self.sparse.embed_documents(texts)]
 
 
 def _wait_collection_ready(client: QdrantClient, collection_name: str) -> None:
@@ -312,26 +405,6 @@ def _wait_collection_ready(client: QdrantClient, collection_name: str) -> None:
         raise last_error
 
 
-def _ensure_sparse_vector(client: QdrantClient, collection_name: str) -> None:
-    if not _sparse_uses_store():
-        return
-    collection = client.get_collection(collection_name)
-    sparse_vectors = collection.config.params.sparse_vectors or {}
-    if "sparse" in sparse_vectors:
-        return
-    client.update_collection(
-        collection_name=collection_name,
-        sparse_vectors_config={"sparse": models.SparseVectorParams()},
-    )
-
-
-def ensure_payload_indexes(collection_name: str | None = None):
-    client = get_qdrant_client()
-    target_collection = collection_name or _chunks_collection()
-    _ensure_payload_index(client, target_collection, "metadata.file_id", models.PayloadSchemaType.KEYWORD)
-    _ensure_payload_index(client, target_collection, "metadata.chunk_index", models.PayloadSchemaType.INTEGER)
-
-
 def _ensure_payload_index(client: QdrantClient, collection_name: str, field_name: str, field_schema: models.PayloadSchemaType):
     try:
         client.create_payload_index(
@@ -343,171 +416,14 @@ def _ensure_payload_index(client: QdrantClient, collection_name: str, field_name
         pass
 
 
-def search_dense(query: str, limit: int, metadata_filter: models.Filter) -> list[dict]:
-    return _query_points(_get_dense().embed_query(query), "dense", limit, metadata_filter)
+def _qdrant_sparse_vector(vector) -> models.SparseVector:
+    return models.SparseVector(indices=list(vector.indices), values=list(vector.values))
 
 
-def search_sparse(query: str, limit: int, metadata_filter: models.Filter) -> list[dict]:
-    sparse = _get_sparse()
-    if sparse is None:
-        raise RuntimeError("sparse is not initialized")
-    return _query_points(_qdrant_sparse_vector(sparse.embed_query(query)), "sparse", limit, metadata_filter)
-
-
-def search_hybrid(
-    query: str,
-    limit: int,
-    metadata_filter: models.Filter,
-    dense_weight: float = 0.5,
-    sparse_weight: float = 0.5,
-    rrf_k: int = 60,
-) -> list[dict]:
-    dense_items = search_dense(query, limit, metadata_filter)
-    sparse_items = search_sparse(query, limit, metadata_filter)
-    return _weighted_reciprocal_rank(dense_items, sparse_items, limit, dense_weight, sparse_weight, rrf_k)
-
-
-def _query_points(query, vector_name: str, limit: int, metadata_filter: models.Filter | None) -> list[dict]:
-    _require_search_ready()
-    try:
-        response = get_qdrant_client().query_points(
-            collection_name=_chunks_collection(),
-            query=query,
-            using=vector_name,
-            query_filter=metadata_filter,
-            limit=limit,
-            with_payload=True,
-            with_vectors=False,
-        )
-    except UnexpectedResponse as exc:
-        if _is_collection_not_found(exc):
-            return []
-        raise
-    return [_point_to_item(point) for point in response.points]
-
-
-def add_file_chunks(chunks: list[dict], file_id: str) -> int:
-    if not chunks:
-        return 0
-    if not file_id:
-        raise ValueError("file_id is required")
-    _require_search_ready()
-    with _document_lock(file_id):
-        app_id = current_app_id()
-        delete_file_chunks(file_id)
-        points = _to_points(chunks, file_id)
-        started = time.perf_counter()
-        logger.info("Qdrant upsert start", extra={"event": "qdrant_upsert_start", "stage": "index", "backend": "qdrant", "retriever": "vector", "app_id": app_id, "file_id": file_id, "chunk_count": len(chunks), "point_count": len(points)})
-        get_qdrant_client().upsert(
-            collection_name=_chunks_collection(),
-            points=points,
-        )
-        total_ms = round((time.perf_counter() - started) * 1000, 1)
-        logger.info("Qdrant upsert done", extra={"event": "qdrant_upsert_done", "stage": "index", "backend": "qdrant", "retriever": "vector", "app_id": app_id, "file_id": file_id, "chunk_count": len(chunks), "point_count": len(points), "total_ms": total_ms, "status": "ok"})
-    return len(chunks)
-
-
-def delete_file_chunks(file_id: str) -> int:
-    return _delete_by_filter(_file_payload_filter(file_ids=[file_id]))
-
-
-def get_total_chunks(file_ids: list[str] | None = None) -> int:
-    return _count_documents(build_file_filter(file_ids))
-
-
-def get_search_documents(metadata_filter: models.Filter | None) -> list[dict]:
-    client = get_qdrant_client()
-    documents = []
-    offset = None
-    while True:
-        try:
-            rows, offset = client.scroll(
-                collection_name=_chunks_collection(),
-                scroll_filter=metadata_filter,
-                limit=1000,
-                offset=offset,
-                with_payload=True,
-                with_vectors=False,
-            )
-        except UnexpectedResponse as exc:
-            if _is_collection_not_found(exc):
-                return []
-            raise
-        documents.extend(_record_to_document(row) for row in rows)
-        if offset is None:
-            break
-    return documents
-
-
-def list_chunks(file_ids: list[str] | None = None, limit: int = 50, cursor: str | None = None) -> dict:
-    if limit <= 0:
-        raise ValueError("limit must be greater than 0")
-    limit = min(limit, 200)
-    scroll_filter = _combine_chunk_filters(build_file_filter(file_ids), _chunk_cursor_filter(cursor))
-    try:
-        rows, _ = get_qdrant_client().scroll(
-            collection_name=_chunks_collection(),
-            scroll_filter=scroll_filter,
-            limit=limit + 1,
-            order_by="metadata.chunk_index",
-            offset=None,
-            with_payload=True,
-            with_vectors=False,
-        )
-    except UnexpectedResponse as exc:
-        if _is_collection_not_found(exc):
-            return {"documents": [], "next_cursor": None, "has_more": False}
-        raise
-    page_rows = rows[:limit]
-    return {
-        "documents": [_record_to_document(row) for row in page_rows],
-        "next_cursor": _encode_chunk_cursor(page_rows[-1]) if len(rows) > limit and page_rows else None,
-        "has_more": len(rows) > limit,
-    }
-
-
-def get_dense_vector(chunk_id: str) -> list[float] | None:
-    vectors = _get_point_vectors(chunk_id)
-    if vectors is None:
-        return None
-    dense = vectors.get("dense") if isinstance(vectors, dict) else vectors
-    return list(dense) if dense is not None else None
-
-
-def get_sparse_vector(chunk_id: str) -> dict | None:
-    vectors = _get_point_vectors(chunk_id)
-    if not isinstance(vectors, dict):
-        return None
-    sparse = vectors.get("sparse")
-    if sparse is None:
-        return None
-    indices = getattr(sparse, "indices", None)
-    values = getattr(sparse, "values", None)
-    if indices is None and isinstance(sparse, dict):
-        indices = sparse.get("indices")
-        values = sparse.get("values")
-    return {"indices": list(indices or []), "values": list(values or [])}
-
-
-def _get_point_vectors(chunk_id: str):
-    _require_search_ready()
-    rows = get_qdrant_client().retrieve(
-        collection_name=_chunks_collection(),
-        ids=[_point_id(chunk_id)],
-        with_payload=False,
-        with_vectors=True,
-    )
-    if not rows:
-        return None
-    return getattr(rows[0], "vector", None)
-
-
-def build_file_filter(file_ids: list[str] | None = None) -> models.Filter | None:
-    if file_ids is None:
-        return None
-    if not file_ids:
-        raise ValueError("file_ids cannot be empty")
-    return _file_payload_filter(file_ids=file_ids)
+def _file_payload_filter(file_ids: list[str]) -> models.Filter:
+    return models.Filter(must=[
+        models.FieldCondition(key="metadata.file_id", match=models.MatchAny(any=file_ids)),
+    ])
 
 
 def _chunk_cursor_filter(cursor: str | None) -> models.Filter | None:
@@ -563,32 +479,6 @@ def _record_to_document(row) -> dict:
     }
 
 
-def _to_points(chunks: list[dict], file_id: str) -> list[models.PointStruct]:
-    app_id = current_app_id()
-    contents = [chunk["content"] for chunk in chunks]
-    started = time.perf_counter()
-    logger.info("Dense embedding start", extra={"event": "dense_embedding_start", "stage": "embedding", "backend": "model", "retriever": "dense", "app_id": app_id, "file_id": file_id, "chunk_count": len(chunks)})
-    dense_vectors = _get_dense().embed_documents(contents)
-    total_ms = round((time.perf_counter() - started) * 1000, 1)
-    logger.info("Dense embedding done", extra={"event": "dense_embedding_done", "stage": "embedding", "backend": "model", "retriever": "dense", "app_id": app_id, "file_id": file_id, "chunk_count": len(chunks), "total_ms": total_ms, "status": "ok"})
-    if _sparse_uses_store():
-        started = time.perf_counter()
-        logger.info("Sparse embedding start", extra={"event": "sparse_embedding_start", "stage": "embedding", "backend": "model", "retriever": "sparse_vector", "app_id": app_id, "file_id": file_id, "chunk_count": len(chunks)})
-        sparse_vectors = _sparse_vectors_for_documents(contents)
-        total_ms = round((time.perf_counter() - started) * 1000, 1)
-        logger.info("Sparse embedding done", extra={"event": "sparse_embedding_done", "stage": "embedding", "backend": "model", "retriever": "sparse_vector", "app_id": app_id, "file_id": file_id, "chunk_count": len(chunks), "total_ms": total_ms, "status": "ok"})
-    else:
-        sparse_vectors = [None] * len(chunks)
-    points = []
-    for chunk, dense_vector, sparse_vector in zip(chunks, dense_vectors, sparse_vectors):
-        point_id = _point_id(chunk["id"])
-        vector = {"dense": dense_vector}
-        if sparse_vector is not None:
-            vector["sparse"] = sparse_vector
-        points.append(models.PointStruct(id=point_id, vector=vector, payload=_payload_for_chunk(chunk, file_id)))
-    return points
-
-
 def _payload_for_chunk(chunk: dict, file_id: str) -> dict:
     metadata = dict(chunk.get("metadata") or {})
     metadata["file_id"] = file_id
@@ -600,47 +490,6 @@ def _payload_for_chunk(chunk: dict, file_id: str) -> dict:
         "content": chunk["content"],
         "metadata": metadata,
     }
-
-
-def _sparse_vectors_for_documents(texts: list[str]) -> list[models.SparseVector]:
-    sparse = _get_sparse()
-    if sparse is None:
-        raise RuntimeError("sparse is not initialized")
-    return [_qdrant_sparse_vector(vector) for vector in sparse.embed_documents(texts)]
-
-
-def _qdrant_sparse_vector(vector) -> models.SparseVector:
-    return models.SparseVector(indices=list(vector.indices), values=list(vector.values))
-
-
-def _file_payload_filter(file_ids: list[str]) -> models.Filter:
-    return models.Filter(must=[
-        models.FieldCondition(key="metadata.file_id", match=models.MatchAny(any=file_ids)),
-    ])
-
-
-def _delete_by_filter(metadata_filter: models.Filter) -> int:
-    client = get_qdrant_client()
-    before = _count_documents(metadata_filter)
-    if before:
-        try:
-            client.delete(collection_name=_chunks_collection(), points_selector=models.FilterSelector(filter=metadata_filter))
-        except UnexpectedResponse as exc:
-            if _is_collection_not_found(exc):
-                return 0
-            raise
-    return before
-
-
-def _count_documents(metadata_filter: models.Filter | None) -> int:
-    client = get_qdrant_client()
-    try:
-        result = client.count(collection_name=_chunks_collection(), count_filter=metadata_filter, exact=True)
-    except UnexpectedResponse as exc:
-        if _is_collection_not_found(exc):
-            return 0
-        raise
-    return int(result.count)
 
 
 def _is_collection_not_found(exc: UnexpectedResponse) -> bool:

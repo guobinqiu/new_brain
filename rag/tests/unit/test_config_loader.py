@@ -189,6 +189,7 @@ embedding:
   dense_batch_size: 32
   sparse_batch_size: 16
   release_memory: after_call
+  parallel: true
 rerank: test_rerank
 ocr: test_ocr
 """,
@@ -201,6 +202,7 @@ ocr: test_ocr
     assert config.embedding.dense_batch_size == 32
     assert config.embedding.sparse_batch_size == 16
     assert config.embedding.release_memory == "after_call"
+    assert config.embedding.parallel is True
 
 
 def test_load_app_config_rejects_multiple_enabled_parsers(monkeypatch, tmp_path):
@@ -465,6 +467,7 @@ ocr:
         encoding="utf-8",
     )
     monkeypatch.setenv("CONFIG_FILE", str(path))
+    monkeypatch.setenv("QDRANT_URL", "http://localhost:6333")
 
     config = load_app_config()
 
@@ -603,6 +606,7 @@ ocr: test_ocr
         encoding="utf-8",
     )
     monkeypatch.setenv("CONFIG_FILE", str(path))
+    monkeypatch.setenv("MILVUS_URI", "http://localhost:19530")
 
     config = load_app_config()
 
