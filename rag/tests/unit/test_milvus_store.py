@@ -402,6 +402,19 @@ def test_milvus_store_uses_cosine_metric_for_dense_vectors():
     assert store._index_params_for_mode("dense") == {"metric_type": "COSINE", "index_type": "AUTOINDEX", "params": {}}
 
 
+def test_milvus_get_search_documents_uses_limit_for_empty_filter():
+    from rag.scope import app_collection
+
+    client = FakeMilvusClient("http://localhost:19530")
+    store = _started_store(client)
+
+    with app_collection("myapp"):
+        store.get_search_documents("")
+
+    assert client.queries[-1][1]["filter"] == ""
+    assert client.queries[-1][1]["limit"] == 16384
+
+
 def test_milvus_hybrid_uses_app_rrf_instead_of_native_hybrid_search():
     from rag.scope import app_collection
 

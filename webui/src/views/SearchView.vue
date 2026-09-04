@@ -122,6 +122,7 @@ function formatScore(score) {
 
 async function doSearch() {
   if (!query.value.trim()) return
+  if (searching.value) return
   if (rerank.value && fetchK.value < topK.value) fetchK.value = topK.value
   searching.value = true
   noResults.value = false

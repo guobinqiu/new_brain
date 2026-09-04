@@ -168,11 +168,16 @@ class MilvusStore:
         return app_collection(app_id)
 
     def get_search_documents(self, metadata_filter: str) -> list[dict]:
+        query_kwargs = {
+            "filter": metadata_filter,
+            "output_fields": ["*"],
+            "timeout": self.timeout,
+        }
+        if not metadata_filter:
+            query_kwargs["limit"] = 16384
         rows = self._client().query(
             collection_name=self._chunks_collection(),
-            filter=metadata_filter,
-            output_fields=["*"],
-            timeout=self.timeout,
+            **query_kwargs,
         )
         return [_row_to_document(row) for row in rows]
 

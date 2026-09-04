@@ -31,6 +31,12 @@ TEST_APP_ID = "myapp"
 E2E_APP_ID = "myapp"
 
 
+def _test_app_id_for_node(node) -> str:
+    raw = node.name.lower()
+    safe = "".join(ch if ch.isalnum() else "_" for ch in raw)
+    return f"myapp_{safe[:80]}"
+
+
 def _is_integration_item(item) -> bool:
     return item.get_closest_marker("integration") is not None or "/tests/integration/" in str(item.path)
 
@@ -213,41 +219,54 @@ def uploaded_chunks(initialized_store, test_txt_path):
 
 
 @pytest.fixture
-def initialized_store(store_test_env):
+def initialized_store(request, store_test_env):
     """Store module after explicit startup initialization."""
-    from rag.scope import app_collection
-    from dense.huggingface import HuggingFaceDense
-    from rag.store.qdrant import QdrantStore
+    from rag.loader import load_app_config
 
-    dense = HuggingFaceDense()
-    dense.start()
-    store = QdrantStore(dense=dense)
-    store.start()
-    store.ensure_app_collection(TEST_APP_ID)
-    with app_collection(TEST_APP_ID):
-        yield store
+    config = load_app_config()
+    yield from _initialized_store_for_config(config, _test_app_id_for_node(request.node))
 
 
 @pytest.fixture
-def initialized_milvus_store(store_test_env):
-    from rag.dense.huggingface import HuggingFaceDense
-    from rag.scope import app_collection, collection_name_for_app
-    from rag.store.milvus import MilvusStore
+def initialized_qdrant_store(request, store_test_env):
+    from rag.loader import load_config_file
 
-    _skip_if_milvus_unavailable(os.environ["MILVUS_URI"])
-    collection_name = collection_name_for_app(TEST_APP_ID)
-    _drop_milvus_collection(os.environ["MILVUS_URI"], collection_name)
+    config = load_config_file(BACKEND_DIR / "config" / "qdrant-bgebase.yaml")
+    yield from _initialized_store_for_config(config, _test_app_id_for_node(request.node))
+
+
+@pytest.fixture
+def initialized_milvus_store(request, store_test_env):
+    from dataclasses import replace
+    from rag.loader import load_app_config
+
+    config = load_app_config()
+    config = replace(config, store=replace(config.store, type="milvus", uri=os.environ["MILVUS_URI"]))
+    yield from _initialized_store_for_config(config, _test_app_id_for_node(request.node))
+
+
+def _initialized_store_for_config(config, app_id: str):
+    from rag.container import build_store
+    from rag.dense.huggingface import HuggingFaceDense
+    from rag.scope import app_collection
+
+    store_key = _configured_store_key(config.store.type)
+    if store_key == "qdrant":
+        _skip_if_qdrant_unavailable(config.store.url or os.environ["QDRANT_URL"])
+    elif store_key == "milvus":
+        _skip_if_milvus_unavailable(config.store.uri or os.environ["MILVUS_URI"])
     dense = HuggingFaceDense()
     dense.start()
-    store = MilvusStore(dense=dense, uri=os.environ["MILVUS_URI"])
+    store = build_store(config, dense=dense, sparse=None)
+    _drop_store_collection({"store": {"type": config.store.type}}, app_id, qdrant_url=config.store.url or os.environ["QDRANT_URL"], milvus_uri=config.store.uri or os.environ["MILVUS_URI"])
     store.start()
-    store.ensure_app_collection(TEST_APP_ID)
+    store.ensure_app_collection(app_id)
     try:
-        with app_collection(TEST_APP_ID):
+        with app_collection(app_id):
             yield store
     finally:
         store.stop()
-        _drop_milvus_collection(os.environ["MILVUS_URI"], collection_name)
+        _drop_store_collection({"store": {"type": config.store.type}}, app_id, qdrant_url=config.store.url or os.environ["QDRANT_URL"], milvus_uri=config.store.uri or os.environ["MILVUS_URI"])
 
 
 class DeterministicReranker:
@@ -321,6 +340,42 @@ def _drop_qdrant_collection(url: str, collection_name: str) -> None:
             close()
     except Exception:
         pass
+
+
+def _skip_if_qdrant_unavailable(url: str) -> None:
+    if not _qdrant_available(url):
+        pytest.skip(f"Qdrant is not available at {url}")
+
+
+def _qdrant_available(url: str) -> bool:
+    try:
+        client = _make_qdrant_client(url)
+        client.get_collections()
+        return True
+    except Exception as exc:
+        if _is_qdrant_connection_error(exc):
+            return False
+        raise
+
+
+def _make_qdrant_client(url: str):
+    from qdrant_client import QdrantClient
+
+    return QdrantClient(url=url, timeout=2)
+
+
+def _is_qdrant_connection_error(exc: Exception) -> bool:
+    if isinstance(exc, (ConnectionError, TimeoutError, OSError)):
+        return True
+    message = str(exc).lower()
+    return any(marker in message for marker in (
+        "connection refused",
+        "failed to connect",
+        "name or service not known",
+        "nodename nor servname",
+        "timed out",
+        "timeout",
+    ))
 
 
 def _drop_milvus_collection(uri: str, collection_name: str) -> None:
@@ -399,6 +454,13 @@ def _enabled_store_key(raw_config: dict) -> str | None:
         if isinstance(value, dict) and value.get("enable") is True:
             return str(value.get("type") or key)
     return None
+
+
+def _configured_store_key(store_type: str) -> str:
+    key = store_type.rsplit("/", 1)[-1]
+    if key == "milvus_lite":
+        return "milvus"
+    return key
 
 
 def _reset_rate_limit() -> None:
