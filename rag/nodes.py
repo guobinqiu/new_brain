@@ -73,4 +73,4 @@ async def _fetch_peer(client, base_url: str, path: str, headers: dict[str, str])
 
 def _fallback_node_id(base_url: str) -> str:
     parsed = urlparse(base_url)
-    return parsed.netloc or parsed.path
+    return parsed.hostname or parsed.path

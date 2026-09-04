@@ -56,7 +56,7 @@ def test_fetch_peers_returns_success_and_forwards_authorization():
 
         rows = await fetch_peers(["http://a:8000", "http://b:8000"], "/api/open/rag/monitor", "Bearer token", client=client)
 
-        assert [row.node_id for row in rows] == ["node-a", "b:8000"]
+        assert [row.node_id for row in rows] == ["node-a", "b"]
         assert [row.status for row in rows] == ["ok", "ok"]
         assert rows[0].data == {"node_id": "node-a", "ready": True}
         assert client.requests[0]["headers"]["Authorization"] == "Bearer token"
@@ -77,7 +77,7 @@ def test_fetch_peers_keeps_failed_peer_as_unreachable():
 
         rows = await fetch_peers(["http://a:8000", "http://b:8000"], "/api/open/rag/config", None, client=client)
 
-        assert [row.node_id for row in rows] == ["a:8000", "b:8000"]
+        assert [row.node_id for row in rows] == ["a", "b"]
         assert [row.status for row in rows] == ["unreachable", "unreachable"]
         assert rows[0].data is None
         assert "status 500" in rows[0].error
