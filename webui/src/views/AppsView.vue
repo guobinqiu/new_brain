@@ -30,7 +30,7 @@
               </div>
             </template>
           </el-table-column>
-          <el-table-column :label="t('common.actions')" width="184">
+          <el-table-column :label="t('common.actions')" min-width="184">
             <template #default="{ row }">
               <div class="app-row-actions">
                 <el-button type="primary" size="small" @click="selectApp(row)">{{ t('apps.enter') }}</el-button>

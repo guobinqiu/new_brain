@@ -26,13 +26,13 @@
       </div>
 
       <el-table v-if="debugResults.length" :data="debugResults" class="debug-results" max-height="420">
-        <el-table-column :label="t('database.score')" width="100">
+        <el-table-column :label="t('database.score')" min-width="100">
           <template #default="{ row }">{{ formatScore(row.score) }}</template>
         </el-table-column>
         <el-table-column prop="id" :label="t('database.chunkId')" min-width="140" show-overflow-tooltip />
         <el-table-column prop="file_id" :label="t('database.fileId')" min-width="170" show-overflow-tooltip />
         <el-table-column prop="filename" :label="t('database.filename')" min-width="120" show-overflow-tooltip />
-        <el-table-column prop="chunk_index" :label="t('database.chunkIndex')" width="92" />
+        <el-table-column prop="chunk_index" :label="t('database.chunkIndex')" min-width="120" />
         <el-table-column :label="t('database.content')" min-width="320">
           <template #default="{ row }">
             <div class="copy-cell">
@@ -46,7 +46,7 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column :label="t('common.actions')" width="150" fixed="right">
+        <el-table-column :label="t('common.actions')" min-width="150" fixed="right">
           <template #default="{ row }">
             <div class="vector-actions">
               <el-button v-if="denseVectorAvailable" size="small" @click.stop="showVector(row, 'dense')">{{ t('database.denseVector') }}</el-button>

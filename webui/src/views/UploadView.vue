@@ -57,13 +57,13 @@
           <el-table-column label="created_at" min-width="160">
             <template #default="{ row }">{{ shortTime(row.created_at) }}</template>
           </el-table-column>
-          <el-table-column prop="status" label="status" width="100" />
+          <el-table-column prop="status" label="status" min-width="100" />
           <el-table-column label="indexed_at" min-width="160">
             <template #default="{ row }">{{ shortTime(row.indexed_at) }}</template>
           </el-table-column>
           <el-table-column prop="error" label="error" min-width="180" show-overflow-tooltip />
-          <el-table-column prop="size" label="size" width="100" />
-          <el-table-column :label="t('common.actions')" width="100">
+          <el-table-column prop="size" label="size" min-width="100" />
+          <el-table-column :label="t('common.actions')" min-width="120">
             <template #default="{ row }">
               <el-button type="danger" size="small" :disabled="deletingFileId === row.id" @click="deleteFile(row)">{{ deletingFileId === row.id ? t('common.deleting') : t('common.delete') }}</el-button>
             </template>

@@ -63,7 +63,7 @@
           <el-table-column :label="t('database.createdAt')" min-width="150">
             <template #default="{ row }">{{ shortTime(row.created_at) }}</template>
           </el-table-column>
-          <el-table-column prop="chunk_index" :label="t('database.chunkIndex')" width="92" />
+          <el-table-column prop="chunk_index" :label="t('database.chunkIndex')" min-width="120" />
           <el-table-column :label="t('database.content')" min-width="260">
             <template #default="{ row }">
               <div class="copy-cell">

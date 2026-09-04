@@ -27,44 +27,44 @@
                 <span class="trace-query">{{ row.query }}</span>
               </template>
             </el-table-column>
-            <el-table-column :label="t('trace.columns.mode')" width="90">
+            <el-table-column :label="t('trace.columns.mode')" min-width="100">
               <template #default="{ row }">{{ traceModeText(row.mode) }}</template>
             </el-table-column>
-            <el-table-column prop="top_k" :label="t('trace.columns.topK')" width="64" />
-            <el-table-column :label="t('trace.columns.elapsed')" width="84">
+            <el-table-column prop="top_k" :label="t('trace.columns.topK')" min-width="88" />
+            <el-table-column :label="t('trace.columns.elapsed')" min-width="128">
               <template #default="{ row }"><strong>{{ ms(row.elapsed_ms) }}</strong></template>
             </el-table-column>
-            <el-table-column :label="t('trace.columns.prepare')" width="84">
+            <el-table-column :label="t('trace.columns.prepare')" min-width="120">
               <template #default="{ row }"><StageCell :stage="stage(row, 'prepare_plan')" /></template>
             </el-table-column>
-            <el-table-column :label="t('trace.columns.dense')" width="84">
+            <el-table-column :label="t('trace.columns.dense')" min-width="112">
               <template #default="{ row }"><StageCell :stage="stage(row, 'dense')" /></template>
             </el-table-column>
-            <el-table-column :label="t('trace.columns.denseEncode')" width="92">
+            <el-table-column :label="t('trace.columns.denseEncode')" min-width="152">
               <template #default="{ row }"><StageCell :stage="stage(row, 'dense_encode')" /></template>
             </el-table-column>
-            <el-table-column :label="t('trace.columns.denseQuery')" width="92">
+            <el-table-column :label="t('trace.columns.denseQuery')" min-width="148">
               <template #default="{ row }"><StageCell :stage="stage(row, 'dense_query')" /></template>
             </el-table-column>
-            <el-table-column :label="t('trace.columns.sparse')" width="84">
+            <el-table-column :label="t('trace.columns.sparse')" min-width="120">
               <template #default="{ row }"><StageCell :stage="stage(row, 'sparse')" /></template>
             </el-table-column>
-            <el-table-column :label="t('trace.columns.sparseEncode')" width="92">
+            <el-table-column :label="t('trace.columns.sparseEncode')" min-width="160">
               <template #default="{ row }"><StageCell :stage="stage(row, 'sparse_encode')" /></template>
             </el-table-column>
-            <el-table-column :label="t('trace.columns.sparseQuery')" width="92">
+            <el-table-column :label="t('trace.columns.sparseQuery')" min-width="156">
               <template #default="{ row }"><StageCell :stage="stage(row, 'sparse_query')" /></template>
             </el-table-column>
-            <el-table-column :label="t('trace.columns.fusion')" width="84">
+            <el-table-column :label="t('trace.columns.fusion')" min-width="112">
               <template #default="{ row }"><StageCell :stage="stage(row, 'fusion')" /></template>
             </el-table-column>
-            <el-table-column :label="t('trace.columns.dedupe')" width="84">
+            <el-table-column :label="t('trace.columns.dedupe')" min-width="120">
               <template #default="{ row }"><StageCell :stage="stage(row, 'dedupe')" /></template>
             </el-table-column>
-            <el-table-column :label="t('trace.columns.rerank')" width="84">
+            <el-table-column :label="t('trace.columns.rerank')" min-width="120">
               <template #default="{ row }"><StageCell :stage="stage(row, 'rerank')" /></template>
             </el-table-column>
-            <el-table-column :label="t('trace.columns.format')" width="84">
+            <el-table-column :label="t('trace.columns.format')" min-width="120">
               <template #default="{ row }"><StageCell :stage="stage(row, 'format_response')" /></template>
             </el-table-column>
           </el-table>
