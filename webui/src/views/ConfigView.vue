@@ -17,31 +17,43 @@
             </div>
           </div>
           <div v-if="node.status === 'ok'" class="config-grid">
-            <div class="kv-list">
-              <div><span>{{ t('config.searchDefaults') }}</span><strong>{{ node.data?.config_name || '-' }}</strong></div>
-              <div><span>mode</span><strong>{{ node.data?.default_mode || '-' }}</strong></div>
-              <div><span>top_k</span><strong>{{ node.data?.top_k ?? '-' }}</strong></div>
-              <div><span>fetch_k</span><strong>{{ node.data?.fetch_k ?? '-' }}</strong></div>
-              <div><span>dense_weight</span><strong>{{ node.data?.dense_weight ?? '-' }}</strong></div>
-              <div><span>sparse_weight</span><strong>{{ node.data?.sparse_weight ?? '-' }}</strong></div>
-              <div><span>rrf_k</span><strong>{{ node.data?.rrf_k ?? '-' }}</strong></div>
+            <div class="config-panel">
+              <div class="config-panel-title">{{ t('config.searchDefaults') }}</div>
+              <div class="kv-list">
+                <div><span>profile</span><strong :title="node.data?.config_name || '-'">{{ node.data?.config_name || '-' }}</strong></div>
+                <div><span>mode</span><strong>{{ node.data?.default_mode || '-' }}</strong></div>
+                <div><span>top_k</span><strong>{{ node.data?.top_k ?? '-' }}</strong></div>
+                <div><span>fetch_k</span><strong>{{ node.data?.fetch_k ?? '-' }}</strong></div>
+                <div><span>dense_weight</span><strong>{{ node.data?.dense_weight ?? '-' }}</strong></div>
+                <div><span>sparse_weight</span><strong>{{ node.data?.sparse_weight ?? '-' }}</strong></div>
+                <div><span>rrf_k</span><strong>{{ node.data?.rrf_k ?? '-' }}</strong></div>
+              </div>
             </div>
-            <div class="kv-list">
-              <div><span>{{ t('config.components') }}</span><strong></strong></div>
-              <div><span>dense</span><strong>{{ configComponentModel(node.data?.dense) }}</strong></div>
-              <div><span>sparse</span><strong>{{ configComponentModel(node.data?.sparse) }}</strong></div>
-              <div><span>rerank</span><strong>{{ configComponentModel(node.data?.rerank) }}</strong></div>
-              <div><span>ocr</span><strong>{{ configComponentModel(node.data?.ocr) }}</strong></div>
+            <div class="config-panel">
+              <div class="config-panel-title">{{ t('config.components') }}</div>
+              <div class="kv-list">
+                <div><span>dense</span><strong :title="configComponentModel(node.data?.dense)">{{ configComponentModel(node.data?.dense) }}</strong></div>
+                <div><span>sparse</span><strong :title="configComponentModel(node.data?.sparse)">{{ configComponentModel(node.data?.sparse) }}</strong></div>
+                <div><span>rerank</span><strong :title="configComponentModel(node.data?.rerank)">{{ configComponentModel(node.data?.rerank) }}</strong></div>
+                <div><span>ocr</span><strong :title="configComponentModel(node.data?.ocr)">{{ configComponentModel(node.data?.ocr) }}</strong></div>
+              </div>
             </div>
-            <div class="kv-list">
-              <div><span>parser.text.chunk_size</span><strong>{{ activeParserConfig(node.data?.parser)?.text?.chunk_size ?? '-' }}</strong></div>
-              <div><span>parser.text.chunk_overlap</span><strong>{{ activeParserConfig(node.data?.parser)?.text?.chunk_overlap ?? '-' }}</strong></div>
-              <div><span>parser.table.header_backward_chars</span><strong>{{ activeParserConfig(node.data?.parser)?.table?.header_backward_chars ?? '-' }}</strong></div>
-              <div><span>parser.table.footer_forward_chars</span><strong>{{ activeParserConfig(node.data?.parser)?.table?.footer_forward_chars ?? '-' }}</strong></div>
+            <div class="config-panel">
+              <div class="config-panel-title">{{ t('config.parser') }}</div>
+              <div class="kv-list">
+                <div><span>type</span><strong>{{ node.data?.parser?.enabled || '-' }}</strong></div>
+                <div><span>text.chunk_size</span><strong>{{ activeParserConfig(node.data?.parser)?.text?.chunk_size ?? '-' }}</strong></div>
+                <div><span>text.chunk_overlap</span><strong>{{ activeParserConfig(node.data?.parser)?.text?.chunk_overlap ?? '-' }}</strong></div>
+                <div><span>table.header_backward_chars</span><strong>{{ activeParserConfig(node.data?.parser)?.table?.header_backward_chars ?? '-' }}</strong></div>
+                <div><span>table.footer_forward_chars</span><strong>{{ activeParserConfig(node.data?.parser)?.table?.footer_forward_chars ?? '-' }}</strong></div>
+              </div>
             </div>
-            <div class="kv-list">
-              <div><span>{{ t('config.storage') }}</span><strong>{{ node.data?.store?.type || '-' }}</strong></div>
-              <div><span>{{ t('database.location') }}</span><strong>{{ configStoreLocation(node.data) }}</strong></div>
+            <div class="config-panel">
+              <div class="config-panel-title">{{ t('config.storage') }}</div>
+              <div class="kv-list">
+                <div><span>store</span><strong>{{ node.data?.store?.type || '-' }}</strong></div>
+                <div><span>{{ t('database.location') }}</span><strong :title="configStoreLocation(node.data)">{{ configStoreLocation(node.data) }}</strong></div>
+              </div>
             </div>
           </div>
           <div v-else class="trace-empty">{{ node.error }}</div>
