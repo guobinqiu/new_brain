@@ -77,7 +77,7 @@ class QdrantVectorClient:
     def drop_collections(self) -> None:
         collection_name = self._chunks_collection()
         client = self._client()
-        if client.collection_exists(collection_name, timeout=self._drop_timeout()):
+        if client.collection_exists(collection_name):
             client.delete_collection(collection_name, timeout=self._drop_timeout())
 
     @property
@@ -196,7 +196,7 @@ class QdrantVectorClient:
     def drop_app_collection(self, app_id: str) -> bool:
         collection_name = collection_name_for_app(app_id)
         client = self._client()
-        if not client.collection_exists(collection_name, timeout=self._drop_timeout()):
+        if not client.collection_exists(collection_name):
             return False
         client.delete_collection(collection_name, timeout=self._drop_timeout())
         return True
@@ -235,7 +235,7 @@ class QdrantVectorClient:
         client = self._client()
         dense_size = self._get_dense_vector_size()
         target_collection = collection_name or self._chunks_collection()
-        if client.collection_exists(target_collection, timeout=self._init_timeout()):
+        if client.collection_exists(target_collection):
             self._ensure_dense_vector_size(target_collection, dense_size)
             self.ensure_payload_indexes(target_collection)
             return
@@ -303,7 +303,7 @@ class QdrantVectorClient:
         return self.dense_vector_size
 
     def _ensure_dense_vector_size(self, collection_name: str, expected_size: int) -> None:
-        actual_size = _dense_vector_size_from_collection(self._client().get_collection(collection_name, timeout=self._init_timeout()))
+        actual_size = _dense_vector_size_from_collection(self._client().get_collection(collection_name))
         if actual_size is not None and actual_size != expected_size:
             raise ValueError(f"dense vector dimension mismatch: expected {expected_size}, actual {actual_size}")
 
@@ -400,7 +400,7 @@ class QdrantVectorClient:
         return self.sparse.embed_documents(contents)
 
 def _wait_collection_ready(client: QdrantClient, collection_name: str, timeout: int = 30) -> None:
-    client.get_collection(collection_name, timeout=timeout)
+    client.get_collection(collection_name)
     client.count(collection_name=collection_name, exact=True, timeout=timeout)
 
 

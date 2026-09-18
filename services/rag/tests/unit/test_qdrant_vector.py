@@ -254,6 +254,8 @@ def test_qdrant_vector_uses_split_operation_timeouts():
         vector.drop_collections()
 
     assert ("create", 120) in calls
+    assert ("exists", None) in calls
+    assert ("get", None) in calls
     assert ("payload_index", 120) in calls
     assert ("upsert", 60) in calls
     assert ("query", 10) in calls
