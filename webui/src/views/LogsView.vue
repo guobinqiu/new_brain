@@ -15,12 +15,13 @@
             class="log-time-range"
             :start-placeholder="t('common.startTime')"
             :end-placeholder="t('common.endTime')"
+            @change="reloadForRange"
           />
-          <el-select v-model="nodeId" size="small" class="log-filter">
+          <el-select v-model="nodeId" size="small" class="log-filter" @change="loadLogs">
             <el-option :label="t('cluster.allNodes')" value="" />
             <el-option v-for="node in nodes" :key="node" :label="node" :value="node" />
           </el-select>
-          <el-select v-model="container" size="small" class="log-filter" filterable>
+          <el-select v-model="container" size="small" class="log-filter" filterable @change="loadLogs">
             <el-option :label="t('logs.allContainers')" value="" />
             <el-option v-for="item in containers" :key="item" :label="item" :value="item" />
           </el-select>
@@ -60,12 +61,17 @@ function defaultRange() {
 
 async function loadFilters() {
   const [nodeValues, containerValues] = await Promise.all([
-    fetchLabelValues('node_id'),
-    fetchLabelValues('container'),
+    fetchLabelValues('node_id', timeRange.value),
+    fetchLabelValues('container', timeRange.value),
   ])
   nodes.value = nodeValues
   containers.value = containerValues
   if (container.value && !containers.value.includes(container.value)) container.value = ''
+}
+
+async function reloadForRange() {
+  await loadFilters()
+  await loadLogs()
 }
 
 async function loadLogs() {

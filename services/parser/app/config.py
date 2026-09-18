@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any
 
 import yaml
 
-from shared.config import DoclingParserConfig, DoclingVlmParserConfig, MineruParserConfig, MineruVlmParserConfig, ParserConfig, RetryConfig, VolcengineParserConfig
+from shared.config import DoclingParserConfig, DoclingVlmParserConfig, MineruParserConfig, ParserConfig, RetryConfig, VolcengineParserConfig
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -17,12 +16,11 @@ def load_parser_config(config_file: str | Path | None = None) -> ParserConfig:
     with _resolve_config_path(config_file).open("r", encoding="utf-8") as f:
         raw = yaml.safe_load(f) or {}
     parser = raw.get("parser") or {}
-    active = _select_enabled_backend(parser, ("mineru", "mineru_vlm", "docling", "docling_vlm", "volcengine"))
+    active = _select_enabled_backend(parser, ("mineru", "docling", "docling_vlm", "volcengine"))
     volcengine = parser.get("volcengine") or {}
     return ParserConfig(
         active=active,
         mineru=_parse_mineru_config(parser.get("mineru") or {}),
-        mineru_vlm=_parse_mineru_vlm_config(parser.get("mineru_vlm") or {}),
         docling=_parse_docling_config(parser.get("docling") or {}),
         docling_vlm=_parse_docling_vlm_config(parser.get("docling_vlm") or {}),
         volcengine=VolcengineParserConfig(
@@ -35,7 +33,7 @@ def load_parser_config(config_file: str | Path | None = None) -> ParserConfig:
             timeout=int(volcengine.get("timeout", 300)),
             base_url=volcengine["base_url"] if active == "volcengine" else volcengine.get("base_url"),
             retry=_parse_retry_config(volcengine.get("retry")),
-            api_key=os.environ["ARK_API_KEY"] if active == "volcengine" else None,
+            api_key=_env_value("ARK_API_KEY") if active == "volcengine" else None,
         ),
     )
 
@@ -46,12 +44,11 @@ def _parse_mineru_config(raw: dict[str, Any]) -> MineruParserConfig:
         parse_method=str(raw.get("parse_method", "auto")),
         formula=bool(raw.get("formula", True)),
         table_enable=bool(raw.get("table", True)),
-    )
-
-
-def _parse_mineru_vlm_config(raw: dict[str, Any]) -> MineruVlmParserConfig:
-    return MineruVlmParserConfig(
-        enable=bool(raw.get("enable", False)),
+        base_url=raw.get("base_url"),
+        timeout=int(raw.get("timeout", 300)),
+        tier=str(raw.get("tier", "standard")),
+        retry=_parse_retry_config(raw.get("retry")),
+        api_key=_env_value("MINERU_API_KEY"),
     )
 
 
@@ -104,3 +101,10 @@ def _resolve_config_path(value: str | Path | None) -> Path:
     if path.parts and path.parts[0] in ("rag", "services"):
         return PROJECT_ROOT / path
     return Path.cwd() / path
+
+
+def _env_value(name: str) -> str | None:
+    import os
+
+    value = os.environ.get(name)
+    return value if value else None

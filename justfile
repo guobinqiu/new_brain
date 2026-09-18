@@ -5,11 +5,6 @@ CTRL_STACK := "brain_ctrl"
 DEPLOY_STACK := "brain"
 NETWORK := "brain-net"
 ROOT := justfile_directory()
-RAG_IMAGE := env_var_or_default("RAG_IMAGE", "brain-rag:dev")
-PARSER_IMAGE := env_var_or_default("PARSER_IMAGE", "brain-parser:dev")
-INFERENCE_IMAGE := env_var_or_default("INFERENCE_IMAGE", "brain-inference:dev")
-LLM_IMAGE := env_var_or_default("LLM_IMAGE", "brain-llm:dev")
-OPS_IMAGE := env_var_or_default("OPS_IMAGE", "brain-ops:dev")
 
 ctrl action:
 	just _ctrl-{{action}}
@@ -32,185 +27,29 @@ _deploy-down:
 _network-up:
 	docker network inspect {{NETWORK}} >/dev/null 2>&1 || docker network create --driver overlay --attachable {{NETWORK}}
 
-_service-start service:
-	docker service scale {{service}}=1
+service action name:
+	just _service-{{action}} {{quote(name)}}
 
-_service-stop service:
-	docker service scale {{service}}=0
+_service-start name:
+	docker service scale {{quote(name)}}=1
 
-_service-remove service:
-	docker service rm {{service}}
+_service-stop name:
+	docker service scale {{quote(name)}}=0
 
-_service-rollout service:
-	docker service update --force {{service}}
+_service-remove name:
+	docker service rm {{quote(name)}}
 
-webui action:
-	just _webui-{{action}}
+_service-rollout name:
+	docker service update --force {{quote(name)}}
 
-rag action:
-	just _rag-{{action}}
+bundle service:
+	npm --prefix {{quote(service)}} run build
 
-parser action:
-	just _parser-{{action}}
+build service:
+	docker build -f deploy/Dockerfile --target {{quote(service)}} \
+	  -t {{quote(env_var("IMAGE_REGISTRY") + "/brain-" + service + ":" + env_var("IMAGE_TAG"))}} \
+	  --build-arg USE_CN_MIRROR={{quote(env_var_or_default("USE_CN_MIRROR", "true"))}} \
+	  --build-arg SERVICE_EXTRA={{quote(env_var_or_default("SERVICE_EXTRA", "cpu"))}} .
 
-inference action:
-	just _inference-{{action}}
-
-llm action:
-	just _llm-{{action}}
-
-ops action:
-	just _ops-{{action}}
-
-tei-dense action:
-	just _tei-dense-{{action}}
-
-tei-rerank action:
-	just _tei-rerank-{{action}}
-
-vllm-dense action:
-	just _vllm-dense-{{action}}
-
-vllm-rerank action:
-	just _vllm-rerank-{{action}}
-
-_rag-build:
-	docker build -f deploy/Dockerfile --target rag -t {{ RAG_IMAGE }} --build-arg USE_CN_MIRROR={{ env_var_or_default("USE_CN_MIRROR", "true") }} .
-
-_rag-push:
-	docker push {{ RAG_IMAGE }}
-
-_rag-start:
-	just _service-start brain_rag
-
-_rag-stop:
-	just _service-stop brain_rag
-
-_rag-remove:
-	just _service-remove brain_rag
-
-_rag-rollout:
-	just _service-rollout brain_rag
-
-_parser-build:
-	docker build -f deploy/Dockerfile --target parser -t {{ PARSER_IMAGE }} --build-arg USE_CN_MIRROR={{ env_var_or_default("USE_CN_MIRROR", "true") }} --build-arg SERVICE_EXTRA={{ env_var_or_default("SERVICE_EXTRA", "cpu") }} .
-
-_parser-push:
-	docker push {{ PARSER_IMAGE }}
-
-_parser-start:
-	just _service-start brain_parser
-
-_parser-stop:
-	just _service-stop brain_parser
-
-_parser-remove:
-	just _service-remove brain_parser
-
-_parser-rollout:
-	just _service-rollout brain_parser
-
-_inference-build:
-	docker build -f deploy/Dockerfile --target inference -t {{ INFERENCE_IMAGE }} --build-arg USE_CN_MIRROR={{ env_var_or_default("USE_CN_MIRROR", "true") }} --build-arg SERVICE_EXTRA={{ env_var_or_default("SERVICE_EXTRA", "cpu") }} .
-
-_inference-push:
-	docker push {{ INFERENCE_IMAGE }}
-
-_inference-start:
-	just _service-start brain_inference
-
-_inference-stop:
-	just _service-stop brain_inference
-
-_inference-remove:
-	just _service-remove brain_inference
-
-_inference-rollout:
-	just _service-rollout brain_inference
-
-_llm-build:
-	docker build -f services/llm/Dockerfile -t {{ LLM_IMAGE }} --build-arg USE_CN_MIRROR={{ env_var_or_default("USE_CN_MIRROR", "true") }} .
-
-_llm-push:
-	docker push {{ LLM_IMAGE }}
-
-_llm-start:
-	just _service-start brain_llm
-
-_llm-stop:
-	just _service-stop brain_llm
-
-_llm-remove:
-	just _service-remove brain_llm
-
-_llm-rollout:
-	just _service-rollout brain_llm
-
-_ops-build:
-	docker build -f deploy/Dockerfile --target ops -t {{ OPS_IMAGE }} --build-arg USE_CN_MIRROR={{ env_var_or_default("USE_CN_MIRROR", "true") }} .
-
-_ops-push:
-	docker push {{ OPS_IMAGE }}
-
-_ops-start:
-	just _service-start brain_ctrl_ops
-
-_ops-stop:
-	just _service-stop brain_ctrl_ops
-
-_ops-remove:
-	just _service-remove brain_ctrl_ops
-
-_ops-rollout:
-	just _service-rollout brain_ctrl_ops
-
-_tei-dense-start:
-	just _service-start brain_tei_dense
-
-_tei-dense-stop:
-	just _service-stop brain_tei_dense
-
-_tei-dense-remove:
-	just _service-remove brain_tei_dense
-
-_tei-dense-rollout:
-	just _service-rollout brain_tei_dense
-
-_tei-rerank-start:
-	just _service-start brain_tei_rerank
-
-_tei-rerank-stop:
-	just _service-stop brain_tei_rerank
-
-_tei-rerank-remove:
-	just _service-remove brain_tei_rerank
-
-_tei-rerank-rollout:
-	just _service-rollout brain_tei_rerank
-
-_vllm-dense-start:
-	just _service-start brain_vllm_dense
-
-_vllm-dense-stop:
-	just _service-stop brain_vllm_dense
-
-_vllm-dense-remove:
-	just _service-remove brain_vllm_dense
-
-_vllm-dense-rollout:
-	just _service-rollout brain_vllm_dense
-
-_vllm-rerank-start:
-	just _service-start brain_vllm_rerank
-
-_vllm-rerank-stop:
-	just _service-stop brain_vllm_rerank
-
-_vllm-rerank-remove:
-	just _service-remove brain_vllm_rerank
-
-_vllm-rerank-rollout:
-	just _service-rollout brain_vllm_rerank
-
-_webui-build:
-	npm --prefix webui run build
+push service:
+	docker push {{quote(env_var("IMAGE_REGISTRY") + "/brain-" + service + ":" + env_var("IMAGE_TAG"))}}

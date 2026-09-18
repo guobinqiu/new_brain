@@ -34,9 +34,14 @@ async def query_range(
         return response.json().get("data", {}).get("result", [])
 
 
-async def label_values(loki_url: str, label: str) -> list[str]:
+async def label_values(loki_url: str, label: str, start: str | None = None, end: str | None = None) -> list[str]:
+    params = {}
+    if start:
+        params["start"] = start
+    if end:
+        params["end"] = end
     async with httpx.AsyncClient(timeout=LOKI_TIMEOUT_SECONDS) as client:
-        response = await client.get(f"{loki_url.rstrip('/')}/loki/api/v1/label/{label}/values")
+        response = await client.get(f"{loki_url.rstrip('/')}/loki/api/v1/label/{label}/values", params=params)
         response.raise_for_status()
         return response.json().get("data", [])
 

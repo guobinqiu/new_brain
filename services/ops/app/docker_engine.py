@@ -26,14 +26,14 @@ class DockerEngineClient:
         filters = json.dumps({"service": {service_name: True}}, separators=(",", ":"))
         return self._request("GET", "/tasks", params={"filters": filters}).json()
 
-    def service_logs(self, service_name: str, tail: int = 200) -> str:
+    def service_logs(self, service_name: str, tail: int = 50) -> str:
         response = self._request("GET", f"/services/{quote(service_name, safe='')}/logs", params={
             "stdout": "1",
             "stderr": "1",
             "timestamps": "1",
             "tail": str(tail),
         })
-        return response.text
+        return _decode_log_stream(response.content)
 
     def list_nodes(self) -> list[dict]:
         return self._request("GET", "/nodes").json()
@@ -45,3 +45,19 @@ class DockerEngineClient:
         response = self._client.request(method, path, **kwargs)
         response.raise_for_status()
         return response
+
+
+def _decode_log_stream(content: bytes) -> str:
+    chunks = []
+    index = 0
+    while index + 8 <= len(content):
+        stream_type = content[index]
+        size = int.from_bytes(content[index + 4:index + 8], "big")
+        if stream_type not in {1, 2} or size < 0 or index + 8 + size > len(content):
+            return content.decode("utf-8", errors="replace")
+        index += 8
+        chunks.append(content[index:index + size])
+        index += size
+    if index != len(content):
+        return content.decode("utf-8", errors="replace")
+    return b"".join(chunks).decode("utf-8", errors="replace")

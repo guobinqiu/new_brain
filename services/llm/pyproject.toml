@@ -2,7 +2,7 @@
 name = "brain-llm"
 version = "0.1.0"
 description = "RAG LLM backend"
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 dependencies = [
     "langgraph",
     "langgraph-checkpoint-postgres",

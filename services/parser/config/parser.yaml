@@ -1,11 +1,15 @@
 parser:
   mineru:
     enable: true
+    base_url: http://mineru_api_server:8000
+    timeout: 300 # 单次请求超时，单位秒
+    tier: standard
+    retry:
+      max_attempts: 3
+      interval_seconds: 0.5
     parse_method: auto # auto, ocr, txt
     formula: true
     table: true
-  mineru_vlm:
-    enable: false
 
   # 解析效果一般不如mineru，但可作为备选方案  
   docling:

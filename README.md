@@ -15,15 +15,15 @@
 
   3. 构建并推送服务镜像：
 
-     just ops build && just ops push
-     just rag build && just rag push
-     just parser build && just parser push
-     just inference build && just inference push
-     just llm build && just llm push
+     just build ops && just push ops
+     just build rag && just push rag
+     just build parser && just push parser
+     just build inference && just push inference
+     just build llm && just push llm
 
-  4. 构建前端：
+  4. 打包前端静态文件：
 
-     just webui build
+     just bundle webui
 
   5. 启动管理入口：
 
@@ -63,6 +63,45 @@
   8. TEI/vLLM 已在 deploy/deploy.yaml 中注册为 Swarm service，默认副本数为 0，需要时在管理台“基础服务”里启动
 
 ```
+
+## 命令
+
+在项目根目录执行以下命令：
+
+| 命令格式 | 示例 | 作用 |
+| --- | --- | --- |
+| `just ctrl up` | `just ctrl up` | 部署管理入口 |
+| `just ctrl down` | `just ctrl down` | 删除管理入口 stack |
+| `just deploy up` | `just deploy up` | 部署业务和基础服务 |
+| `just deploy down` | `just deploy down` | 删除业务 stack |
+| `just build <服务名>` | `just build rag` | 构建服务镜像 |
+| `just bundle <服务名>` | `just bundle webui` | 打包前端静态文件 |
+| `just push <服务名>` | `just push rag` | 推送该服务的镜像 |
+| `just service start <Swarm服务名>` | `just service start brain_rag` | 将服务副本数设为 1 |
+| `just service stop <Swarm服务名>` | `just service stop brain_rag` | 将服务副本数设为 0 |
+| `just service rollout <Swarm服务名>` | `just service rollout brain_rag` | 强制滚动更新服务 |
+| `just service remove <Swarm服务名>` | `just service remove brain_rag` | 删除服务 |
+| `just --list` | `just --list` | 查看命令入口 |
+
+各服务的构建、推送示例：
+
+| 服务 | 构建 | 推送镜像 |
+| --- | --- | --- |
+| rag | `just build rag` | `just push rag` |
+| parser | `just build parser` | `just push parser` |
+| inference | `just build inference` | `just push inference` |
+| llm | `just build llm` | `just push llm` |
+| ops | `just build ops` | `just push ops` |
+| webui | `just bundle webui` | 无需推送镜像 |
+
+`just service` 的服务名填写 `docker service ls` 显示的实际名称，会原样传给 Docker，不自动添加前缀。
+
+`just bundle webui` 执行 `npm --prefix webui run build`，生成前端静态文件，不生成镜像。
+
+镜像地址由 `deploy/.env` 中的 `IMAGE_REGISTRY` 和 `IMAGE_TAG` 统一生成。
+例如 `IMAGE_REGISTRY=registry.example.com/brain`、`IMAGE_TAG=amd64-gpu` 时，`just push rag` 会推送 `registry.example.com/brain/brain-rag:amd64-gpu`。
+所有服务镜像统一使用 `deploy/Dockerfile` 构建，target 为服务名，例如 `just build llm`。
+`USE_CN_MIRROR` 和 `SERVICE_EXTRA` 作为构建参数统一传给 Docker，由 Dockerfile 中的 `ARG` 声明决定是否使用。
 
 ## API
 

@@ -36,6 +36,7 @@
     "loading": "Loading",
     "loadMore": "Load more",
     "copy": "Copy",
+    "close": "Close",
     "delete": "Delete",
     "deleting": "Deleting",
     "search": "Query",
@@ -200,6 +201,7 @@
       "stop": "Stop",
       "scale": "Scale",
       "rollout": "Rollout",
+      "logs": "Logs",
       "validate": "Validate",
       "save": "Save",
       "apply": "Apply",
@@ -218,7 +220,8 @@
     "applied": "Config apply submitted.",
     "published": "Business services publish submitted.",
     "scaled": "{service} scaled to {replicas} replicas",
-    "submitted": "{service} {action} submitted"
+    "submitted": "{service} {action} submitted",
+    "emptyLogs": "No logs"
   },
   "apps": {
     "presignConfig": "S3 presign configuration",

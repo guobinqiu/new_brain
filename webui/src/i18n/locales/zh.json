@@ -36,6 +36,7 @@
     "loading": "加载中",
     "loadMore": "加载更多",
     "copy": "复制",
+    "close": "关闭",
     "delete": "删除",
     "deleting": "删除中",
     "search": "查询",
@@ -200,6 +201,7 @@
       "stop": "停止",
       "scale": "扩缩容",
       "rollout": "滚动更新",
+      "logs": "日志",
       "validate": "校验",
       "save": "保存",
       "apply": "应用",
@@ -218,7 +220,8 @@
     "applied": "配置应用已提交",
     "published": "业务服务发布已提交",
     "scaled": "{service} 已调整为 {replicas} 个副本",
-    "submitted": "{service} {action} 已提交"
+    "submitted": "{service} {action} 已提交",
+    "emptyLogs": "暂无日志"
   },
   "apps": {
     "presignConfig": "S3 预签名配置",

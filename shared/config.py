@@ -80,11 +80,11 @@ class MineruParserConfig:
     parse_method: str = "auto"
     formula: bool = True
     table_enable: bool = True
-
-
-@dataclass(frozen=True)
-class MineruVlmParserConfig:
-    enable: bool = False
+    base_url: str | None = None
+    timeout: int = 300
+    tier: str = "standard"
+    retry: RetryConfig = field(default_factory=RetryConfig)
+    api_key: str | None = field(default=None, repr=False)
 
 
 @dataclass(frozen=True)
@@ -123,7 +123,6 @@ class VolcengineParserConfig:
 @dataclass(frozen=True, init=False)
 class ParserConfig:
     mineru: MineruParserConfig = field(default_factory=MineruParserConfig)
-    mineru_vlm: MineruVlmParserConfig = field(default_factory=MineruVlmParserConfig)
     docling: DoclingParserConfig = field(default_factory=DoclingParserConfig)
     docling_vlm: DoclingVlmParserConfig = field(default_factory=lambda: DoclingVlmParserConfig(model="granitedocling"))
     active: str = "docling"
@@ -132,7 +131,6 @@ class ParserConfig:
     def __init__(
         self,
         mineru: MineruParserConfig | None = None,
-        mineru_vlm: MineruVlmParserConfig | None = None,
         docling: DoclingParserConfig | None = None,
         docling_vlm: DoclingVlmParserConfig | None = None,
         active: str = "docling",
@@ -141,7 +139,6 @@ class ParserConfig:
         mineru_config = mineru or MineruParserConfig()
         docling_config = docling or DoclingParserConfig()
         object.__setattr__(self, "mineru", mineru_config)
-        object.__setattr__(self, "mineru_vlm", mineru_vlm or MineruVlmParserConfig())
         object.__setattr__(self, "docling", docling_config)
         object.__setattr__(self, "docling_vlm", docling_vlm or DoclingVlmParserConfig(model="granitedocling"))
         object.__setattr__(self, "active", active)

@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 
 from fastapi import HTTPException
 
-from services.rag.core.loki_client import container_service, label_values, log_query, next_ns, parse_logs, query_range, timestamp_to_ns
+from services.rag.core.loki_client import container_service, label_values, log_query, parse_logs, query_range, timestamp_to_ns
 
 
 async def logs(
@@ -28,22 +28,28 @@ async def logs(
         start_ns,
         end_ns,
         page_limit,
-        "forward",
+        "backward",
     )
     rows = parse_logs(streams)
     return {
         "logs": rows,
-        "has_more": len(rows) >= page_limit,
-        "next_start": next_ns(rows[-1]["ts"]) if rows else None,
+        "has_more": False,
+        "next_start": None,
     }
 
 
-async def log_label_values(state, label: str, _):
+async def log_label_values(state, label: str, _, start: str | None = None, end: str | None = None):
     if not state.config.logging.loki_url:
         raise HTTPException(503, "log storage is not configured")
     if label not in {"container", "node_id"}:
         raise HTTPException(400, "unsupported log label")
-    values = await label_values(state.config.logging.loki_url, label)
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    values = await label_values(
+        state.config.logging.loki_url,
+        label,
+        timestamp_to_ns(start, now_ms - 15 * 60 * 1000),
+        timestamp_to_ns(end, now_ms),
+    )
     if label == "container":
         values = sorted({container_service(value) for value in values})
     return {"values": values}

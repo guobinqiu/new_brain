@@ -100,7 +100,7 @@ def create_app(*, services=None, configs=None) -> FastAPI:
         return _service_action(lambda: {"tasks": app.state.services.list_tasks(service)})
 
     @app.get("/api/ops/services/{service}/logs", dependencies=[Depends(require_admin_jwt)])
-    def service_logs(service: str, tail: int = Query(200, ge=1, le=2000)):
+    def service_logs(service: str, tail: int = Query(50, ge=1, le=500)):
         return _service_action(lambda: {"logs": app.state.services.logs(service, tail=tail)})
 
     @app.get("/api/ops/nodes", dependencies=[Depends(require_admin_jwt)])

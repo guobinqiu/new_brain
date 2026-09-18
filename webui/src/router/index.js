@@ -7,7 +7,7 @@ import SearchView from '../views/SearchView.vue'
 import LlmView from '../views/LlmView.vue'
 import DebugView from '../views/DebugView.vue'
 import TracesView from '../views/TracesView.vue'
-import LogsView from '../views/LogsView.vue'
+// import LogsView from '../views/LogsView.vue'
 import OpsView from '../views/OpsView.vue'
 
 const router = createRouter({
@@ -27,7 +27,7 @@ const router = createRouter({
     { path: '/llm', component: LlmView },
     { path: '/debug', component: DebugView },
     { path: '/trace', component: TracesView },
-    { path: '/logs', component: LogsView },
+    // { path: '/logs', component: LogsView },
     { path: '/config', redirect: '/ops' },
     { path: '/ops', component: OpsView },
     { path: '/', redirect: '/apps' },

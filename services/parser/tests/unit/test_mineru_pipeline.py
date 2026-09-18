@@ -4,31 +4,6 @@ import pytest
 pytestmark = pytest.mark.unit
 
 
-def test_mineru_do_parse_uses_configured_parse_method(monkeypatch, tmp_path):
-    import services.parser.providers.mineru as mineru
-    from shared.config import MineruParserConfig
-
-    calls = []
-
-    def fake_read_fn(filepath, file_type):
-        return b"pdf"
-
-    def fake_do_parse(**kwargs):
-        calls.append(kwargs)
-
-    monkeypatch.setattr("mineru.cli.common.read_fn", fake_read_fn)
-    monkeypatch.setattr("mineru.cli.common.do_parse", fake_do_parse)
-
-    mineru._mineru_do_parse(
-        output_dir=str(tmp_path),
-        filepath="/tmp/a.pdf",
-        filename="a.pdf",
-        parser_config=MineruParserConfig(parse_method="ocr"),
-    )
-
-    assert calls[0]["parse_method"] == "ocr"
-
-
 def test_mineru_content_list_merges_text_fragments_and_drops_table_duplicates():
     from services.parser.common.schema import TableBlock
     from services.parser.providers.mineru.normalizer import content_list_to_blocks
@@ -70,4 +45,3 @@ def test_mineru_preserves_native_heading_list_and_code():
                       TextBlock("First", page=1, kind="list_item"),
                       TextBlock("Second", page=1, kind="list_item"),
                       TextBlock("if x < 1:\n    print(x)", page=1, kind="code")]
-

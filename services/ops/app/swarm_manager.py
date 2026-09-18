@@ -91,7 +91,7 @@ class SwarmManager:
         self._require_managed_service(service)
         return [_task_summary(task) for task in self.docker.list_tasks(service)]
 
-    def logs(self, service: str, tail: int = 200) -> str:
+    def logs(self, service: str, tail: int = 50) -> str:
         self._require_managed_service(service)
         return self.docker.service_logs(service, tail=tail)
 

@@ -62,7 +62,7 @@
             </el-sub-menu>
             <el-menu-item index="/llm">{{ t('nav.llm') }}</el-menu-item>
             <el-menu-item index="/debug">{{ t('nav.debug') }}</el-menu-item>
-            <el-menu-item index="/logs">{{ t('nav.logs') }}</el-menu-item>
+            <!-- <el-menu-item index="/logs">{{ t('nav.logs') }}</el-menu-item> -->
             <el-menu-item index="/ops">{{ t('nav.ops') }}</el-menu-item>
           </el-menu>
         </aside>

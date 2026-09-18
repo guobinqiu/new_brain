@@ -3,8 +3,14 @@ import { shortTime } from './format'
 
 const LOG_LIMIT = 500
 
-export async function fetchLabelValues(label) {
-  const res = await axios.get(`/api/rag/logs/labels/${label}`)
+export async function fetchLabelValues(label, range = null) {
+  const params = new URLSearchParams()
+  if (range?.length === 2) {
+    params.set('start', String(range[0]))
+    params.set('end', String(range[1]))
+  }
+  const query = params.toString()
+  const res = await axios.get(`/api/rag/logs/labels/${label}${query ? `?${query}` : ''}`)
   return res.data?.values || []
 }
 

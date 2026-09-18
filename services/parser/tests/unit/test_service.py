@@ -66,26 +66,19 @@ def test_parser_service_uses_distinct_docling_pipeline_and_vlm_backends(monkeypa
     assert vlm_service.pdf_parser.config.model == "granitedocling"
 
 
-def test_parser_service_uses_distinct_mineru_and_vlm_backends(monkeypatch):
+def test_parser_service_uses_mineru_api_server_backend(monkeypatch):
     import services.parser.service as service_mod
-    from shared.config import MineruParserConfig, MineruVlmParserConfig
+    from shared.config import MineruParserConfig
 
-    class FakeMineruPipelineDocumentParser:
+    class FakeMineruApiServerDocumentParser:
         def __init__(self, config):
             self.config = config
 
-    class FakeMineruVlmDocumentParser:
-        def __init__(self, config):
-            self.config = config
+    monkeypatch.setattr(service_mod, "MineruApiServerDocumentParser", FakeMineruApiServerDocumentParser)
 
-    monkeypatch.setattr(service_mod, "MineruPipelineDocumentParser", FakeMineruPipelineDocumentParser)
-    monkeypatch.setattr(service_mod, "MineruVlmDocumentParser", FakeMineruVlmDocumentParser)
+    service = ParserService(ParserConfig(active="mineru", mineru=MineruParserConfig()))
 
-    pipeline_service = ParserService(ParserConfig(active="mineru", mineru=MineruParserConfig()))
-    vlm_service = ParserService(ParserConfig(active="mineru_vlm", mineru_vlm=MineruVlmParserConfig()))
-
-    assert isinstance(pipeline_service.pdf_parser, FakeMineruPipelineDocumentParser)
-    assert isinstance(vlm_service.pdf_parser, FakeMineruVlmDocumentParser)
+    assert isinstance(service.pdf_parser, FakeMineruApiServerDocumentParser)
 
 
 def test_parser_service_routes_txt_to_local_parser_when_docling_is_active(tmp_path, monkeypatch):

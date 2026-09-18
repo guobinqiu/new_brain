@@ -22,5 +22,11 @@ async def logs(
 
 
 @router.get("/api/rag/logs/labels/{label}")
-async def log_label_values(request: Request, label: str, principal=Depends(require_jwt)):
-    return await service.log_label_values(request.app.state, label, principal)
+async def log_label_values(
+    request: Request,
+    label: str,
+    start: str | None = None,
+    end: str | None = None,
+    principal=Depends(require_jwt),
+):
+    return await service.log_label_values(request.app.state, label, principal, start=start, end=end)

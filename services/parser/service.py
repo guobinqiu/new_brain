@@ -7,8 +7,7 @@ from services.parser.providers.docling.pdf_pipeline import DoclingPipelineDocume
 from services.parser.providers.docling.pdf_vlm import DoclingVlmDocumentParser
 from services.parser.documents.parser import DocumentParser
 from services.parser.common.schema import Block
-from services.parser.providers.mineru.pdf_pipeline import MineruPipelineDocumentParser
-from services.parser.providers.mineru.pdf_vlm import MineruVlmDocumentParser
+from services.parser.providers.mineru.api_parser import MineruApiServerDocumentParser
 from services.parser.providers.volcengine import VolcengineDocumentParser
 from shared.config import ParserConfig
 
@@ -28,9 +27,7 @@ class ParserService:
             return DoclingPipelineDocumentParser(config.docling)
         if config.active == "docling_vlm":
             return DoclingVlmDocumentParser(config.docling_vlm)
-        if config.active == "mineru_vlm":
-            return MineruVlmDocumentParser(config.mineru_vlm)
-        return MineruPipelineDocumentParser(config.mineru)
+        return MineruApiServerDocumentParser(config.mineru)
 
     def start(self) -> None:
         self.pdf_parser.start()

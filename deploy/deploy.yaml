@@ -130,6 +130,8 @@ services:
   promtail:
     image: grafana/promtail:3.4.1
     command: -config.file=/etc/promtail/config.yml -config.expand-env=true
+    environment:
+      NODE_NAME: "{{.Node.Hostname}}"
     volumes:
       - type: bind
         source: ${PROJECT_ROOT}/deploy/monitor/promtail-config.yml
@@ -211,7 +213,7 @@ services:
         condition: any
 
   rag:
-    image: ${RAG_IMAGE}
+    image: ${IMAGE_REGISTRY}/brain-rag:${IMAGE_TAG}
     command: ["/app/.venv/bin/uvicorn", "services.rag.app.main:app", "--host", "0.0.0.0", "--port", "6000", "--reload"]
     labels:
       logging: loki
@@ -245,7 +247,7 @@ services:
         condition: any
 
   parser:
-    image: ${PARSER_IMAGE}
+    image: ${IMAGE_REGISTRY}/brain-parser:${IMAGE_TAG}
     command: ["/app/.venv/bin/uvicorn", "services.parser.app.main:app", "--host", "0.0.0.0", "--port", "7000", "--reload"]
     labels:
       logging: loki
@@ -283,7 +285,7 @@ services:
         condition: any
 
   inference:
-    image: ${INFERENCE_IMAGE}
+    image: ${IMAGE_REGISTRY}/brain-inference:${IMAGE_TAG}
     command: ["/app/.venv/bin/uvicorn", "services.inference.app.main:app", "--host", "0.0.0.0", "--port", "7001", "--reload"]
     labels:
       logging: loki
@@ -317,7 +319,7 @@ services:
         condition: any
 
   llm:
-    image: ${LLM_IMAGE}
+    image: ${IMAGE_REGISTRY}/brain-llm:${IMAGE_TAG}
     command: ["/app/.venv/bin/uvicorn", "services.llm.src.main:app", "--host", "0.0.0.0", "--port", "6001", "--reload"]
     labels:
       logging: loki
@@ -348,6 +350,68 @@ services:
       restart_policy:
         condition: any
 
+  mineru_api_server:
+    image: ${IMAGE_REGISTRY}/mineru:${IMAGE_TAG}
+    entrypoint: ["mineru-kit"]
+    command: ["api-server", "--host", "0.0.0.0", "--port", "8000"]
+    labels:
+      logging: loki
+    environment:
+      MINERU_MODEL_SOURCE: local
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://127.0.0.1:8000/v1/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 60
+      start_period: 30s
+    ulimits:
+      memlock: -1
+      stack: 67108864
+    ipc: host
+    logging: *json-logging
+    deploy:
+      labels:
+        group: infra
+      replicas: 0
+      placement:
+        constraints:
+          - node.labels.gpu == true
+      restart_policy:
+        condition: any
+
+  mineru_vlm_server:
+    image: ${IMAGE_REGISTRY}/mineru:${IMAGE_TAG}
+    entrypoint: ["mineru-kit"]
+    command: ["vlm-server", "--host", "0.0.0.0", "--port", "30000"]
+    labels:
+      logging: loki
+    environment:
+      MINERU_MODEL_SOURCE: local
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://127.0.0.1:30000/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 60
+      start_period: 30s
+    ulimits:
+      memlock: -1
+      stack: 67108864
+    ipc: host
+    logging: *json-logging
+    deploy:
+      labels:
+        group: infra
+      replicas: 0
+      placement:
+        constraints:
+          - node.labels.gpu == true
+      restart_policy:
+        condition: any
+
   tei_dense:
     image: ghcr.io/huggingface/text-embeddings-inference:cuda-1.9
     command: ["--model-id", "/model"]
@@ -356,16 +420,15 @@ services:
     environment:
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
-    ports:
-      - target: 80
-        published: 8081
-        protocol: tcp
-        mode: host
     volumes:
       - type: bind
         source: ${PROJECT_ROOT}/models/BAAI/bge-m3
         target: /model
         read_only: true
+    ulimits:
+      memlock: -1
+      stack: 67108864
+    ipc: host
     logging: *json-logging
     deploy:
       labels:
@@ -385,16 +448,15 @@ services:
     environment:
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
-    ports:
-      - target: 80
-        published: 8082
-        protocol: tcp
-        mode: host
     volumes:
       - type: bind
         source: ${PROJECT_ROOT}/models/BAAI/bge-reranker-v2-m3
         target: /model
         read_only: true
+    ulimits:
+      memlock: -1
+      stack: 67108864
+    ipc: host
     logging: *json-logging
     deploy:
       labels:
@@ -414,16 +476,15 @@ services:
     environment:
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
-    ports:
-      - target: 8000
-        published: 8083
-        protocol: tcp
-        mode: host
     volumes:
       - type: bind
         source: ${PROJECT_ROOT}/models/BAAI/bge-m3
         target: /model
         read_only: true
+    ulimits:
+      memlock: -1
+      stack: 67108864
+    ipc: host
     logging: *json-logging
     deploy:
       labels:
@@ -443,16 +504,15 @@ services:
     environment:
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
-    ports:
-      - target: 8000
-        published: 8084
-        protocol: tcp
-        mode: host
     volumes:
       - type: bind
         source: ${PROJECT_ROOT}/models/BAAI/bge-reranker-v2-m3
         target: /model
         read_only: true
+    ulimits:
+      memlock: -1
+      stack: 67108864
+    ipc: host
     logging: *json-logging
     deploy:
       labels:

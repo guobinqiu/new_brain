@@ -23,8 +23,10 @@ def test_load_parser_config_selects_enabled_docling(tmp_path):
                     "parse_method": "ocr",
                     "formula": True,
                     "table": True,
+                    "base_url": "http://mineru_api_server:8000",
+                    "timeout": 240,
+                    "tier": "standard",
                 },
-                "mineru_vlm": {"enable": False},
                 "docling": {
                     "enable": True,
                     "formula": True,
@@ -43,10 +45,11 @@ def test_load_parser_config_selects_enabled_docling(tmp_path):
 
     assert config.active == "docling"
     assert config.mineru.parse_method == "ocr"
+    assert config.mineru.base_url == "http://mineru_api_server:8000"
+    assert config.mineru.timeout == 240
+    assert config.mineru.tier == "standard"
     assert config.docling.formula is True
     assert config.docling.table_enable is True
-    assert not hasattr(config.mineru_vlm, "formula")
-    assert not hasattr(config.mineru_vlm, "table_enable")
     assert config.docling_vlm.model == "granitedocling"
 
 
@@ -59,7 +62,6 @@ def test_load_parser_config_selects_enabled_docling_vlm(tmp_path):
         _parser_yaml({
             "parser": {
                 "mineru": {"enable": False},
-                "mineru_vlm": {"enable": False},
                 "docling": {"enable": False},
                 "docling_vlm": {"enable": True, "model": "granitedocling"},
             },
@@ -82,7 +84,6 @@ def test_load_parser_config_rejects_no_enabled_backend(tmp_path):
         _parser_yaml({
             "parser": {
                 "mineru": {"enable": False},
-                "mineru_vlm": {"enable": False},
                 "docling": {"enable": False},
                 "docling_vlm": {"enable": False},
             },
@@ -103,7 +104,6 @@ def test_load_parser_config_rejects_multiple_enabled_backends(tmp_path):
         _parser_yaml({
             "parser": {
                 "mineru": {"enable": True},
-                "mineru_vlm": {"enable": False},
                 "docling": {"enable": True},
                 "docling_vlm": {"enable": False},
             },
@@ -124,7 +124,6 @@ def test_load_parser_config_docling_table_mode_defaults_to_accurate(tmp_path):
         _parser_yaml({
             "parser": {
                 "mineru": {"enable": False},
-                "mineru_vlm": {"enable": False},
                 "docling": {"enable": True, "formula": True, "table": True},
                 "docling_vlm": {"enable": False},
             },
@@ -147,7 +146,6 @@ def test_load_parser_config_docling_table_mode_passthrough(tmp_path, table_mode)
         _parser_yaml({
             "parser": {
                 "mineru": {"enable": False},
-                "mineru_vlm": {"enable": False},
                 "docling": {"enable": True, "table_mode": table_mode},
                 "docling_vlm": {"enable": False},
             },
@@ -169,7 +167,6 @@ def test_load_parser_config_rejects_invalid_docling_table_mode(tmp_path):
         _parser_yaml({
             "parser": {
                 "mineru": {"enable": False},
-                "mineru_vlm": {"enable": False},
                 "docling": {"enable": True, "table_mode": "turbo"},
                 "docling_vlm": {"enable": False},
             },

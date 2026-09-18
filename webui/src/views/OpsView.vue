@@ -59,6 +59,11 @@
                 <el-table-column :label="t('ops.columns.ports')" min-width="140">
                   <template #default="{ row }">{{ portsText(row.ports) }}</template>
                 </el-table-column>
+                <el-table-column :label="t('ops.columns.actions')" width="100" fixed="right">
+                  <template #default="{ row }">
+                    <el-button size="small" :loading="serviceLogLoading === row.name" @click="loadServiceLogs(row.name)">{{ t('ops.actions.logs') }}</el-button>
+                  </template>
+                </el-table-column>
               </el-table>
             </el-tab-pane>
             <el-tab-pane :label="t('ops.tabs.appServices')" name="app">
@@ -71,8 +76,9 @@
                 <el-table-column :label="t('ops.columns.ports')" min-width="140">
                   <template #default="{ row }">{{ portsText(row.ports) }}</template>
                 </el-table-column>
-                <el-table-column :label="t('ops.columns.actions')" width="340" fixed="right">
+                <el-table-column :label="t('ops.columns.actions')" width="400" fixed="right">
                   <template #default="{ row }">
+                    <el-button size="small" :loading="serviceLogLoading === row.name" :disabled="serviceBusy(row.name)" @click="loadServiceLogs(row.name)">{{ t('ops.actions.logs') }}</el-button>
                     <el-button size="small" :loading="serviceActionKey === `${row.name}:start`" :disabled="serviceBusy(row.name)" @click="serviceAction(row.name, 'start')">{{ t('ops.actions.start') }}</el-button>
                     <el-button size="small" :loading="serviceActionKey === `${row.name}:stop`" :disabled="serviceBusy(row.name)" @click="serviceAction(row.name, 'stop')">{{ t('ops.actions.stop') }}</el-button>
                     <el-button size="small" :loading="serviceActionKey === `${row.name}:rollout`" :disabled="serviceBusy(row.name)" @click="serviceAction(row.name, 'rollout')">{{ t('ops.actions.rollout') }}</el-button>
@@ -91,10 +97,13 @@
                 <el-table-column :label="t('ops.columns.ports')" min-width="140">
                   <template #default="{ row }">{{ portsText(row.ports) }}</template>
                 </el-table-column>
-                <el-table-column :label="t('ops.columns.actions')" width="180" fixed="right">
+                <el-table-column :label="t('ops.columns.actions')" width="260" fixed="right">
                   <template #default="{ row }">
-                    <el-button size="small" :loading="serviceActionKey === `${row.name}:start`" :disabled="serviceBusy(row.name)" @click="serviceAction(row.name, 'start')">{{ t('ops.actions.start') }}</el-button>
-                    <el-button size="small" :loading="serviceActionKey === `${row.name}:stop`" :disabled="serviceBusy(row.name)" @click="serviceAction(row.name, 'stop')">{{ t('ops.actions.stop') }}</el-button>
+                    <div class="service-actions">
+                      <el-button size="small" :loading="serviceLogLoading === row.name" :disabled="serviceBusy(row.name)" @click="loadServiceLogs(row.name)">{{ t('ops.actions.logs') }}</el-button>
+                      <el-button size="small" :loading="serviceActionKey === `${row.name}:start`" :disabled="serviceBusy(row.name)" @click="serviceAction(row.name, 'start')">{{ t('ops.actions.start') }}</el-button>
+                      <el-button size="small" :loading="serviceActionKey === `${row.name}:stop`" :disabled="serviceBusy(row.name)" @click="serviceAction(row.name, 'stop')">{{ t('ops.actions.stop') }}</el-button>
+                    </div>
                   </template>
                 </el-table-column>
               </el-table>
@@ -166,6 +175,13 @@
         <el-button type="primary" :loading="scalingService === scaleTarget.service" @click="submitScale">{{ t('common.confirm') }}</el-button>
       </template>
     </el-dialog>
+    <el-dialog v-model="logsDialogVisible" :title="`${t('ops.actions.logs')} ${logsService}`" width="960px">
+      <pre v-if="serviceLogs" class="logs-box ops-service-logs">{{ serviceLogs }}</pre>
+      <div v-else class="trace-empty">{{ t('ops.emptyLogs') }}</div>
+      <template #footer>
+        <el-button @click="logsDialogVisible = false">{{ t('common.close') }}</el-button>
+      </template>
+    </el-dialog>
   </main>
 </template>
 
@@ -188,8 +204,12 @@ const joinCommand = ref('')
 const configAction = ref('')
 const serviceActionKey = ref('')
 const scalingService = ref('')
+const serviceLogLoading = ref('')
 const scaleDialogVisible = ref(false)
 const scaleTarget = ref({ service: '', replicas: 0 })
+const logsDialogVisible = ref(false)
+const logsService = ref('')
+const serviceLogs = ref('')
 
 const currentConfig = computed(() => configs.value.find(item => item.name === selectedConfig.value))
 const deployConfigs = computed(() => configs.value.filter(item => item.requires_deploy))
@@ -343,6 +363,17 @@ async function submitScale() {
   } catch (err) { showToast('error', errorMessage(err)) } finally { scalingService.value = '' }
 }
 
+async function loadServiceLogs(service) {
+  serviceLogLoading.value = service
+  logsService.value = service
+  serviceLogs.value = ''
+  try {
+    const res = await axios.get(`/api/ops/services/${encodeURIComponent(service)}/logs`, { params: { tail: 50 } })
+    serviceLogs.value = res.data?.logs || ''
+    logsDialogVisible.value = true
+  } catch (err) { showToast('error', errorMessage(err)) } finally { serviceLogLoading.value = '' }
+}
+
 async function fetchJoinCommand(role) {
   try {
     const res = await axios.get('/api/ops/swarm/join-command', { params: { role } })
@@ -375,5 +406,8 @@ watch(tab, () => {
 .editor-footer-actions { justify-content: flex-end; flex-shrink: 0; }
 .config-note { margin: 0; }
 .scale-dialog { display: flex; flex-direction: column; gap: 12px; }
+.service-actions { display: flex; gap: 8px; flex-wrap: nowrap; }
+.service-actions .el-button { margin-left: 0; }
+.ops-service-logs { max-height: 620px; }
 :deep(textarea) { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; font-size: 13px; line-height: 1.5; }
 </style>
