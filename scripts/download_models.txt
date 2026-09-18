@@ -1,0 +1,40 @@
+# 在项目根目录执行以下命令
+
+# ModelScope 向量模型
+modelscope download BAAI/bge-base-zh-v1.5 --local-dir models/BAAI/bge-base-zh-v1.5
+modelscope download BAAI/bge-base-en-v1.5 --local-dir models/BAAI/bge-base-en-v1.5
+modelscope download BAAI/bge-m3 --local-dir models/BAAI/bge-m3
+
+# ModelScope 重排模型
+modelscope download BAAI/bge-reranker-base --local-dir models/BAAI/bge-reranker-base
+modelscope download BAAI/bge-reranker-v2-m3 --local-dir models/BAAI/bge-reranker-v2-m3
+modelscope download BAAI/bge-reranker-large --local-dir models/BAAI/bge-reranker-large
+
+# MinerU 模型
+MINERU_TOOLS_CONFIG_JSON=models/mineru/mineru.json mineru-models-download -s modelscope -m pipeline
+MINERU_TOOLS_CONFIG_JSON=models/mineru/mineru.json mineru-models-download -s modelscope -m vlm
+
+# Docling standard pipeline 默认模型集合：layout + tableformer + code_formula + picture_classifier + rapidocr
+docling-tools models download -o models/docling
+
+# Docling standard pipeline 单项模型
+docling-tools models download -o models/docling layout
+docling-tools models download -o models/docling tableformer
+docling-tools models download -o models/docling tableformerv2
+docling-tools models download -o models/docling code_formula
+docling-tools models download -o models/docling picture_classifier
+docling-tools models download -o models/docling rapidocr
+docling-tools models download -o models/docling easyocr
+
+# Docling VLM 模型
+docling-tools models download -o models/docling granitedocling
+docling-tools models download -o models/docling granitedocling_mlx
+docling-tools models download -o models/docling smoldocling
+docling-tools models download -o models/docling smoldocling_mlx
+
+# Docling 可选视觉、图表、OCR 模型
+docling-tools models download -o models/docling smolvlm
+docling-tools models download -o models/docling granite_vision
+docling-tools models download -o models/docling granite_chart_extraction
+docling-tools models download -o models/docling granite_chart_extraction_v4
+docling-tools models download -o models/docling nemotron_ocr_v2

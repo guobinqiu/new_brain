@@ -15,14 +15,6 @@
           <el-input v-model.trim="fileIdsText" :placeholder="t('search.fileIdsPlaceholder')" class="scopes" />
         </div>
       </div>
-      <div v-if="mode === 'hybrid'" class="search-row-3">
-        <div v-if="mode === 'hybrid'" class="balance-control">
-          <span class="bal-label">{{ t('search.modeValues.dense') }}</span>
-          <el-slider v-model="hybridBalance" :min="0" :max="1" :step="0.05" @input="onBalanceChange" style="flex: 1" />
-          <span class="bal-value">{{ hybridBalance.toFixed(2) }}</span>
-          <span class="bal-label" style="text-align:right">{{ t('search.modeValues.sparse') }}</span>
-        </div>
-      </div>
       <div class="search-row-3">
         <div class="topk-control">
           <span class="topk-label">{{ t('search.topK') }}</span>
@@ -35,10 +27,10 @@
         </div>
       </div>
       <div class="search-row-3">
-        <el-checkbox v-if="rerankAvailable" v-model="rerank" class="rerank-control">{{ t('search.rerank') }}</el-checkbox>
-        <div v-if="rerank" class="fetchk-control">
-          <span class="cand-label" :title="t('search.fetchKTitle')">{{ t('search.fetchK') }}</span>
-          <el-input-number v-model="fetchK" :min="topK" :title="t('search.fetchKTitle')" style="width: 120px" />
+        <el-checkbox v-if="rerankVisible" v-model="rerank" class="rerank-control">{{ t('search.rerank') }}</el-checkbox>
+        <div v-if="rerankVisible && rerank" class="fetchk-control">
+          <span class="cand-label" :title="t('search.rerankFetchKTitle')">{{ t('search.rerankFetchK') }}</span>
+          <el-input-number v-model="rerankFetchK" :min="topK" :max="100" :title="t('search.rerankFetchKTitle')" style="width: 120px" />
         </div>
       </div>
       <div class="search-row-2">
@@ -53,9 +45,8 @@
     <div v-if="searchResults.length > 0" class="results-section">
       <div class="results-bar">
         <span class="results-count">{{ t('search.resultCount', { count: searchResults.length }) }}</span>
-        <span class="results-mode">{{ t('search.mode') }}: {{ t(`search.modeValues.${lastSearch?.mode}`) }}</span>
+        <span class="results-mode">{{ t('search.mode') }}: {{ t(`search.modeValues.${lastSearch?.mode || 'dense'}`) }}</span>
         <span class="results-mode">{{ t('search.files') }}: {{ lastSearch?.fileIds?.length ? lastSearch.fileIds.length : t('common.all') }}</span>
-        <span v-if="lastSearch?.mode === 'hybrid'" class="results-balance">{{ t('search.balance') }}: {{ lastSearch.balance.toFixed(2) }} {{ t('search.modeValues.dense') }}</span>
         <span v-if="searchTime !== null" class="results-elapsed">{{ t('search.elapsed') }}: {{ searchTime }}ms</span>
       </div>
       <div v-for="(r, i) in searchResults" :key="i" class="result-card">
@@ -85,32 +76,25 @@ import { useActiveAppStore } from '../stores/activeApp'
 import { parseFileIds, escapeHtml } from '../utils/format'
 import { errorMessage, showToast } from '../utils/toast'
 
-const API = '/api/open/rag'
+const API = '/api/rag'
 const { t } = useI18n()
 const activeAppStore = useActiveAppStore()
 const route = useRoute()
 const currentAppId = computed(() => route.params.app_id || activeAppStore.appId)
 
 const query = ref('')
-const mode = ref('hybrid')
+const mode = ref('dense')
 const topK = ref(5)
-const fetchK = ref(20)
 const rerank = ref(false)
-const rerankAvailable = ref(false)
-const sparseAvailable = ref(true)
+const rerankVisible = ref(false)
+const rerankFetchK = ref(20)
+const sparseAvailable = ref(false)
 const fileIdsText = ref('')
-const hybridBalance = ref(0.5)
-const searchConfig = ref({ dense_weight: 0.5, sparse_weight: 0.5, rrf_k: 60 })
 const searchResults = ref([])
 const searchTime = ref(null)
 const lastSearch = ref(null)
 const searching = ref(false)
 const noResults = ref(false)
-
-function onBalanceChange() {
-  searchConfig.value.dense_weight = hybridBalance.value
-  searchConfig.value.sparse_weight = 1 - hybridBalance.value
-}
 
 function searchFileIds() {
   return parseFileIds(fileIdsText.value)
@@ -123,7 +107,7 @@ function formatScore(score) {
 async function doSearch() {
   if (!query.value.trim()) return
   if (searching.value) return
-  if (rerank.value && fetchK.value < topK.value) fetchK.value = topK.value
+  if (rerankVisible.value && rerank.value && rerankFetchK.value < topK.value) rerankFetchK.value = topK.value
   searching.value = true
   noResults.value = false
   searchResults.value = []
@@ -134,24 +118,20 @@ async function doSearch() {
       query: query.value,
       mode: mode.value,
       top_k: topK.value,
-      rerank: rerank.value,
-      dense_weight: searchConfig.value.dense_weight,
-      sparse_weight: searchConfig.value.sparse_weight,
-      rrf_k: searchConfig.value.rrf_k,
+      rerank: rerankVisible.value && rerank.value,
     }
     if (currentAppId.value) body.app_id = currentAppId.value
     if (fileIds.length) body.file_ids = fileIds
-    if (rerank.value) body.fetch_k = fetchK.value
+    if (rerankVisible.value && rerank.value) body.rerank_fetch_k = rerankFetchK.value
     const res = await axios.post(`${API}/search`, body)
     searchResults.value = res.data.results
     searchTime.value = res.data.elapsed_ms
     lastSearch.value = {
       query: query.value,
       mode: mode.value,
-      balance: hybridBalance.value,
       topK: topK.value,
-      rerank: rerank.value,
-      fetchK: rerank.value ? fetchK.value : null,
+      rerank: rerankVisible.value && rerank.value,
+      rerankFetchK: rerankVisible.value && rerank.value ? rerankFetchK.value : null,
       fileIds,
     }
     noResults.value = searchResults.value.length === 0
@@ -164,16 +144,13 @@ async function doSearch() {
 async function fetchConfig() {
   try {
     const res = await axios.get(`${API}/config`)
-    searchConfig.value = res.data
-    mode.value = res.data.default_mode ?? mode.value
-    sparseAvailable.value = Boolean(res.data.sparse)
-    if ((mode.value === 'sparse' || mode.value === 'hybrid') && !sparseAvailable.value) mode.value = 'dense'
-    rerankAvailable.value = Boolean(res.data.rerank_available)
-    rerank.value = Boolean(res.data.rerank && res.data.rerank_available)
-    hybridBalance.value = res.data.dense_weight ?? 0.5
+    sparseAvailable.value = Boolean(res.data.capabilities?.sparse_vector)
+    mode.value = res.data.mode || mode.value
     topK.value = res.data.top_k ?? topK.value
-    fetchK.value = res.data.fetch_k ?? fetchK.value
-  } catch (err) { console.error(err) }
+    rerankVisible.value = Boolean(res.data.rerank)
+    rerank.value = Boolean(res.data.rerank)
+    rerankFetchK.value = res.data.rerank_fetch_k ?? rerankFetchK.value
+  } catch (err) { showToast('error', errorMessage(err)) }
 }
 
 onMounted(fetchConfig)

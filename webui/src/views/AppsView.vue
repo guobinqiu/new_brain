@@ -7,26 +7,24 @@
           <p>{{ t('apps.desc') }}</p>
         </div>
       </div>
-      <form class="app-create" @submit.prevent="createApp">
-        <el-input v-model.trim="newAppId" :placeholder="t('apps.appIdPlaceholder')" />
-        <el-button type="primary" native-type="submit" :loading="creatingApp">{{ creatingApp ? t('common.loading') : t('apps.create') }}</el-button>
-      </form>
+      <el-form class="app-create-form" @submit.prevent="createApp">
+        <el-form-item>
+          <el-input
+            v-model.trim="newAppId"
+            :placeholder="t('apps.appIdPlaceholder')"
+            clearable
+          />
+        </el-form-item>
+        <el-button type="primary" :loading="creating" native-type="submit">{{ t('apps.create') }}</el-button>
+      </el-form>
       <div v-if="apps.length" class="trace-table-wrap apps-table-wrap">
         <el-table :data="apps" style="width: 100%">
           <el-table-column prop="app_id" label="app_id" min-width="160" show-overflow-tooltip />
-          <el-table-column label="access_key" min-width="260" show-overflow-tooltip>
+          <el-table-column label="api_key" min-width="360" show-overflow-tooltip>
             <template #default="{ row }">
               <div class="copy-cell">
-                <span class="chunk-id">{{ row.access_key }}</span>
-                <el-button :icon="CopyDocument" circle size="small" @click.stop="copyText(row.access_key)" />
-              </div>
-            </template>
-          </el-table-column>
-          <el-table-column label="secret_key" min-width="260" show-overflow-tooltip>
-            <template #default="{ row }">
-              <div class="copy-cell">
-                <span class="chunk-id">{{ row.secret_key }}</span>
-                <el-button :icon="CopyDocument" circle size="small" @click.stop="copyText(row.secret_key)" />
+                <span class="chunk-id">{{ row.api_key }}</span>
+                <el-button :icon="CopyDocument" circle size="small" @click.stop="copyText(row.api_key)" />
               </div>
             </template>
           </el-table-column>
@@ -34,7 +32,10 @@
             <template #default="{ row }">
               <div class="app-row-actions">
                 <el-button type="primary" size="small" @click="selectApp(row)">{{ t('apps.enter') }}</el-button>
-                <el-button type="danger" size="small" @click="deleteApp(row)">{{ t('common.delete') }}</el-button>
+                <el-button type="danger" size="small" plain @click="deleteApp(row)">{{ t('common.delete') }}</el-button>
+                <el-tooltip :content="t('apps.presignConfig')">
+                  <el-button :icon="Setting" size="small" :aria-label="t('apps.presignConfig')" @click="editPresign(row)" />
+                </el-tooltip>
               </div>
             </template>
           </el-table-column>
@@ -42,81 +43,100 @@
       </div>
       <div v-else class="trace-empty">{{ t('apps.empty') }}</div>
     </div>
+    <el-dialog v-model="presignVisible" :title="`${presignAppId} · ${t('apps.presignConfig')}`" width="min(760px, 94vw)">
+      <el-input v-model="presignTemplate" type="textarea" :rows="18" :aria-label="t('apps.presignConfig')" />
+      <template #footer>
+        <el-button type="primary" :loading="savingPresign" @click="savePresign">{{ t('common.save') }}</el-button>
+      </template>
+    </el-dialog>
   </main>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { onMounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import axios from '../utils/api'
 import { useActiveAppStore } from '../stores/activeApp'
 import { useAppsStore } from '../stores/apps'
-import { errorMessage, showToast } from '../utils/toast'
-import { ElMessageBox } from 'element-plus'
-import { CopyDocument } from '@element-plus/icons-vue'
+import { CopyDocument, Setting } from '@element-plus/icons-vue'
+import axios from '../utils/api'
 import { copyText } from '../utils/format'
+import { errorMessage, showToast } from '../utils/toast'
+import { confirmBox } from '../utils/messageBox'
 
-const API = '/api/open/rag'
 const router = useRouter()
 const { t } = useI18n()
 const activeAppStore = useActiveAppStore()
 
 const appsStore = useAppsStore()
 const { apps } = storeToRefs(appsStore)
-
-const APP_ID_PATTERN = /^[A-Za-z][A-Za-z0-9_]{1,63}$/
 const newAppId = ref('')
-const creatingApp = ref(false)
+const creating = ref(false)
+const presignVisible = ref(false)
+const presignAppId = ref('')
+const presignTemplate = ref('')
+const savingPresign = ref(false)
 
-async function createApp() {
-  if (!newAppId.value || creatingApp.value) return
-  if (!APP_ID_PATTERN.test(newAppId.value)) {
-    showToast('error', t('apps.appIdRule'))
-    return
-  }
-  creatingApp.value = true
+async function editPresign(app) {
   try {
-    const res = await axios.post(`${API}/apps`, { app_id: newAppId.value })
-    showToast('success', t('apps.created', { appId: res.data.app_id }))
-    newAppId.value = ''
-    await appsStore.fetchApps()
+    const response = await axios.get(`/api/rag/apps/${app.app_id}/presign-config`)
+    presignAppId.value = app.app_id
+    presignTemplate.value = response.data.presign_config
+    presignVisible.value = true
   } catch (err) {
     showToast('error', errorMessage(err))
-  } finally {
-    creatingApp.value = false
   }
 }
 
-async function deleteApp(app) {
-  if (!app?.app_id) return
+async function savePresign() {
+  savingPresign.value = true
   try {
-    await ElMessageBox.confirm(
-      t('apps.deleteConfirm', { appId: app.app_id }),
-      t('common.delete'),
-      { type: 'warning', confirmButtonText: t('common.delete') }
-    )
-  } catch {
-    return
-  }
-  try {
-    await axios.delete(`${API}/apps/${app.app_id}`)
-    showToast('success', t('apps.deleted', { appId: app.app_id }))
-    if (activeAppStore.appId === app.app_id) {
-      activeAppStore.appId = ''
-      activeAppStore.databaseStatus = null
-    }
-    await appsStore.fetchApps()
+    await axios.put(`/api/rag/apps/${presignAppId.value}/presign-config`, presignTemplate.value, {
+      headers: { 'Content-Type': 'text/plain' },
+    })
+    presignVisible.value = false
   } catch (err) {
     showToast('error', errorMessage(err))
+  } finally {
+    savingPresign.value = false
   }
 }
 
 function selectApp(app) {
   if (!app?.app_id) return
   activeAppStore.appId = app.app_id
-  router.push('/database')
+  router.push(`/apps/${app.app_id}/database`)
+}
+
+async function createApp() {
+  if (!newAppId.value) {
+    showToast('error', t('apps.appIdRule'))
+    return
+  }
+  creating.value = true
+  try {
+    const created = await appsStore.createApp(newAppId.value)
+    newAppId.value = ''
+    showToast('success', t('apps.created', { appId: created.app_id }))
+  } catch (err) {
+    showToast('error', errorMessage(err))
+  } finally {
+    creating.value = false
+  }
+}
+
+async function deleteApp(app) {
+  if (!app?.app_id) return
+  try {
+    await confirmBox(t, t('apps.deleteConfirm', { appId: app.app_id }), t('common.delete'), { type: 'warning' })
+    await appsStore.deleteApp(app.app_id)
+    if (activeAppStore.appId === app.app_id) activeAppStore.appId = ''
+    showToast('success', t('apps.deleted', { appId: app.app_id }))
+  } catch (err) {
+    if (err === 'cancel' || err === 'close') return
+    showToast('error', errorMessage(err))
+  }
 }
 
 onMounted(() => appsStore.fetchApps())

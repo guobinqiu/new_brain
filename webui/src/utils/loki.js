@@ -1,9 +1,10 @@
 import axios from './api'
+import { shortTime } from './format'
 
 const LOG_LIMIT = 500
 
 export async function fetchLabelValues(label) {
-  const res = await axios.get(`/api/open/rag/logs/labels/${label}`)
+  const res = await axios.get(`/api/rag/logs/labels/${label}`)
   return res.data?.values || []
 }
 
@@ -17,15 +18,16 @@ export async function fetchLogs(filter = {}) {
     params.set('end', String(filter.range[1]))
   }
   if (filter.start != null) params.set('start', String(filter.start))
-  const res = await axios.get(`/api/open/rag/logs?${params.toString()}`)
+  const res = await axios.get(`/api/rag/logs?${params.toString()}`)
   return res.data || { logs: [], has_more: false, next_start: null }
 }
 
 export function formatLogLine(row) {
   const parsed = row.parsed
   if (!parsed) return row.line
+  const time = parsed.time || row.time
   const pieces = [
-    parsed.time || row.time || '',
+    time ? shortTime(time) : '',
     row.container || '',
     parsed.level || '',
     parsed.logger || '',

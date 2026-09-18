@@ -19,20 +19,15 @@
           <div class="docs-title">
             <h2>{{ t('database.indexData') }}</h2>
           </div>
-          <el-radio-group v-model="activeDataSource" size="small" @change="onDataSourceChange">
-            <el-radio-button value="vector">{{ t('database.vectorStore') }}</el-radio-button>
-            <el-radio-button v-if="searchIndexAvailable" value="search">{{ t('database.searchIndex') }}</el-radio-button>
-          </el-radio-group>
         </div>
-        <el-button type="danger" class="database-delete-btn" @click="deleteDatabase">{{ t('database.delete') }}</el-button>
+        <el-button type="danger" class="database-delete-btn" :loading="databaseDeleting" @click="deleteDatabase">{{ t('database.delete') }}</el-button>
       </div>
       <div class="chunk-filter">
         <span>{{ t('database.fileIds') }}</span>
         <el-input v-model.trim="databaseFileIdsText" :placeholder="t('database.fileIdsPlaceholder')" @keyup.enter="fetchActiveChunks" />
         <el-button :disabled="!appId || activeChunksLoading" @click="fetchActiveChunks">{{ t('database.query') }}</el-button>
       </div>
-      <div v-if="activeDataSource === 'search' && !searchIndexAvailable" class="docs-empty">{{ t('database.searchIndexDisabled') }}</div>
-      <div v-else-if="activeChunks.length === 0 && !activeChunksLoading" class="docs-empty">{{ activeDataSource === 'vector' ? t('database.vectorEmpty') : t('database.searchIndexEmpty') }}</div>
+      <div v-if="activeChunks.length === 0 && !activeChunksLoading" class="docs-empty">{{ t('database.vectorEmpty') }}</div>
       <template v-else>
         <el-table
           ref="chunksTableRef"
@@ -84,18 +79,18 @@
 </template>
 
 <script setup>
-import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
+import { computed, ref, onMounted, onBeforeUnmount, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
-import { ElMessageBox } from 'element-plus'
 import { CopyDocument } from '@element-plus/icons-vue'
 import axios from '../utils/api'
 import { useActiveAppStore } from '../stores/activeApp'
 import { errorMessage, showToast } from '../utils/toast'
+import { confirmBox } from '../utils/messageBox'
 import { copyText, shortTime, parseFileIds } from '../utils/format'
 
-const API = '/api/open/rag'
+const API = '/api/rag'
 const { t } = useI18n()
 const activeAppStore = useActiveAppStore()
 const { appId, databaseStatus } = storeToRefs(activeAppStore)
@@ -104,51 +99,33 @@ const currentAppId = computed(() => route.params.app_id || appId.value)
 
 const databaseFileIdsText = ref('')
 const databaseAppliedFileIdsText = ref('')
-const activeDataSource = ref('vector')
 const chunks = ref([])
 const chunksCursor = ref(null)
 const chunksHasMore = ref(false)
 const chunksLoading = ref(false)
 const chunksLoaded = ref(false)
-const sparseChunks = ref([])
-const sparseChunksCursor = ref(null)
-const sparseChunksHasMore = ref(false)
-const sparseChunksLoading = ref(false)
-const sparseChunksLoaded = ref(false)
 const databaseInitializing = ref(false)
+const databaseDeleting = ref(false)
 const chunksTableRef = ref(null)
-const capabilities = ref({})
+let statusRequestId = 0
+let chunksRequestId = 0
+let viewActive = true
 
-const activeChunks = computed(() => activeDataSource.value === 'vector' ? chunks.value : sparseChunks.value)
-const activeChunksLoading = computed(() => activeDataSource.value === 'vector' ? chunksLoading.value : sparseChunksLoading.value)
-const searchIndexAvailable = computed(() => capabilities.value.search_index === true)
-
-async function fetchConfig() {
-  try {
-    const res = await axios.get(`${API}/config`)
-    capabilities.value = res.data?.capabilities || {}
-    if (!searchIndexAvailable.value && activeDataSource.value === 'search') {
-      activeDataSource.value = 'vector'
-      resetSparseChunks()
-    }
-  } catch (err) {
-    capabilities.value = {}
-    if (activeDataSource.value === 'search') {
-      activeDataSource.value = 'vector'
-      resetSparseChunks()
-    }
-  }
-}
+const activeChunks = computed(() => chunks.value)
+const activeChunksLoading = computed(() => chunksLoading.value)
 
 async function fetchDatabaseStatus() {
+  const requestId = ++statusRequestId
   if (!currentAppId.value) {
     activeAppStore.databaseStatus = null
     return
   }
   try {
     const res = await axios.get(`${API}/apps/${currentAppId.value}/database`)
+    if (requestId !== statusRequestId) return
     activeAppStore.databaseStatus = res.data
   } catch (err) {
+    if (requestId !== statusRequestId) return
     activeAppStore.databaseStatus = null
     showToast('error', errorMessage(err))
   }
@@ -171,60 +148,51 @@ async function initializeDatabase() {
 }
 
 async function deleteDatabase() {
-  if (!currentAppId.value || !activeAppStore.databaseStatus?.exists) return
+  if (!currentAppId.value || !activeAppStore.databaseStatus?.exists || databaseDeleting.value) return
+  const deletedAppId = currentAppId.value
   try {
-    await ElMessageBox.confirm(t('database.deleteConfirm', { appId: currentAppId.value }), t('database.delete'), { type: 'warning' })
+    await confirmBox(t, t('database.deleteConfirm', { appId: deletedAppId }), t('database.delete'), { type: 'warning' })
   } catch {
     return
   }
+  databaseDeleting.value = true
   try {
-    await axios.delete(`${API}/apps/${currentAppId.value}/database`)
-    showToast('success', t('database.deleted', { appId: currentAppId.value }))
+    await axios.delete(`${API}/apps/${deletedAppId}/database`)
+    showToast('success', t('database.deleted', { appId: deletedAppId }))
+    if (!viewActive || currentAppId.value !== deletedAppId) return
+    statusRequestId++
+    activeAppStore.databaseStatus = { app_id: deletedAppId, exists: false }
     resetChunks()
-    resetSparseChunks()
-    await fetchDatabaseStatus()
   } catch (err) {
     showToast('error', errorMessage(err))
+  } finally {
+    databaseDeleting.value = false
   }
 }
 
 async function fetchActiveChunks() {
   if (!currentAppId.value) {
     resetChunks()
-    resetSparseChunks()
     return
   }
   databaseAppliedFileIdsText.value = databaseFileIdsText.value
-  if (activeDataSource.value === 'search') {
-    resetSparseChunks()
-    if (!searchIndexAvailable.value) {
-      sparseChunksLoaded.value = true
-      return
-    }
-    await fetchNextSparseChunks()
-    return
-  }
   resetChunks()
   await fetchNextChunks()
 }
 
 function resetChunks() {
+  chunksRequestId++
+  chunksLoading.value = false
   chunks.value = []
   chunksCursor.value = null
   chunksHasMore.value = false
   chunksLoaded.value = false
 }
 
-function resetSparseChunks() {
-  sparseChunks.value = []
-  sparseChunksCursor.value = null
-  sparseChunksHasMore.value = false
-  sparseChunksLoaded.value = false
-}
-
 async function fetchNextChunks() {
   if (!currentAppId.value) return
   if (chunksLoading.value) return
+  const requestId = ++chunksRequestId
   chunksLoading.value = true
   try {
     const body = { limit: 50 }
@@ -233,39 +201,15 @@ async function fetchNextChunks() {
     const fileIds = parseFileIds(databaseAppliedFileIdsText.value)
     if (fileIds.length) body.file_ids = fileIds
     const res = await axios.post(`${API}/chunks`, body)
+    if (requestId !== chunksRequestId) return
     chunks.value = chunks.value.concat(res.data.chunks || [])
     chunksCursor.value = res.data.next_cursor || null
     chunksHasMore.value = Boolean(res.data.has_more)
     chunksLoaded.value = true
     if (!chunksCursor.value) await fetchDatabaseStatus()
   }
-  catch (err) { console.error(err) }
-  finally { chunksLoading.value = false }
-}
-
-async function fetchNextSparseChunks() {
-  if (!currentAppId.value) return
-  if (sparseChunksLoading.value) return
-  sparseChunksLoading.value = true
-  try {
-    const body = { limit: 50 }
-    if (sparseChunksCursor.value) body.cursor = sparseChunksCursor.value
-    if (currentAppId.value) body.app_id = currentAppId.value
-    const fileIds = parseFileIds(databaseAppliedFileIdsText.value)
-    if (fileIds.length) body.file_ids = fileIds
-    const res = await axios.post(`${API}/sparse/chunks`, body)
-    sparseChunks.value = sparseChunks.value.concat(res.data.chunks || [])
-    sparseChunksCursor.value = res.data.next_cursor || null
-    sparseChunksHasMore.value = Boolean(res.data.has_more)
-    sparseChunksLoaded.value = true
-  }
-  catch (err) { console.error(err) }
-  finally { sparseChunksLoading.value = false }
-}
-
-async function onDataSourceChange() {
-  if (activeDataSource.value === 'search' && !sparseChunksLoaded.value) await fetchActiveChunks()
-  if (activeDataSource.value === 'vector' && !chunksLoaded.value) await fetchActiveChunks()
+  catch (err) { showToast('error', errorMessage(err)) }
+  finally { if (requestId === chunksRequestId) chunksLoading.value = false }
 }
 
 function onChunksScroll(event) {
@@ -274,43 +218,27 @@ function onChunksScroll(event) {
   const wrap = chunksTableRef.value?.scrollBarRef?.wrapRef
   if (!wrap) return
   const scrollTop = event?.scrollTop ?? wrap.scrollTop
-  if (activeDataSource.value === 'search' && scrollTop + wrap.clientHeight >= wrap.scrollHeight - 24 && sparseChunksHasMore.value) {
-    fetchNextSparseChunks()
-    return
-  }
   if (scrollTop + wrap.clientHeight >= wrap.scrollHeight - 24 && chunksHasMore.value) {
     fetchNextChunks()
   }
 }
 
 onMounted(async () => {
-  await fetchConfig()
   await fetchDatabaseStatus()
   if (activeAppStore.databaseStatus?.exists) await fetchActiveChunks()
-  window.addEventListener('focus', refreshConfig)
-  document.addEventListener('visibilitychange', onVisibilityChange)
 })
 
-onUnmounted(() => {
-  window.removeEventListener('focus', refreshConfig)
-  document.removeEventListener('visibilitychange', onVisibilityChange)
+onBeforeUnmount(() => {
+  viewActive = false
+  statusRequestId++
+  chunksRequestId++
 })
 
 watch(currentAppId, async () => {
   resetChunks()
-  resetSparseChunks()
-  await fetchConfig()
   await fetchDatabaseStatus()
   if (activeAppStore.databaseStatus?.exists) await fetchActiveChunks()
 })
-
-async function refreshConfig() {
-  await fetchConfig()
-}
-
-function onVisibilityChange() {
-  if (document.visibilityState === 'visible') refreshConfig()
-}
 </script>
 
 <style scoped>

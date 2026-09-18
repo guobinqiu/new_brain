@@ -6,8 +6,11 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/api/open/llm': 'http://llm:6001',
-      '/api/open/rag': 'http://rag:6000'
+      '/api/v1/llm': 'http://localhost:5175',
+      '/api/v1/rag': 'http://localhost:5175',
+      '/api/rag': 'http://localhost:5175',
+      '^/health$': 'http://localhost:5175',
+      '^/ready$': 'http://localhost:5175'
     }
   }
 })

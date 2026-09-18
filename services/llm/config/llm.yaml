@@ -1,0 +1,26 @@
+model_name: vllm
+openai_base_url: http://19.16.1.233:8000/v1
+llm_kwargs: ""
+use_responses_api: false
+
+llm_concurrency_limit: 10
+request:
+  timeout: 60
+model:
+  timeout: 60
+
+cors_origins: ["*"]
+rate_limit_default: 100/minute
+rate_limit_chat: 30/minute
+rate_limit_history: 60/minute
+rate_limit_storage: memory://
+
+log_level: INFO
+debug_llm_http: false
+langchain_tracing_v2: false
+langchain_project: llm-rag
+
+rag:
+  base_url: http://rag:6000
+  timeout: 10
+  max_retries: 2

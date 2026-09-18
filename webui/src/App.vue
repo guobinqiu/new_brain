@@ -58,18 +58,17 @@
               <el-menu-item :index="`/apps/${app.app_id}/database`">{{ t('nav.database') }}</el-menu-item>
               <el-menu-item :index="`/apps/${app.app_id}/upload`">{{ t('nav.upload') }}</el-menu-item>
               <el-menu-item :index="`/apps/${app.app_id}/search`">{{ t('nav.search') }}</el-menu-item>
-              <el-menu-item :index="`/apps/${app.app_id}/llm`">{{ t('nav.llm') }}</el-menu-item>
-              <el-menu-item :index="`/apps/${app.app_id}/debug`">{{ t('nav.debug') }}</el-menu-item>
               <el-menu-item :index="`/apps/${app.app_id}/trace`">{{ t('nav.trace') }}</el-menu-item>
             </el-sub-menu>
-            <el-menu-item index="/monitor">{{ t('nav.monitor') }}</el-menu-item>
+            <el-menu-item index="/llm">{{ t('nav.llm') }}</el-menu-item>
+            <el-menu-item index="/debug">{{ t('nav.debug') }}</el-menu-item>
             <el-menu-item index="/logs">{{ t('nav.logs') }}</el-menu-item>
-            <el-menu-item index="/config">{{ t('nav.config') }}</el-menu-item>
+            <el-menu-item index="/ops">{{ t('nav.ops') }}</el-menu-item>
           </el-menu>
         </aside>
 
         <section class="console-main">
-          <div v-if="appId && routeAppPage !== 'debug'" class="app-context">
+          <div v-if="showAppContext" class="app-context">
             <span>{{ t('apps.current') }}</span>
             <strong>{{ appId }}</strong>
           </div>
@@ -117,6 +116,7 @@ const SUB_PAGES = ['database', 'upload', 'search', 'llm', 'debug', 'trace']
 
 const routerViewKey = computed(() => (appId.value ? `${appId.value}${route.path}` : route.path))
 const routeAppPage = computed(() => route.path.split('/')[3] || '')
+const showAppContext = computed(() => Boolean(route.params.app_id))
 
 const activeMenu = computed(() => {
   if (route.params.app_id && SUB_PAGES.includes(routeAppPage.value)) {
@@ -126,7 +126,7 @@ const activeMenu = computed(() => {
 })
 
 function onMenuSelect(index) {
-  if (index === '/apps' || index === '/monitor' || index === '/logs' || index === '/config') {
+  if (index === '/apps' || index === '/llm' || index === '/debug' || index === '/logs' || index === '/ops') {
     router.push(index)
     return
   }
@@ -219,7 +219,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helv
 .llm-view,
 .debug-view,
 .upload-view,
-.monitor-view,
+.traces-view,
 .logs-view,
 .database-view,
 .config-view,
@@ -272,6 +272,9 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helv
 .monitor-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
 .monitor-head h2 { font-size: 14px; font-weight: 600; color: var(--el-text-color-primary); }
 .monitor-head p { font-size: 12px; color: var(--el-text-color-secondary); margin-top: 3px; }
+.page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+.page-head h2 { font-size: 20px; font-weight: 650; color: var(--el-text-color-primary); margin-bottom: 4px; }
+.page-head p { font-size: 13px; color: var(--el-text-color-secondary); }
 .node-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 16px; }
 .node-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .node-head > div { min-width: 0; }
@@ -283,7 +286,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helv
 .monitor-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .monitor-grid + .monitor-block { margin-top: 18px; }
 .monitor-section > .monitor-block + .monitor-block { margin-top: 18px; }
-.config-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 14px 18px; }
+.config-grid { display: grid; grid-template-columns: 1fr; gap: 14px 18px; }
 .config-panel { min-width: 0; overflow: hidden; display: grid; gap: 8px; }
 .config-panel-title { font-size: 12px; font-weight: 600; color: var(--el-text-color-primary); }
 .monitor-block { min-width: 0; border: 1px solid var(--el-border-color); border-radius: 6px; padding: 12px; background: var(--el-fill-color-light); }
@@ -298,13 +301,12 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helv
 .component-name { color: var(--el-text-color-secondary); }
 .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--el-text-color-placeholder); }
 .status-dot.ready { background: var(--el-color-success); }
-.status-dot.loading { background: var(--el-color-warning); }
 .status-dot.disabled { background: var(--el-text-color-placeholder); }
 .status-dot.error { background: var(--el-color-danger); }
 .kv-list { min-width: 0; display: grid; gap: 7px; }
 .kv-list div { min-width: 0; display: grid; grid-template-columns: minmax(120px, 1fr) minmax(0, 1.2fr); align-items: center; gap: 12px; font-size: 12px; color: var(--el-text-color-secondary); }
 .kv-list span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.kv-list strong { min-width: 0; color: var(--el-text-color-primary); font-weight: 500; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kv-list strong { min-width: 0; color: var(--el-text-color-primary); font-weight: 500; text-align: right; overflow-wrap: anywhere; }
 
 .trace-table-wrap { overflow-x: auto; }
 .apps-table-wrap { max-height: 360px; overflow: auto; }
@@ -320,7 +322,8 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helv
 html.dark .logs-box { background: #050b13; color: #d6e4f2; }
 
 .job-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.app-create { display: grid; grid-template-columns: minmax(0, 1fr) 120px; gap: 8px; margin-bottom: 12px; }
+.app-create-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 8px; margin-bottom: 12px; }
+.app-create-form .el-form-item { margin-bottom: 0; }
 .app-row-actions { display: flex; gap: 8px; }
 
 /* Search */
@@ -332,14 +335,11 @@ html.dark .logs-box { background: #050b13; color: #d6e4f2; }
 .scope-title { width: 76px; font-size: 13px; color: var(--el-text-color-secondary); white-space: nowrap; }
 .scopes { flex: 1; }
 .search-input-wrap { flex: 1; display: flex; gap: 8px; }
-.balance-control { display: flex; align-items: center; gap: 10px; flex: 1; max-width: 520px; }
-.bal-label { font-size: 12px; color: var(--el-text-color-secondary); white-space: nowrap; min-width: 40px; }
-.bal-value { font-size: 14px; font-weight: 600; color: var(--el-color-primary); min-width: 36px; text-align: center; }
 .topk-control { display: flex; align-items: center; gap: 6px; }
 .topk-label { font-size: 13px; color: var(--el-text-color-secondary); }
+.rerank-control { margin-right: 8px; }
 .fetchk-control { display: flex; align-items: center; gap: 6px; }
-.cand-label { font-size: 13px; color: var(--el-text-color-secondary); white-space: nowrap; }
-.rerank-control { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--el-text-color-secondary); cursor: pointer; user-select: none; }
+.cand-label { font-size: 13px; color: var(--el-text-color-secondary); }
 
 /* Results */
 .results-section { background: var(--el-bg-color); border: 1px solid var(--el-border-color); border-radius: 6px; padding: 0 24px; box-shadow: none; margin-bottom: 20px; }

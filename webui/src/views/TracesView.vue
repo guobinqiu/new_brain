@@ -1,11 +1,11 @@
 <template>
-  <main class="monitor-view">
-    <div v-if="!currentAppId" class="trace-empty">{{ t('monitor.noAppSelected') }}</div>
+  <main class="traces-view">
+    <div v-if="!currentAppId" class="trace-empty">{{ t('upload.selectApp') }}</div>
     <template v-else>
     <div class="monitor-section">
       <div class="monitor-block trace-block">
         <div class="block-title job-title">
-          <span>{{ t('monitor.traces') }}</span>
+          <span>{{ t('trace.title') }}</span>
           <el-date-picker
             v-model="timeRange"
             type="datetimerange"
@@ -46,22 +46,22 @@
             <el-table-column :label="t('trace.columns.denseQuery')" min-width="148">
               <template #default="{ row }"><StageCell :stage="stage(row, 'dense_query')" /></template>
             </el-table-column>
-            <el-table-column :label="t('trace.columns.sparse')" min-width="120">
+            <el-table-column :label="t('trace.columns.sparse')" min-width="112">
               <template #default="{ row }"><StageCell :stage="stage(row, 'sparse')" /></template>
             </el-table-column>
-            <el-table-column :label="t('trace.columns.sparseEncode')" min-width="160">
+            <el-table-column :label="t('trace.columns.sparseEncode')" min-width="152">
               <template #default="{ row }"><StageCell :stage="stage(row, 'sparse_encode')" /></template>
             </el-table-column>
-            <el-table-column :label="t('trace.columns.sparseQuery')" min-width="156">
+            <el-table-column :label="t('trace.columns.sparseQuery')" min-width="148">
               <template #default="{ row }"><StageCell :stage="stage(row, 'sparse_query')" /></template>
             </el-table-column>
-            <el-table-column :label="t('trace.columns.fusion')" min-width="112">
-              <template #default="{ row }"><StageCell :stage="stage(row, 'fusion')" /></template>
+            <el-table-column :label="t('trace.columns.rrf')" min-width="120">
+              <template #default="{ row }"><StageCell :stage="stage(row, 'rrf')" /></template>
             </el-table-column>
             <el-table-column :label="t('trace.columns.dedupe')" min-width="120">
               <template #default="{ row }"><StageCell :stage="stage(row, 'dedupe')" /></template>
             </el-table-column>
-            <el-table-column :label="t('trace.columns.rerank')" min-width="120">
+            <el-table-column :label="t('trace.columns.rerank')" min-width="128">
               <template #default="{ row }"><StageCell :stage="stage(row, 'rerank')" /></template>
             </el-table-column>
             <el-table-column :label="t('trace.columns.format')" min-width="120">
@@ -69,7 +69,7 @@
             </el-table-column>
           </el-table>
         </template>
-        <div v-else class="trace-empty">{{ t('monitor.noTraces') }}</div>
+        <div v-else class="trace-empty">{{ t('trace.empty') }}</div>
       </div>
     </div>
     </template>
@@ -84,6 +84,7 @@ import { useRoute } from 'vue-router'
 import { ms, shortTime } from '../utils/format'
 import { useActiveAppStore } from '../stores/activeApp'
 import axios from '../utils/api'
+import { errorMessage, showToast } from '../utils/toast'
 
 const TRACE_LIMIT = 500
 const { t } = useI18n()
@@ -154,12 +155,14 @@ async function fetchNextTraces() {
       params.end = timeRange.value[1]
     }
     if (tracesNextStart.value != null) params.start = tracesNextStart.value
-    const res = await axios.get('/api/open/rag/traces', {
+    const res = await axios.get('/api/rag/traces', {
       params,
     })
     traces.value = traces.value.concat(res.data?.traces || [])
     tracesHasMore.value = Boolean(res.data?.has_more)
     tracesNextStart.value = res.data?.next_start || null
+  } catch (err) {
+    showToast('error', errorMessage(err))
   } finally {
     tracesLoading.value = false
   }

@@ -1,6 +1,6 @@
 {
   "app": {
-    "title": "Odysseus",
+    "title": "Knowledge Base Management Platform",
     "desc": "Manage RAG retrieval, document indexing, and LLM chat in one console."
   },
   "theme": {
@@ -12,9 +12,8 @@
     "database": "Database",
     "search": "Search",
     "trace": "Trace",
-    "monitor": "Monitor",
     "logs": "Logs",
-    "config": "Config",
+    "ops": "Cluster",
     "apps": "Apps",
     "llm": "Chat",
     "debug": "Debug"
@@ -28,6 +27,10 @@
     "logout": "Sign out"
   },
   "common": {
+    "retry": "Retry",
+    "save": "Save",
+    "cancel": "Cancel",
+    "confirm": "Confirm",
     "all": "All",
     "refresh": "Refresh",
     "loading": "Loading",
@@ -42,9 +45,6 @@
   },
   "search": {
     "topK": "Top K",
-    "rerank": "Rerank",
-    "fetchK": "Fetch K",
-    "fetchKTitle": "Candidate count sent into retrieval/rerank",
     "placeholder": "Enter a search query...",
     "fileIdsPlaceholder": "Comma-separated file_id values; leave empty to search all files",
     "submit": "Search",
@@ -53,10 +53,12 @@
     "mode": "Mode",
     "files": "Files",
     "score": "Score",
-    "balance": "Balance",
     "elapsed": "Elapsed",
+    "rerank": "Rerank",
+    "rerankFetchK": "Rerank candidates",
+    "rerankFetchKTitle": "Candidate count retrieved before rerank; must be at least Top K",
     "noResults": "No matching results",
-    "noResultsHint": "Try another search mode or adjust the Sparse / Dense balance",
+    "noResultsHint": "Try another query, or narrow the file scope and search again",
     "modeValues": {
       "dense": "Dense",
       "sparse": "Sparse",
@@ -65,41 +67,24 @@
   },
   "upload": {
     "choose": "Choose documents",
-    "hint": "Drop files here · PDF / TXT / MD / DOCX / XLSX / PNG / JPG / JPEG / WEBP / BMP.",
+    "hint": "PDF / TXT / MD / DOC / DOCX / XLS / XLSX / PPT / PPTX",
     "submit": "Upload",
     "uploading": "Uploading",
     "files": "Uploaded files",
     "empty": "No uploaded files",
     "indexSubmitted": "{count} file(s) indexed.",
     "selectApp": "Select an app first",
-    "deletedFile": "{name} deleted"
-  },
-  "monitor": {
-    "title": "Runtime",
-    "components": "Components",
-    "traces": "Trace",
-    "noTraces": "No searches yet",
-    "noAppSelected": "Select an app first",
-    "componentNames": {
-      "Store": "Store",
-      "Dense": "Dense",
-      "Sparse": "Sparse",
-      "Rerank": "Rerank",
-      "OCR": "OCR",
-      "Parser": "Parser",
-      "database": "Database"
-    }
+    "deletedFile": "{name} deleted",
+    "updateFile": "Update file"
   },
   "cluster": {
     "desc": "Runtime status for all rag nodes",
-    "configDesc": "Active configuration for all rag nodes",
     "allNodes": "All nodes",
     "unreachable": "Unreachable",
     "configDrift": "Config drift"
   },
   "status": {
     "ready": "Ready",
-    "loading": "Loading",
     "disabled": "Off",
     "error": "Error"
   },
@@ -109,9 +94,7 @@
     "chunks": "Vector store",
     "indexData": "Index data",
     "vectorData": "Vector store",
-    "sparseData": "Search index",
     "vectorStore": "Vector store",
-    "searchIndex": "Search index",
     "app": "App",
     "initialize": "Initialize database",
     "initialized": "{appId} database initialized",
@@ -123,9 +106,7 @@
     "fileIdsPlaceholder": "Separate file_id values with commas",
     "debugQueryPlaceholder": "Enter raw text to encode or query vectors",
     "encodeDense": "Encode dense",
-    "encodeSparse": "Encode sparse",
     "queryDense": "Query dense",
-    "querySparse": "Query sparse",
     "score": "Score",
     "chunkId": "Chunk ID",
     "fileId": "File ID",
@@ -136,23 +117,17 @@
     "content": "Content",
     "empty": "No vector store data",
     "vectorEmpty": "No vector store data",
-    "sparseEmpty": "No search index data",
-    "searchIndexEmpty": "No search index data",
-    "searchIndexDisabled": "OpenSearch search index is not enabled",
     "denseVector": "Dense",
-    "sparseVector": "Sparse",
     "denseVectorTitle": "Dense Vector",
-    "sparseVectorTitle": "Sparse Vector",
-    "vectorDimension": "Dimensions: {count}",
-    "sparseVectorNonZero": "Non-zero values: {count}"
+    "vectorDimension": "Dimensions: {count}"
   },
   "debug": {
+    "title": "Debug",
+    "desc": "Debug vector encoding and dense retrieval for the current app",
     "placeholder": "Enter raw text to encode vectors or query indexes",
     "topK": "Top K",
     "encodeDense": "Encode dense",
-    "queryDense": "Query dense",
-    "encodeSparse": "Encode sparse",
-    "querySparse": "Query sparse"
+    "queryDense": "Query dense"
   },
   "trace": {
     "title": "Trace",
@@ -171,7 +146,7 @@
       "sparse": "Sparse (ms)",
       "sparseEncode": "Sparse Encode (ms)",
       "sparseQuery": "Sparse Query (ms)",
-      "fusion": "Fusion (ms)",
+      "rrf": "RRF (ms)",
       "dedupe": "Dedupe (ms)",
       "rerank": "Rerank (ms)",
       "format": "Format (ms)"
@@ -195,28 +170,73 @@
       "message": "Message"
     }
   },
-  "config": {
-    "title": "Config",
-    "searchDefaults": "Search defaults",
-    "components": "Components",
-    "parser": "Parser",
-    "storage": "Storage path"
+  "ops": {
+    "title": "Cluster Management",
+    "desc": "Swarm cluster",
+    "tabs": {
+      "services": "Services",
+      "deploy": "Deploy",
+      "nodes": "Nodes",
+      "configs": "Configs",
+      "controlServices": "Control plane",
+      "appServices": "App services",
+      "infraServices": "Infra services"
+    },
+    "columns": {
+      "service": "Service",
+      "image": "Image",
+      "replicas": "Replicas",
+      "ports": "Ports",
+      "actions": "Actions",
+      "node": "Node",
+      "role": "Role",
+      "state": "State",
+      "availability": "Availability",
+      "addr": "Address",
+      "leader": "Leader"
+    },
+    "actions": {
+      "start": "Start",
+      "stop": "Stop",
+      "scale": "Scale",
+      "rollout": "Rollout",
+      "validate": "Validate",
+      "save": "Save",
+      "apply": "Apply",
+      "publish": "Publish",
+      "workerJoin": "Worker join command",
+      "managerJoin": "Manager join command"
+    },
+    "nodesNote": "Copy the join command and run it on the new server. Workers only run service tasks; managers participate in the control plane, have higher privileges, and are usually kept at an odd count.",
+    "configNote": "Save the service config, then apply it.",
+    "deployNote": "After saving deploy/.env or deploy/deploy.yaml on the release manager, click Publish to apply it.",
+    "validateOk": "Config validation passed",
+    "savedConfig": "Config saved.",
+    "applyConfirm": "Apply {name} config? This will trigger a rolling update for the related service.",
+    "publishConfirm": "Publish the business deployment? This will redeploy the business stack.",
+    "appliedConfig": "{service} config apply submitted.",
+    "applied": "Config apply submitted.",
+    "published": "Business services publish submitted.",
+    "scaled": "{service} scaled to {replicas} replicas",
+    "submitted": "{service} {action} submitted"
   },
   "apps": {
+    "presignConfig": "S3 presign configuration",
     "title": "Apps",
-    "desc": "Manage upstream app_id and AK/SK credentials",
+    "desc": "Manage upstream app_id and API keys",
     "appIdPlaceholder": "Start with a letter. Letters, numbers, underscore only",
     "appIdRule": "app_id must start with a letter, be 2-64 chars, and contain only letters, numbers, or underscore",
     "create": "Create app",
     "created": "{appId} created",
     "deleted": "{appId} deleted",
-    "deleteConfirm": "Delete AK/SK for {appId}?",
+    "deleteConfirm": "Delete API key for {appId}?",
     "current": "Current app",
     "enter": "Enter",
     "empty": "No apps"
   },
   "llm": {
     "title": "Chat",
+    "desc": "Ask questions with the currently selected app knowledge base",
     "thread": "Thread",
     "newConversation": "New conversation",
     "empty": "No messages",

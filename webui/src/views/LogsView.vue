@@ -38,7 +38,7 @@
 <script setup>
 import { onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import axios from '../utils/api'
+import { errorMessage, showToast } from '../utils/toast'
 import { fetchLabelValues, fetchLogs, formatLogLine } from '../utils/loki'
 
 const { t } = useI18n()
@@ -59,11 +59,11 @@ function defaultRange() {
 }
 
 async function loadFilters() {
-  const [monitorRes, containerValues] = await Promise.all([
-    axios.get('/api/open/rag/nodes/monitor'),
+  const [nodeValues, containerValues] = await Promise.all([
+    fetchLabelValues('node_id'),
     fetchLabelValues('container'),
   ])
-  nodes.value = (monitorRes.data?.nodes || []).map(node => node.node_id)
+  nodes.value = nodeValues
   containers.value = containerValues
   if (container.value && !containers.value.includes(container.value)) container.value = ''
 }
@@ -88,6 +88,8 @@ async function fetchNextLogs() {
     logs.value = logs.value.concat(res.logs || [])
     logsHasMore.value = Boolean(res.has_more)
     logsNextStart.value = res.next_start || null
+  } catch (err) {
+    showToast('error', errorMessage(err))
   } finally {
     loading.value = false
   }
@@ -102,7 +104,11 @@ function onLogsScroll(event) {
 }
 
 onMounted(async () => {
-  await loadFilters()
+  try {
+    await loadFilters()
+  } catch (err) {
+    showToast('error', errorMessage(err))
+  }
   await loadLogs()
 })
 </script>

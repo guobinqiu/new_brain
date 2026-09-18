@@ -1,5 +1,12 @@
 <template>
   <main class="debug-view">
+    <div class="page-head">
+      <div>
+        <h2>{{ t('debug.title') }}</h2>
+        <p>{{ t('debug.desc') }}</p>
+      </div>
+    </div>
+
     <section class="debug-card">
       <div class="debug-form">
         <el-input
@@ -13,10 +20,8 @@
             <span>{{ t('debug.topK') }}</span>
             <el-input-number v-model="debugTopK" :min="1" :max="100" size="small" controls-position="right" />
           </div>
-          <el-button :disabled="!canDense" :loading="debugLoading === 'dense-encode'" @click="debugEncode('dense')">{{ t('debug.encodeDense') }}</el-button>
-          <el-button type="primary" :disabled="!canDense" :loading="debugLoading === 'dense-search'" @click="debugSearch('dense')">{{ t('debug.queryDense') }}</el-button>
-          <el-button v-if="sparseVectorAvailable" :disabled="!canSparse" :loading="debugLoading === 'sparse-encode'" @click="debugEncode('sparse')">{{ t('debug.encodeSparse') }}</el-button>
-          <el-button v-if="sparseVectorAvailable" type="primary" :disabled="!canSparse" :loading="debugLoading === 'sparse-search'" @click="debugSearch('sparse')">{{ t('debug.querySparse') }}</el-button>
+          <el-button :disabled="!canDense" :loading="debugLoading === 'dense-encode'" @click="debugEncode">{{ t('debug.encodeDense') }}</el-button>
+          <el-button type="primary" :disabled="!canDense" :loading="debugLoading === 'dense-search'" @click="debugSearch">{{ t('debug.queryDense') }}</el-button>
         </div>
       </div>
 
@@ -49,8 +54,7 @@
         <el-table-column :label="t('common.actions')" min-width="150" fixed="right">
           <template #default="{ row }">
             <div class="vector-actions">
-              <el-button v-if="denseVectorAvailable" size="small" @click.stop="showVector(row, 'dense')">{{ t('database.denseVector') }}</el-button>
-              <el-button v-if="sparseVectorAvailable" size="small" @click.stop="showVector(row, 'sparse')">{{ t('database.sparseVector') }}</el-button>
+              <el-button v-if="denseVectorAvailable" size="small" @click.stop="showDenseVector(row)">{{ t('database.denseVector') }}</el-button>
             </div>
           </template>
         </el-table-column>
@@ -74,7 +78,7 @@ import { useActiveAppStore } from '../stores/activeApp'
 import { copyText } from '../utils/format'
 import { errorMessage, showToast } from '../utils/toast'
 
-const API = '/api/open/rag'
+const API = '/api/rag'
 const { t } = useI18n()
 const activeAppStore = useActiveAppStore()
 const { appId } = storeToRefs(activeAppStore)
@@ -94,9 +98,7 @@ const vectorDialogBody = ref('')
 const vectorDialogMeta = ref('')
 
 const denseVectorAvailable = computed(() => capabilities.value.dense_vector === true)
-const sparseVectorAvailable = computed(() => capabilities.value.sparse_vector === true)
 const canDense = computed(() => currentAppId.value && debugQueryText.value && denseVectorAvailable.value && !debugLoading.value)
-const canSparse = computed(() => currentAppId.value && debugQueryText.value && sparseVectorAvailable.value && !debugLoading.value)
 
 async function fetchConfig() {
   try {
@@ -104,16 +106,16 @@ async function fetchConfig() {
     capabilities.value = res.data?.capabilities || {}
   } catch (err) {
     capabilities.value = {}
+    showToast('error', errorMessage(err))
   }
 }
 
-async function debugEncode(type) {
-  if (type === 'dense' && !canDense.value) return
-  if (type === 'sparse' && !canSparse.value) return
-  debugLoading.value = `${type}-encode`
+async function debugEncode() {
+  if (!canDense.value) return
+  debugLoading.value = 'dense-encode'
   debugResults.value = []
   try {
-    const res = await axios.post(`${API}/apps/${currentAppId.value}/debug/${type}-encode`, { query: debugQueryText.value })
+    const res = await axios.post(`${API}/apps/${currentAppId.value}/debug/dense-encode`, { query: debugQueryText.value })
     setDebugVector(res.data)
   } catch (err) {
     showToast('error', errorMessage(err))
@@ -122,12 +124,11 @@ async function debugEncode(type) {
   }
 }
 
-async function debugSearch(type) {
-  if (type === 'dense' && !canDense.value) return
-  if (type === 'sparse' && !canSparse.value) return
-  debugLoading.value = `${type}-search`
+async function debugSearch() {
+  if (!canDense.value) return
+  debugLoading.value = 'dense-search'
   try {
-    const res = await axios.post(`${API}/apps/${currentAppId.value}/debug/${type}-search`, { query: debugQueryText.value, top_k: debugTopK.value })
+    const res = await axios.post(`${API}/apps/${currentAppId.value}/debug/dense-search`, { query: debugQueryText.value, top_k: debugTopK.value })
     setDebugVector(res.data)
     debugResults.value = res.data?.results || []
   } catch (err) {
@@ -139,18 +140,16 @@ async function debugSearch(type) {
 
 function setDebugVector(data) {
   const vector = data?.query_vector || {}
-  debugVectorMeta.value = data?.type === 'dense'
-    ? t('database.vectorDimension', { count: Array.isArray(vector) ? vector.length : 0 })
-    : t('database.sparseVectorNonZero', { count: Array.isArray(vector.indices) ? vector.indices.length : 0 })
+  debugVectorMeta.value = t('database.vectorDimension', { count: Array.isArray(vector) ? vector.length : 0 })
   debugVectorBody.value = JSON.stringify(vector, null, 2)
 }
 
-async function showVector(row, type) {
+async function showDenseVector(row) {
   if (!currentAppId.value || !row?.id) return
   try {
-    const res = await axios.get(`${API}/apps/${currentAppId.value}/chunks/${row.id}/${type}-vector`)
-    vectorDialogTitle.value = type === 'dense' ? t('database.denseVectorTitle') : t('database.sparseVectorTitle')
-    vectorDialogMeta.value = vectorMeta(res.data.vector, type)
+    const res = await axios.get(`${API}/apps/${currentAppId.value}/chunks/${row.id}/dense-vector`)
+    vectorDialogTitle.value = t('database.denseVectorTitle')
+    vectorDialogMeta.value = vectorMeta(res.data.vector)
     vectorDialogBody.value = JSON.stringify(res.data.vector, null, 2)
     vectorDialogVisible.value = true
   } catch (err) {
@@ -158,12 +157,9 @@ async function showVector(row, type) {
   }
 }
 
-function vectorMeta(vector, type) {
-  if (type === 'dense' && Array.isArray(vector)) {
+function vectorMeta(vector) {
+  if (Array.isArray(vector)) {
     return t('database.vectorDimension', { count: vector.length })
-  }
-  if (type === 'sparse' && vector?.indices && Array.isArray(vector.indices)) {
-    return t('database.sparseVectorNonZero', { count: vector.indices.length })
   }
   return ''
 }

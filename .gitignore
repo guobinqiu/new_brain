@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 .venv/
+.model-download-venv/
 venv/
 .uv-cache/
 .uv-cache-docker/
@@ -10,16 +11,15 @@ venv/
 
 # 模型文件（大，不入库）
 models/
+models
 
 # 数据库本地数据
-chroma_data/
 milvus_data/
 minio_data/
 loki_data/
 pg_data/
 postgres_data/
 qdrant_data/
-opensearch_data/
 redis_data/
 data/
 backend/data/

@@ -1,54 +1,156 @@
-svc action="up" target="cpu":
-	@just _services {{target}} {{action}} postgres qdrant opensearch minio loki promtail
+set dotenv-load := true
+set dotenv-path := "deploy/.env"
 
-rag action="up" target="cpu":
-	@just _services {{target}} {{action}} rag
+CTRL_STACK := "brain_ctrl"
+DEPLOY_STACK := "brain"
+NETWORK := "brain-net"
+ROOT := justfile_directory()
+RAG_IMAGE := env_var_or_default("RAG_IMAGE", "brain-rag:dev")
+PARSER_IMAGE := env_var_or_default("PARSER_IMAGE", "brain-parser:dev")
+INFERENCE_IMAGE := env_var_or_default("INFERENCE_IMAGE", "brain-inference:dev")
+LLM_IMAGE := env_var_or_default("LLM_IMAGE", "brain-llm:dev")
+OPS_IMAGE := env_var_or_default("OPS_IMAGE", "brain-ops:dev")
 
-llm action="up" target="cpu":
-	@just _services {{target}} {{action}} llm
+ctrl action:
+	just _ctrl-{{action}}
 
-webui action="up" target="cpu":
-	@if [ "{{action}}" = "build" ]; then docker compose --env-file "$PWD/deploy/.env" -f deploy/cpu/docker-compose.yml run --rm --no-deps webui sh -c "npm install && npm run build"; else just _services {{target}} {{action}} webui; fi
+deploy action:
+	just _deploy-{{action}}
 
-postgres action="up" target="cpu":
-	@just _services {{target}} {{action}} postgres
+_ctrl-up: _network-up
+	env PROJECT_ROOT={{quote(ROOT)}} docker stack deploy --with-registry-auth -c deploy/ctrl.yaml {{CTRL_STACK}}
 
-qdrant action="up" target="cpu":
-	@just _services {{target}} {{action}} qdrant
+_ctrl-down:
+	docker stack rm {{CTRL_STACK}}
 
-opensearch action="up" target="cpu":
-	@just _services {{target}} {{action}} opensearch
+_deploy-up: _network-up
+	env PROJECT_ROOT={{quote(ROOT)}} docker stack deploy --with-registry-auth -c deploy/deploy.yaml {{DEPLOY_STACK}}
 
-milvus action="up" target="cpu":
-	@just _services {{target}} {{action}} etcd milvus
+_deploy-down:
+	docker stack rm {{DEPLOY_STACK}}
 
-minio action="up" target="cpu":
-	@just _services {{target}} {{action}} minio
+_network-up:
+	docker network inspect {{NETWORK}} >/dev/null 2>&1 || docker network create --driver overlay --attachable {{NETWORK}}
 
-loki action="up" target="cpu":
-	@just _services {{target}} {{action}} loki
+_service-start service:
+	docker service scale {{service}}=1
 
-nginx action="up" target="cpu":
-	@just _services {{target}} {{action}} nginx
+_service-stop service:
+	docker service scale {{service}}=0
 
-promtail action="up" target="cpu":
-	@just _services {{target}} {{action}} promtail
+_service-remove service:
+	docker service rm {{service}}
 
-models target="all":
-	@docker compose --env-file "$PWD/deploy/.env" -f deploy/cpu/docker-compose.yml run --rm --no-deps -v "$PWD/scripts:/app/scripts:ro" -e RAG_VENV=/app/.venv rag /app/scripts/download_models.sh {{target}}
+_service-rollout service:
+	docker service update --force {{service}}
 
-_services target action +services:
-	@if [ "{{action}}" = "build" ]; then docker compose --env-file "$PWD/deploy/.env" -f deploy/{{target}}/docker-compose.yml build {{services}}; elif [ "{{action}}" = "down" ]; then docker compose --env-file "$PWD/deploy/.env" -f deploy/{{target}}/docker-compose.yml stop {{services}}; elif [ "{{action}}" = "restart" ]; then docker compose --env-file "$PWD/deploy/.env" -f deploy/{{target}}/docker-compose.yml restart {{services}}; else docker compose --env-file "$PWD/deploy/.env" -f deploy/{{target}}/docker-compose.yml {{action}} -d {{services}}; fi
+webui action:
+	just _webui-{{action}}
 
-_up area:
-	@docker compose --env-file "$PWD/deploy/.env" -f deploy/{{area}}/docker-compose.yml up -d
+rag action:
+	just _rag-{{action}}
 
-_down area:
-	@docker compose --env-file "$PWD/deploy/.env" -f deploy/{{area}}/docker-compose.yml down
+parser action:
+	just _parser-{{action}}
 
-_build area:
-	@docker compose --env-file "$PWD/deploy/.env" -f deploy/{{area}}/docker-compose.yml build
+inference action:
+	just _inference-{{action}}
 
-_restart area:
-	@just _down {{area}}
-	@just _up {{area}}
+llm action:
+	just _llm-{{action}}
+
+ops action:
+	just _ops-{{action}}
+
+_rag-build:
+	docker build -f deploy/Dockerfile --target rag -t {{ RAG_IMAGE }} --build-arg USE_CN_MIRROR={{ env_var_or_default("USE_CN_MIRROR", "true") }} .
+
+_rag-push:
+	docker push {{ RAG_IMAGE }}
+
+_rag-start:
+	just _service-start brain_rag
+
+_rag-stop:
+	just _service-stop brain_rag
+
+_rag-remove:
+	just _service-remove brain_rag
+
+_rag-rollout:
+	just _service-rollout brain_rag
+
+_parser-build:
+	docker build -f deploy/Dockerfile --target parser -t {{ PARSER_IMAGE }} --build-arg USE_CN_MIRROR={{ env_var_or_default("USE_CN_MIRROR", "true") }} --build-arg SERVICE_EXTRA={{ env_var_or_default("SERVICE_EXTRA", "cpu") }} .
+
+_parser-push:
+	docker push {{ PARSER_IMAGE }}
+
+_parser-start:
+	just _service-start brain_parser
+
+_parser-stop:
+	just _service-stop brain_parser
+
+_parser-remove:
+	just _service-remove brain_parser
+
+_parser-rollout:
+	just _service-rollout brain_parser
+
+_inference-build:
+	docker build -f deploy/Dockerfile --target inference -t {{ INFERENCE_IMAGE }} --build-arg USE_CN_MIRROR={{ env_var_or_default("USE_CN_MIRROR", "true") }} --build-arg SERVICE_EXTRA={{ env_var_or_default("SERVICE_EXTRA", "cpu") }} .
+
+_inference-push:
+	docker push {{ INFERENCE_IMAGE }}
+
+_inference-start:
+	just _service-start brain_inference
+
+_inference-stop:
+	just _service-stop brain_inference
+
+_inference-remove:
+	just _service-remove brain_inference
+
+_inference-rollout:
+	just _service-rollout brain_inference
+
+_llm-build:
+	docker build -f services/llm/Dockerfile -t {{ LLM_IMAGE }} --build-arg USE_CN_MIRROR={{ env_var_or_default("USE_CN_MIRROR", "true") }} .
+
+_llm-push:
+	docker push {{ LLM_IMAGE }}
+
+_llm-start:
+	just _service-start brain_llm
+
+_llm-stop:
+	just _service-stop brain_llm
+
+_llm-remove:
+	just _service-remove brain_llm
+
+_llm-rollout:
+	just _service-rollout brain_llm
+
+_ops-build:
+	docker build -f deploy/Dockerfile --target ops -t {{ OPS_IMAGE }} --build-arg USE_CN_MIRROR={{ env_var_or_default("USE_CN_MIRROR", "true") }} .
+
+_ops-push:
+	docker push {{ OPS_IMAGE }}
+
+_ops-start:
+	just _service-start brain_ctrl_ops
+
+_ops-stop:
+	just _service-stop brain_ctrl_ops
+
+_ops-remove:
+	just _service-remove brain_ctrl_ops
+
+_ops-rollout:
+	just _service-rollout brain_ctrl_ops
+
+_webui-build:
+	npm --prefix webui run build

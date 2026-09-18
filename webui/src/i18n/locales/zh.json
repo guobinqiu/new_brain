@@ -1,6 +1,6 @@
 {
   "app": {
-    "title": "奥德休斯",
+    "title": "知识库管理平台",
     "desc": "统一管理 RAG 检索、文档索引和 LLM 对话"
   },
   "theme": {
@@ -12,9 +12,8 @@
     "database": "数据库",
     "search": "搜索",
     "trace": "链路",
-    "monitor": "监控",
     "logs": "日志",
-    "config": "配置",
+    "ops": "集群",
     "apps": "应用",
     "llm": "对话",
     "debug": "调试"
@@ -28,6 +27,10 @@
     "logout": "退出"
   },
   "common": {
+    "retry": "重试",
+    "save": "保存",
+    "cancel": "取消",
+    "confirm": "确定",
     "all": "全部",
     "refresh": "刷新",
     "loading": "加载中",
@@ -42,9 +45,6 @@
   },
   "search": {
     "topK": "返回条数",
-    "rerank": "重排",
-    "fetchK": "候选池",
-    "fetchKTitle": "送入检索/重排的候选条数",
     "placeholder": "输入搜索内容...",
     "fileIdsPlaceholder": "多个 file_id 用英文逗号分隔；留空为全量搜索",
     "submit": "搜索",
@@ -53,10 +53,12 @@
     "mode": "模式",
     "files": "文件",
     "score": "分数",
-    "balance": "平衡",
     "elapsed": "耗时",
+    "rerank": "重排",
+    "rerankFetchK": "重排候选",
+    "rerankFetchKTitle": "开启重排时先召回的候选数量，必须不小于返回条数",
     "noResults": "未找到匹配结果",
-    "noResultsHint": "试试其他搜索模式或调整语义 / 关键词平衡",
+    "noResultsHint": "试试换一个查询词，或缩小文件范围后重试",
     "modeValues": {
       "dense": "语义",
       "sparse": "关键词",
@@ -65,41 +67,24 @@
   },
   "upload": {
     "choose": "选择文档",
-    "hint": "拖拽文件到这里 · PDF / TXT / MD / DOCX / XLSX / PNG / JPG / JPEG / WEBP / BMP",
+    "hint": "PDF / TXT / MD / DOC / DOCX / XLS / XLSX / PPT / PPTX",
     "submit": "上传",
     "uploading": "上传中",
     "files": "上传文件",
     "empty": "暂无上传文件",
     "indexSubmitted": "已完成 {count} 个文件索引",
     "selectApp": "请先选择应用",
-    "deletedFile": "{name} 已删除"
-  },
-  "monitor": {
-    "title": "监控",
-    "components": "组件",
-    "traces": "链路",
-    "noTraces": "暂无查询",
-    "noAppSelected": "请先在应用列表中选择一个应用",
-    "componentNames": {
-      "Store": "存储",
-      "Dense": "语义",
-      "Sparse": "关键词",
-      "Rerank": "重排",
-      "OCR": "OCR",
-      "Parser": "解析",
-      "database": "数据库"
-    }
+    "deletedFile": "{name} 已删除",
+    "updateFile": "更新文件"
   },
   "cluster": {
     "desc": "所有后端节点运行状态",
-    "configDesc": "所有后端节点当前配置",
     "allNodes": "全部节点",
     "unreachable": "不可达",
     "configDrift": "配置不一致"
   },
   "status": {
     "ready": "就绪",
-    "loading": "加载",
     "disabled": "停用",
     "error": "错误"
   },
@@ -109,9 +94,7 @@
     "chunks": "向量库",
     "indexData": "索引数据",
     "vectorData": "向量库",
-    "sparseData": "全文索引",
     "vectorStore": "向量库",
-    "searchIndex": "全文索引",
     "app": "应用",
     "initialize": "初始化数据库",
     "initialized": "{appId} 数据库已初始化",
@@ -123,9 +106,7 @@
     "fileIdsPlaceholder": "英文逗号分隔多个 file_id",
     "debugQueryPlaceholder": "输入原始文本，转换或查询向量",
     "encodeDense": "转换语义",
-    "encodeSparse": "转换关键词",
     "queryDense": "查询语义",
-    "querySparse": "查询关键词",
     "score": "分数",
     "chunkId": "分块 ID",
     "fileId": "文件 ID",
@@ -136,23 +117,17 @@
     "content": "内容",
     "empty": "暂无向量库数据",
     "vectorEmpty": "暂无向量库数据",
-    "sparseEmpty": "暂无全文索引数据",
-    "searchIndexEmpty": "暂无全文索引数据",
-    "searchIndexDisabled": "当前未启用 OpenSearch 全文索引",
     "denseVector": "Dense",
-    "sparseVector": "Sparse",
     "denseVectorTitle": "Dense Vector",
-    "sparseVectorTitle": "Sparse Vector",
-    "vectorDimension": "维度：{count}",
-    "sparseVectorNonZero": "非零项：{count}"
+    "vectorDimension": "维度：{count}"
   },
   "debug": {
+    "title": "调试",
+    "desc": "调试当前应用的向量转换和语义检索",
     "placeholder": "输入原始文本，转换向量或查询索引",
     "topK": "召回数",
     "encodeDense": "转换语义",
-    "queryDense": "查询语义",
-    "encodeSparse": "转换关键词",
-    "querySparse": "查询关键词"
+    "queryDense": "查询语义"
   },
   "trace": {
     "title": "查询链路",
@@ -171,7 +146,7 @@
       "sparse": "关键词(ms)",
       "sparseEncode": "关键词向量(ms)",
       "sparseQuery": "关键词查询(ms)",
-      "fusion": "融合(ms)",
+      "rrf": "RRF(ms)",
       "dedupe": "去重(ms)",
       "rerank": "重排(ms)",
       "format": "格式化(ms)"
@@ -195,28 +170,73 @@
       "message": "消息"
     }
   },
-  "config": {
-    "title": "配置",
-    "searchDefaults": "搜索默认值",
-    "components": "组件配置",
-    "parser": "解析配置",
-    "storage": "存储路径"
+  "ops": {
+    "title": "集群管理",
+    "desc": "Swarm 集群",
+    "tabs": {
+      "services": "服务",
+      "deploy": "部署",
+      "nodes": "节点",
+      "configs": "配置",
+      "controlServices": "控制面",
+      "appServices": "应用服务",
+      "infraServices": "基础服务"
+    },
+    "columns": {
+      "service": "服务",
+      "image": "镜像",
+      "replicas": "副本",
+      "ports": "端口",
+      "actions": "操作",
+      "node": "节点",
+      "role": "角色",
+      "state": "状态",
+      "availability": "可用性",
+      "addr": "地址",
+      "leader": "Leader"
+    },
+    "actions": {
+      "start": "启动",
+      "stop": "停止",
+      "scale": "扩缩容",
+      "rollout": "滚动更新",
+      "validate": "校验",
+      "save": "保存",
+      "apply": "应用",
+      "publish": "发布",
+      "workerJoin": "Worker 加入命令",
+      "managerJoin": "Manager 加入命令"
+    },
+    "nodesNote": "复制加入命令到要加入的新服务器上执行。Worker 只运行业务任务；Manager 参与集群控制面，权限更高，通常保持奇数个。",
+    "configNote": "服务配置保存后，点击应用使配置生效",
+    "deployNote": "发布 manager 上的 deploy/.env 和 deploy/deploy.yaml 保存后，需要点击发布生效",
+    "validateOk": "配置校验通过",
+    "savedConfig": "配置已保存",
+    "applyConfirm": "确定应用 {name} 配置？这会触发对应服务滚动更新",
+    "publishConfirm": "确定发布业务部署？这会重新部署业务 stack",
+    "appliedConfig": "{service} 配置应用已提交",
+    "applied": "配置应用已提交",
+    "published": "业务服务发布已提交",
+    "scaled": "{service} 已调整为 {replicas} 个副本",
+    "submitted": "{service} {action} 已提交"
   },
   "apps": {
+    "presignConfig": "S3 预签名配置",
     "title": "应用",
-    "desc": "管理上游系统的 app_id 和 AK/SK",
+    "desc": "管理上游系统的 app_id 和 API key",
     "appIdPlaceholder": "字母开头，仅支持字母、数字、下划线",
     "appIdRule": "app_id 必须字母开头，长度 2-64，只能包含字母、数字、下划线",
     "create": "新建应用",
     "created": "{appId} 已创建",
     "deleted": "{appId} 已删除",
-    "deleteConfirm": "删除 {appId} 的 AK/SK？",
+    "deleteConfirm": "删除 {appId} 的 API key？",
     "current": "当前应用",
     "enter": "进入",
     "empty": "暂无应用"
   },
   "llm": {
     "title": "对话",
+    "desc": "使用当前应用的知识库进行问答",
     "thread": "会话",
     "newConversation": "新会话",
     "empty": "暂无对话",

@@ -6,10 +6,9 @@ import UploadView from '../views/UploadView.vue'
 import SearchView from '../views/SearchView.vue'
 import LlmView from '../views/LlmView.vue'
 import DebugView from '../views/DebugView.vue'
-import MonitorView from '../views/MonitorView.vue'
 import TracesView from '../views/TracesView.vue'
 import LogsView from '../views/LogsView.vue'
-import ConfigView from '../views/ConfigView.vue'
+import OpsView from '../views/OpsView.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -19,18 +18,18 @@ const router = createRouter({
     { path: '/apps/:app_id/database', component: DatabaseView },
     { path: '/apps/:app_id/upload', component: UploadView },
     { path: '/apps/:app_id/search', component: SearchView },
-    { path: '/apps/:app_id/llm', component: LlmView },
-    { path: '/apps/:app_id/debug', component: DebugView },
+    { path: '/apps/:app_id/llm', redirect: '/llm' },
+    { path: '/apps/:app_id/debug', redirect: '/debug' },
     { path: '/apps/:app_id/trace', component: TracesView },
     { path: '/database', component: DatabaseView },
     { path: '/upload', component: UploadView },
     { path: '/search', component: SearchView },
     { path: '/llm', component: LlmView },
     { path: '/debug', component: DebugView },
-    { path: '/monitor', component: MonitorView },
     { path: '/trace', component: TracesView },
     { path: '/logs', component: LogsView },
-    { path: '/config', component: ConfigView },
+    { path: '/config', redirect: '/ops' },
+    { path: '/ops', component: OpsView },
     { path: '/', redirect: '/apps' },
   ],
 })

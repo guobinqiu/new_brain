@@ -1,6 +1,13 @@
 <template>
   <main class="llm-view">
-    <div v-if="!currentApp" class="trace-empty">{{ t('monitor.noAppSelected') }}</div>
+    <div class="page-head">
+      <div>
+        <h2>{{ t('llm.title') }}</h2>
+        <p>{{ t('llm.desc') }}</p>
+      </div>
+    </div>
+
+    <div v-if="!currentApp" class="trace-empty">{{ t('upload.selectApp') }}</div>
     <template v-else>
       <div class="llm-toolbar">
         <div>
@@ -43,10 +50,9 @@ import { useRoute } from 'vue-router'
 import { useActiveAppStore } from '../stores/activeApp'
 import { useAppsStore } from '../stores/apps'
 import { useLlmChatStore } from '../stores/llmChat'
-import { hmacSha256Hex, sha256Hex } from '../utils/hmac'
-import { errorMessage, showToast } from '../utils/toast'
+import { errorMessage, indexErrorMessage, showToast } from '../utils/toast'
 
-const API_PATH = '/api/open/llm/chat/stream'
+const API_PATH = '/api/v1/llm/chat/stream'
 const { t } = useI18n()
 const route = useRoute()
 const activeAppStore = useActiveAppStore()
@@ -66,18 +72,11 @@ function newConversation() {
   llmChatStore.newConversation(currentAppId.value)
 }
 
-async function signedHeaders(body) {
+async function requestHeaders() {
   const app = currentApp.value
-  const ts = String(Math.floor(Date.now() / 1000))
-  const bodyHash = sha256Hex(body)
-  const canonical = ['POST', API_PATH, ts, bodyHash, app.app_id].join('\n')
-  const signature = hmacSha256Hex(app.secret_key, canonical)
   return {
     'Content-Type': 'application/json',
-    'X-App-Id': app.app_id,
-    'X-Access-Key': app.access_key,
-    'X-Timestamp': ts,
-    'X-Signature': signature,
+    'Authorization': `Bearer ${app.api_key}`,
   }
 }
 
@@ -95,10 +94,10 @@ async function sendMessage() {
   try {
     const res = await fetch(API_PATH, {
       method: 'POST',
-      headers: await signedHeaders(body),
+      headers: await requestHeaders(),
       body,
     })
-    if (!res.ok) throw new Error(await res.text())
+    if (!res.ok) throw new Error(await res.text() || `HTTP ${res.status} ${res.statusText}`)
     await readStream(res, assistantIndex)
   } catch (err) {
     messages.value[assistantIndex].content = errorMessage(err, t('llm.requestFailed'))
@@ -112,32 +111,36 @@ async function readStream(res, assistantIndex) {
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
-  while (true) {
-    const { value, done } = await reader.read()
-    if (done) break
-    buffer += decoder.decode(value, { stream: true })
-    const events = buffer.split('\n\n')
-    buffer = events.pop() || ''
-    for (const eventText of events) handleEvent(eventText, assistantIndex)
+  try {
+    while (true) {
+      const { value, done } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const events = buffer.split('\n\n')
+      buffer = events.pop() || ''
+      for (const eventText of events) handleEvent(eventText, assistantIndex)
+    }
+    if (buffer) handleEvent(buffer, assistantIndex)
+  } finally {
+    try {
+      await reader.cancel()
+    } finally {
+      reader.releaseLock()
+    }
   }
-  if (buffer) handleEvent(buffer, assistantIndex)
 }
 
 function handleEvent(eventText, assistantIndex) {
   const line = eventText.split('\n').find(item => item.startsWith('data:'))
   if (!line) return
-  try {
-    const event = JSON.parse(line.slice(5).trim())
-    if (event.type === 'token') messages.value[assistantIndex].content += event.content || ''
-    if (event.type === 'error') throw new Error(event.message || 'stream error')
-  } catch (err) {
-    messages.value[assistantIndex].content = errorMessage(err, t('llm.streamError'))
-  }
+  const event = JSON.parse(line.slice(5).trim())
+  if (event.type === 'token') messages.value[assistantIndex].content += event.content || ''
+  if (event.type === 'error') throw new Error(indexErrorMessage(event))
 }
 </script>
 
 <style scoped>
-.llm-view { display: grid; grid-template-rows: auto minmax(360px, 1fr) auto; gap: 16px; min-height: calc(100vh - 142px); }
+.llm-view { display: grid; grid-template-rows: auto auto minmax(360px, 1fr) auto; gap: 16px; min-height: calc(100vh - 142px); }
 .llm-toolbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .llm-toolbar p { font-size: 12px; color: var(--el-text-color-secondary); }
 .thread-id { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; color: var(--el-text-color-primary); }

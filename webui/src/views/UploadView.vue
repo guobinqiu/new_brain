@@ -1,5 +1,6 @@
 <template>
   <main class="upload-view">
+    <input ref="updateInputRef" type="file" hidden accept=".pdf,.txt,.md,.doc,.docx,.xls,.xlsx,.ppt,.pptx" @change="updateSelectedFile" />
     <div class="upload-card">
       <el-upload
         ref="uploadRef"
@@ -7,7 +8,7 @@
         multiple
         :auto-upload="false"
         :show-file-list="false"
-        accept=".pdf,.txt,.md,.docx,.xlsx,.png,.jpg,.jpeg,.webp,.bmp"
+        accept=".pdf,.txt,.md,.doc,.docx,.xls,.xlsx,.ppt,.pptx"
         :on-change="onFileChange"
       >
         <div @dragover.prevent @drop.prevent="onDrop">
@@ -57,15 +58,25 @@
           <el-table-column label="created_at" min-width="160">
             <template #default="{ row }">{{ shortTime(row.created_at) }}</template>
           </el-table-column>
-          <el-table-column prop="status" label="status" min-width="100" />
+          <el-table-column prop="status" label="status" min-width="100">
+            <template #default="{ row }">{{ updatingFileIds.has(row.id) ? 'indexing' : row.status }}</template>
+          </el-table-column>
           <el-table-column label="indexed_at" min-width="160">
             <template #default="{ row }">{{ shortTime(row.indexed_at) }}</template>
           </el-table-column>
-          <el-table-column prop="error" label="error" min-width="180" show-overflow-tooltip />
+          <el-table-column label="error" min-width="180" show-overflow-tooltip>
+            <template #default="{ row }">{{ indexErrorMessage(row.error) }}</template>
+          </el-table-column>
           <el-table-column prop="size" label="size" min-width="100" />
-          <el-table-column :label="t('common.actions')" min-width="120">
+          <el-table-column :label="t('common.actions')" min-width="210">
             <template #default="{ row }">
-              <el-button type="danger" size="small" :disabled="deletingFileId === row.id" @click="deleteFile(row)">{{ deletingFileId === row.id ? t('common.deleting') : t('common.delete') }}</el-button>
+              <el-button type="danger" size="small" :disabled="deletingFileId === row.id || retryingFileIds.has(row.id) || updatingFileIds.has(row.id)" @click="deleteFile(row)">{{ deletingFileId === row.id ? t('common.deleting') : t('common.delete') }}</el-button>
+              <el-tooltip v-if="row.status === 'failed'" :content="t('common.retry')">
+                <el-button :icon="RefreshRight" size="small" :aria-label="t('common.retry')" :loading="retryingFileIds.has(row.id)" :disabled="deletingFileId === row.id || updatingFileIds.has(row.id)" @click="retryFile(row)" />
+              </el-tooltip>
+              <el-tooltip :content="t('upload.updateFile')">
+                <el-button :icon="Upload" size="small" :aria-label="t('upload.updateFile')" :loading="updatingFileIds.has(row.id)" :disabled="deletingFileId === row.id || retryingFileIds.has(row.id) || ['queued', 'indexing'].includes(row.status)" @click="chooseUpdatedFile(row)" />
+              </el-tooltip>
             </template>
           </el-table-column>
         </el-table>
@@ -81,10 +92,11 @@ import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import axios from '../utils/api'
 import { useActiveAppStore } from '../stores/activeApp'
-import { errorMessage, showToast } from '../utils/toast'
+import { errorMessage, indexErrorMessage, showToast } from '../utils/toast'
 import { shortTime } from '../utils/format'
+import { RefreshRight, Upload } from '@element-plus/icons-vue'
 
-const API = '/api/open/rag'
+const API = '/api/rag'
 const { t } = useI18n()
 const activeAppStore = useActiveAppStore()
 const { appId } = storeToRefs(activeAppStore)
@@ -98,6 +110,10 @@ const filesTotal = ref(0)
 const filesNextCursor = ref(null)
 const filesLoading = ref(false)
 const deletingFileId = ref(null)
+const retryingFileIds = ref(new Set())
+const updatingFileIds = ref(new Set())
+const updateInputRef = ref(null)
+const updateTarget = ref(null)
 const uploadRef = ref(null)
 const filesTableRef = ref(null)
 
@@ -132,32 +148,60 @@ async function uploadSelectedFiles() {
   }
 }
 
-async function uploadFiles(files) {
+async function uploadFiles(files, fileId = null, targetAppId = currentAppId.value) {
   let submitted = 0
   for (const file of files) {
     const form = new FormData()
     form.append('file', file)
-    form.append('app_id', currentAppId.value)
+    form.append('app_id', targetAppId)
+    if (fileId) form.append('file_id', fileId)
     try {
       const uploadRes = await axios.post(`${API}/upload`, form)
-      const presignRes = await axios.post(`${API}/presign`, { s3_url: uploadRes.data.s3_url })
       const body = {
-        app_id: currentAppId.value,
+        app_id: targetAppId,
         file_id: uploadRes.data.file_id,
-        presigned_url: presignRes.data.presigned_url,
         s3_url: uploadRes.data.s3_url,
+        filename: uploadRes.data.filename,
       }
-      await axios.post(`${API}/files`, body)
+      try {
+        const res = await axios.post(`${API}/files`, body)
+        if (res.data?.success !== true) {
+          showToast('error', `${file.name}: ${indexErrorMessage(res.data)}`)
+          continue
+        }
+      } catch (err) {
+        showToast('error', `${file.name}: ${errorMessage(err)}`)
+        continue
+      }
       submitted++
     } catch (err) {
       showToast('error', `${file.name}: ${errorMessage(err)}`)
     }
   }
-  await fetchFiles()
+  if (currentAppId.value === targetAppId) await fetchFiles()
   if (submitted > 0) {
     showToast('success', t('upload.indexSubmitted', { count: submitted }))
   }
   return submitted > 0
+}
+
+function chooseUpdatedFile(file) {
+  updateTarget.value = { fileId: file.id, appId: currentAppId.value }
+  updateInputRef.value.value = ''
+  updateInputRef.value.click()
+}
+
+async function updateSelectedFile(event) {
+  const file = event.target.files[0]
+  const target = updateTarget.value
+  if (!file || !target || updatingFileIds.value.has(target.fileId)) return
+  updatingFileIds.value.add(target.fileId)
+  try {
+    await uploadFiles([file], target.fileId, target.appId)
+  } finally {
+    updatingFileIds.value.delete(target.fileId)
+    event.target.value = ''
+  }
 }
 
 async function fetchFiles({ append = false } = {}) {
@@ -173,7 +217,7 @@ async function fetchFiles({ append = false } = {}) {
     filesTotal.value = res.data.total || 0
     filesNextCursor.value = res.data.next_cursor || null
   }
-  catch (err) { console.error(err) }
+  catch (err) { showToast('error', errorMessage(err)) }
   finally { filesLoading.value = false }
 }
 
@@ -187,6 +231,23 @@ function onFilesScroll(event) {
   const scrollTop = event?.scrollTop ?? wrap.scrollTop
   if (scrollTop + wrap.clientHeight >= wrap.scrollHeight - 24 && filesNextCursor.value) {
     fetchNextFiles()
+  }
+}
+
+async function retryFile(file) {
+  const targetAppId = currentAppId.value
+  const key = file.id
+  if (retryingFileIds.value.has(key)) return
+  retryingFileIds.value.add(key)
+  try {
+    const response = await axios.post(`${API}/files`, { app_id: targetAppId, file_id: key })
+    if (response.data.success) showToast('success', t('upload.indexSubmitted', { count: 1 }))
+    else showToast('error', indexErrorMessage(response.data))
+  } catch (err) {
+    showToast('error', `${file.filename}: ${errorMessage(err)}`)
+  } finally {
+    retryingFileIds.value.delete(key)
+    if (currentAppId.value === targetAppId) await fetchFiles()
   }
 }
 
