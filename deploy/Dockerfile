@@ -25,7 +25,7 @@ RUN if [ "$USE_CN_MIRROR" = "true" ]; then \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-RUN mkdir -p /app/services/rag /app/services/parser /app/services/inference
+RUN mkdir -p /app/services/rag /app/services/parser /app/services/inference /app/services/ops
 
 FROM base AS rag
 RUN --mount=type=bind,source=services/rag/pyproject.toml,target=/app/services/rag/pyproject.toml,readonly \
@@ -37,7 +37,14 @@ RUN --mount=type=bind,source=services/rag/pyproject.toml,target=/app/services/ra
     fi
 CMD ["/app/.venv/bin/uvicorn", "services.rag.app.main:app", "--host", "0.0.0.0", "--port", "6000", "--reload"]
 
-FROM rag AS ops
+FROM base AS ops
+RUN --mount=type=bind,source=services/ops/pyproject.toml,target=/app/services/ops/pyproject.toml,readonly \
+    --mount=type=bind,source=services/ops/uv.lock,target=/app/services/ops/uv.lock,readonly \
+    if [ "$USE_CN_MIRROR" = "true" ]; then \
+        cd /app/services/ops && UV_DEFAULT_INDEX="$UV_DEFAULT_INDEX_CN" uv sync --frozen --no-install-project; \
+    else \
+        cd /app/services/ops && uv sync --frozen --no-install-project; \
+    fi
 RUN apt-get update -o Acquire::Retries=5 -o Acquire::http::Timeout=30 \
     && apt-get install -y --no-install-recommends --fix-missing \
         -o Acquire::Retries=5 \
