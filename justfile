@@ -62,6 +62,18 @@ llm action:
 ops action:
 	just _ops-{{action}}
 
+tei-dense action:
+	just _tei-dense-{{action}}
+
+tei-rerank action:
+	just _tei-rerank-{{action}}
+
+vllm-dense action:
+	just _vllm-dense-{{action}}
+
+vllm-rerank action:
+	just _vllm-rerank-{{action}}
+
 _rag-build:
 	docker build -f deploy/Dockerfile --target rag -t {{ RAG_IMAGE }} --build-arg USE_CN_MIRROR={{ env_var_or_default("USE_CN_MIRROR", "true") }} .
 
@@ -151,6 +163,54 @@ _ops-remove:
 
 _ops-rollout:
 	just _service-rollout brain_ctrl_ops
+
+_tei-dense-start:
+	just _service-start brain_tei_dense
+
+_tei-dense-stop:
+	just _service-stop brain_tei_dense
+
+_tei-dense-remove:
+	just _service-remove brain_tei_dense
+
+_tei-dense-rollout:
+	just _service-rollout brain_tei_dense
+
+_tei-rerank-start:
+	just _service-start brain_tei_rerank
+
+_tei-rerank-stop:
+	just _service-stop brain_tei_rerank
+
+_tei-rerank-remove:
+	just _service-remove brain_tei_rerank
+
+_tei-rerank-rollout:
+	just _service-rollout brain_tei_rerank
+
+_vllm-dense-start:
+	just _service-start brain_vllm_dense
+
+_vllm-dense-stop:
+	just _service-stop brain_vllm_dense
+
+_vllm-dense-remove:
+	just _service-remove brain_vllm_dense
+
+_vllm-dense-rollout:
+	just _service-rollout brain_vllm_dense
+
+_vllm-rerank-start:
+	just _service-start brain_vllm_rerank
+
+_vllm-rerank-stop:
+	just _service-stop brain_vllm_rerank
+
+_vllm-rerank-remove:
+	just _service-remove brain_vllm_rerank
+
+_vllm-rerank-rollout:
+	just _service-rollout brain_vllm_rerank
 
 _webui-build:
 	npm --prefix webui run build
