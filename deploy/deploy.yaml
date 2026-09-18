@@ -181,8 +181,6 @@ services:
     labels:
       logging: loki
     command: ["milvus", "run", "standalone"]
-    security_opt:
-      - seccomp:unconfined
     environment:
       ETCD_ENDPOINTS: etcd:2379
       MINIO_ADDRESS: minio:9000

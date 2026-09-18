@@ -1,4 +1,5 @@
 # syntax=docker/dockerfile:1.7
+FROM docker:29.1.2-cli AS docker-cli
 FROM ghcr.io/astral-sh/uv:python3.11-bookworm AS base
 
 ARG USE_CN_MIRROR=false
@@ -38,6 +39,7 @@ RUN --mount=type=bind,source=services/rag/pyproject.toml,target=/app/services/ra
 CMD ["/app/.venv/bin/uvicorn", "services.rag.app.main:app", "--host", "0.0.0.0", "--port", "6000", "--reload"]
 
 FROM base AS ops
+COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
 RUN --mount=type=bind,source=services/ops/pyproject.toml,target=/app/services/ops/pyproject.toml,readonly \
     --mount=type=bind,source=services/ops/uv.lock,target=/app/services/ops/uv.lock,readonly \
     if [ "$USE_CN_MIRROR" = "true" ]; then \
@@ -45,12 +47,6 @@ RUN --mount=type=bind,source=services/ops/pyproject.toml,target=/app/services/op
     else \
         cd /app/services/ops && uv sync --frozen --no-install-project; \
     fi
-RUN apt-get update -o Acquire::Retries=5 -o Acquire::http::Timeout=30 \
-    && apt-get install -y --no-install-recommends --fix-missing \
-        -o Acquire::Retries=5 \
-        -o Acquire::http::Timeout=30 \
-        docker.io \
-    && rm -rf /var/lib/apt/lists/*
 CMD ["/app/.venv/bin/uvicorn", "services.ops.app.main:app", "--host", "0.0.0.0", "--port", "7002", "--reload"]
 
 FROM base AS parser
