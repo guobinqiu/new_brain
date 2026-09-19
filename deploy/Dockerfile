@@ -50,7 +50,6 @@ RUN --mount=type=bind,source=services/ops/pyproject.toml,target=/app/services/op
 CMD ["/app/.venv/bin/uvicorn", "services.ops.app.main:app", "--host", "0.0.0.0", "--port", "7002", "--reload"]
 
 FROM base AS parser
-ARG SERVICE_EXTRA=cpu
 RUN apt-get update -o Acquire::Retries=5 -o Acquire::http::Timeout=30 \
   && apt-get install -y --no-install-recommends --fix-missing \
   -o Acquire::Retries=5 \
@@ -60,9 +59,9 @@ RUN apt-get update -o Acquire::Retries=5 -o Acquire::http::Timeout=30 \
 RUN --mount=type=bind,source=services/parser/pyproject.toml,target=/app/services/parser/pyproject.toml,readonly \
   --mount=type=bind,source=services/parser/uv.lock,target=/app/services/parser/uv.lock,readonly \
   if [ "$USE_CN_MIRROR" = "true" ]; then \
-  cd /app/services/parser && UV_DEFAULT_INDEX="$UV_DEFAULT_INDEX_CN" uv sync --frozen --no-install-project --extra "$SERVICE_EXTRA"; \
+  cd /app/services/parser && UV_DEFAULT_INDEX="$UV_DEFAULT_INDEX_CN" uv sync --frozen --no-install-project; \
   else \
-  cd /app/services/parser && uv sync --frozen --no-install-project --extra "$SERVICE_EXTRA"; \
+  cd /app/services/parser && uv sync --frozen --no-install-project; \
   fi
 CMD ["/app/.venv/bin/uvicorn", "services.parser.app.main:app", "--host", "0.0.0.0", "--port", "7000", "--reload"]
 
