@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     model_name: str = "openai/gpt-4o-mini"
     llm_kwargs: str = ""
     use_responses_api: bool = False
+    prompt: str
 
     # ─── 并发 ──────────────────────────────────────────────────────
     llm_concurrency_limit: int = 10

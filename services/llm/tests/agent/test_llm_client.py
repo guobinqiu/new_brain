@@ -25,6 +25,7 @@ def test_create_llm_uses_yaml_behavior_and_environment_connections(monkeypatch, 
     config_path.write_text(
         "openai_base_url: http://llm.example/v1\n"
         "model_name: test-model\n"
+        "prompt: Test assistant\n"
         "database_url: postgresql://rag:rag@postgres:5432/rag\n"
         "request:\n"
         "  timeout: 45\n"
@@ -55,6 +56,7 @@ def test_create_llm_uses_yaml_behavior_and_environment_connections(monkeypatch, 
     assert captured["model"] == "test-model"
     assert captured["api_key"] == "test-key"
     assert settings.rag_base_url == "http://rag.example:6000"
+    assert settings.prompt == "Test assistant"
     assert settings.request_timeout == 45
     assert settings.model_timeout == 55
     assert settings.rag_timeout == 12.5

@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime
 
 from langchain_core.messages import AIMessage, SystemMessage
 
@@ -32,24 +33,22 @@ def get_semaphore() -> asyncio.Semaphore:
 async def llm_node(state: dict) -> dict:
     """llm 节点：流式调用 LLM，逐 token 推送给前端。
 
-    如果 state 含 rag_context，将其注入为 system message 前缀。
+    每轮注入配置提示词和当前时间，有 rag_context 时追加参考资料。
     """
     logger.info("llm_node start")
 
     messages = list(state.get("messages") or [])
     rag_context = state.get("rag_context") or ""
 
-    # Inject RAG context as system message if available
+    now = datetime.now()
+    weekday = "一二三四五六日"[now.weekday()]
+    system_content = (
+        f"{settings.prompt.strip()}\n\n"
+        f"当前时间：{now:%Y-%m-%d %H:%M:%S}，星期{weekday}。"
+    )
     if rag_context:
-        system_msg = SystemMessage(
-            content=(
-                "你是一个智能助手。以下是与用户问题相关的参考资料，请基于这些资料回答用户问题。\n\n"
-                "## 参考资料\n\n"
-                f"{rag_context}\n\n"
-                "请用自然、准确的中文回答用户问题。如果参考资料中没有相关信息，请基于你的知识回答。"
-            )
-        )
-        messages = [system_msg] + messages
+        system_content += f"\n\n## 参考资料\n\n{rag_context}"
+    messages = [SystemMessage(content=system_content)] + messages
 
     base_llm = get_llm()
     writer = safe_get_writer()
