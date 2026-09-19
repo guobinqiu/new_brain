@@ -69,21 +69,17 @@
 
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
-import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { CopyDocument } from '@element-plus/icons-vue'
 import axios from '../utils/api'
-import { useActiveAppStore } from '../stores/activeApp'
 import { copyText } from '../utils/format'
 import { errorMessage, showToast } from '../utils/toast'
 
 const API = '/api/rag'
 const { t } = useI18n()
-const activeAppStore = useActiveAppStore()
-const { appId } = storeToRefs(activeAppStore)
 const route = useRoute()
-const currentAppId = computed(() => route.params.app_id || appId.value)
+const currentAppId = computed(() => route.params.app_id)
 
 const capabilities = ref({})
 const debugQueryText = ref('')

@@ -58,10 +58,10 @@
               <el-menu-item :index="`/apps/${app.app_id}/database`">{{ t('nav.database') }}</el-menu-item>
               <el-menu-item :index="`/apps/${app.app_id}/upload`">{{ t('nav.upload') }}</el-menu-item>
               <el-menu-item :index="`/apps/${app.app_id}/search`">{{ t('nav.search') }}</el-menu-item>
+              <el-menu-item :index="`/apps/${app.app_id}/llm`">{{ t('nav.llm') }}</el-menu-item>
+              <el-menu-item :index="`/apps/${app.app_id}/debug`">{{ t('nav.debug') }}</el-menu-item>
               <el-menu-item :index="`/apps/${app.app_id}/trace`">{{ t('nav.trace') }}</el-menu-item>
             </el-sub-menu>
-            <el-menu-item index="/llm">{{ t('nav.llm') }}</el-menu-item>
-            <el-menu-item index="/debug">{{ t('nav.debug') }}</el-menu-item>
             <!-- <el-menu-item index="/logs">{{ t('nav.logs') }}</el-menu-item> -->
             <el-menu-item index="/ops">{{ t('nav.ops') }}</el-menu-item>
           </el-menu>
@@ -126,7 +126,7 @@ const activeMenu = computed(() => {
 })
 
 function onMenuSelect(index) {
-  if (index === '/apps' || index === '/llm' || index === '/debug' || index === '/logs' || index === '/ops') {
+  if (index === '/apps' || index === '/logs' || index === '/ops') {
     router.push(index)
     return
   }

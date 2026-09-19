@@ -47,7 +47,6 @@ import { computed, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
-import { useActiveAppStore } from '../stores/activeApp'
 import { useAppsStore } from '../stores/apps'
 import { useLlmChatStore } from '../stores/llmChat'
 import { errorMessage, indexErrorMessage, showToast } from '../utils/toast'
@@ -55,12 +54,11 @@ import { errorMessage, indexErrorMessage, showToast } from '../utils/toast'
 const API_PATH = '/api/v1/llm/chat/stream'
 const { t } = useI18n()
 const route = useRoute()
-const activeAppStore = useActiveAppStore()
 const appsStore = useAppsStore()
 const llmChatStore = useLlmChatStore()
 const { apps } = storeToRefs(appsStore)
 
-const currentAppId = computed(() => route.params.app_id || activeAppStore.appId)
+const currentAppId = computed(() => route.params.app_id)
 const currentApp = computed(() => apps.value.find(app => app.app_id === currentAppId.value))
 const session = computed(() => llmChatStore.sessionFor(currentAppId.value))
 const threadId = computed(() => session.value.threadId)
