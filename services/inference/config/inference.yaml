@@ -1,32 +1,11 @@
 embedded:
   enable: false
   dense:
-    # bge_base 和 bge_m3 不能同时开启
-    bge_base:
-      enable: false
-      model_name: BAAI/bge-base-zh-v1.5
-      # batch_size 小:
-      # 单次显存/内存占用低
-      # 总调用轮次更多
-      # 吞吐更低
-      # API 返回仍然完整
-
-      # batch_size 大:
-      # 吞吐更好
-      # 显存/内存占用更高
-      # 太大可能 OOM
-      batch_size: 4
-
-      # release_memory 可选值
-      # per_batch 每个 batch 后释放
-      # after_call 每次接口调用后释放
-      # never 不主动释放
-      release_memory: never
     bge_m3:
       enable: true
       model_name: BAAI/bge-m3
       batch_size: 4
-      release_memory: never
+      release_memory: never # per_batch|after_call|never
   sparse:
     bge_m3:
       enable: true
