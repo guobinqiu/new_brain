@@ -32,6 +32,10 @@
                   <p>{{ currentConfig?.path || '' }}</p>
                 </div>
                 <div class="editor-actions">
+                  <el-radio-group v-model="deployTarget" size="small" :disabled="configAction === 'deploy'">
+                    <el-radio-button value="app">{{ t('ops.tabs.appServices') }}</el-radio-button>
+                    <el-radio-button value="infra">{{ t('ops.tabs.infraServices') }}</el-radio-button>
+                  </el-radio-group>
                   <el-button size="small" type="primary" :loading="configAction === 'deploy'" @click="publishStack">{{ t('ops.actions.publish') }}</el-button>
                 </div>
               </div>
@@ -202,6 +206,7 @@ const selectedConfig = ref('')
 const configContent = ref('')
 const joinCommand = ref('')
 const configAction = ref('')
+const deployTarget = ref('app')
 const serviceActionKey = ref('')
 const scalingService = ref('')
 const serviceLogLoading = ref('')
@@ -275,6 +280,8 @@ async function ensureSelectedConfig() {
 
 async function selectConfig(name) {
   selectedConfig.value = name
+  if (name === 'infra') deployTarget.value = 'infra'
+  if (name === 'stack') deployTarget.value = 'app'
   try {
     const res = await axios.get(`/api/ops/configs/${name}`)
     configContent.value = res.data?.content || ''
@@ -316,15 +323,17 @@ async function applyConfig() {
 }
 
 async function publishStack() {
+  const target = deployTarget.value
+  const name = t(target === 'infra' ? 'ops.tabs.infraServices' : 'ops.tabs.appServices')
   try {
-    await confirmBox(t, t('ops.publishConfirm'), t('ops.actions.publish'), { type: 'warning' })
+    await confirmBox(t, t('ops.publishConfirm', { name }), t('ops.actions.publish'), { type: 'warning' })
   } catch {
     return
   }
   configAction.value = 'deploy'
   try {
-    await axios.post('/api/ops/stack/deploy')
-    showToast('success', t('ops.published'))
+    await axios.post('/api/ops/stack/deploy', null, { params: { target } })
+    showToast('success', t('ops.published', { name }))
     await fetchServices()
   } catch (err) {
     showToast('error', errorMessage(err))

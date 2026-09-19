@@ -27,10 +27,12 @@ class SwarmManager:
         host_project_root: str | None = None,
         command_timeout: int = COMMAND_TIMEOUT_SECONDS,
         runner=None,
+        infra_stack: str = "brain_infra",
     ):
         self.docker = docker
         self.stack = stack
         self.ctrl_stack = ctrl_stack
+        self.infra_stack = infra_stack
         self.project_root = str(project_root)
         self.host_project_root = host_project_root or self.project_root
         self.command_timeout = command_timeout
@@ -69,23 +71,32 @@ class SwarmManager:
         self.docker.update_service(data["ID"], int(data["Version"]["Index"]), spec)
         return {"service": service, "action": "rollout"}
 
-    def deploy_stack(self) -> dict:
+    def _deployment(self, target: str) -> tuple[str, str]:
+        if target == "app":
+            return self.stack, "deploy/deploy.yaml"
+        if target == "infra":
+            return self.infra_stack, "deploy/infra.yaml"
+        raise ValueError(f"unsupported deployment target: {target}")
+
+    def deploy_stack(self, target: str = "app") -> dict:
+        stack, path = self._deployment(target)
         self.runner(
-            ["docker", "stack", "deploy", "--with-registry-auth", "-c", "deploy/deploy.yaml", self.stack],
+            ["docker", "stack", "deploy", "--with-registry-auth", "-c", path, stack],
             cwd=self.project_root,
             env={"PROJECT_ROOT": self.host_project_root},
             timeout=self.command_timeout,
         )
-        return {"action": "deploy", "stack": self.stack}
+        return {"action": "deploy", "stack": stack}
 
-    def remove_stack(self) -> dict:
+    def remove_stack(self, target: str = "app") -> dict:
+        stack, _ = self._deployment(target)
         self.runner(
-            ["docker", "stack", "rm", self.stack],
+            ["docker", "stack", "rm", stack],
             cwd=self.project_root,
             env={},
             timeout=self.command_timeout,
         )
-        return {"action": "remove", "stack": self.stack}
+        return {"action": "remove", "stack": stack}
 
     def list_tasks(self, service: str) -> list[dict]:
         self._require_managed_service(service)

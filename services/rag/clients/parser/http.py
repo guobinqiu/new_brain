@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 import httpx
 
 from shared.service_auth import service_auth_headers
+from shared.contracts import ParseFileResponse
 from shared.tracing import trace_headers
 from shared.deadline import request_timeout
 from shared.upstream import internal_error
@@ -41,17 +40,15 @@ class HttpParserClient(ParserClient):
         except httpx.HTTPError:
             return False
 
-    def parse_file(self, filepath: str, *, original_filename: str | None = None) -> list[dict]:
+    def parse_file(self, presigned_url: str, *, filename: str) -> dict:
         try:
-            filename = original_filename or Path(filepath).name
-            with open(filepath, "rb") as file:
-                response = self._client.post(
-                    f"{self.base_url}/v1/parse/file",
-                    files={"file": (filename, file, "application/octet-stream")},
-                    headers={**service_auth_headers(self.api_key), **trace_headers()},
-                    timeout=request_timeout(self.timeout),
-                )
+            response = self._client.post(
+                f"{self.base_url}/v1/parse/file",
+                json={"presigned_url": presigned_url, "filename": filename},
+                headers={**service_auth_headers(self.api_key), **trace_headers()},
+                timeout=request_timeout(self.timeout),
+            )
             response.raise_for_status()
-            return response.json()["blocks"]
+            return ParseFileResponse.model_validate(response.json()).model_dump(exclude_none=True)
         except (httpx.HTTPError, KeyError, ValueError) as exc:
             raise internal_error("parser", exc) from exc

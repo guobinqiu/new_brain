@@ -77,28 +77,22 @@ class TextParserConfig:
 @dataclass(frozen=True)
 class MineruParserConfig:
     enable: bool = False
+    tier: str = "basic"
     parse_method: str = "auto"
-    formula: bool = True
-    table_enable: bool = True
-    base_url: str | None = None
+    image_analysis: bool = False
+
+
+@dataclass(frozen=True)
+class MineruCloudParserConfig:
+    enable: bool = False
+    base_url: str = "https://mineru.net"
     timeout: int = 300
-    tier: str = "standard"
+    model_version: str = "vlm"
+    enable_formula: bool = True
+    enable_table: bool = True
+    language: str = "ch"
     retry: RetryConfig = field(default_factory=RetryConfig)
     api_key: str | None = field(default=None, repr=False)
-
-
-@dataclass(frozen=True)
-class DoclingParserConfig:
-    enable: bool = False
-    formula: bool = True
-    table_enable: bool = True
-    table_mode: str = "accurate"  # TableFormer 模式：fast | accurate
-
-
-@dataclass(frozen=True)
-class DoclingVlmParserConfig:
-    enable: bool = False
-    model: str | None = None
 
 
 @dataclass(frozen=True)
@@ -122,25 +116,23 @@ class VolcengineParserConfig:
 
 @dataclass(frozen=True, init=False)
 class ParserConfig:
+    download_timeout: int = 60
     mineru: MineruParserConfig = field(default_factory=MineruParserConfig)
-    docling: DoclingParserConfig = field(default_factory=DoclingParserConfig)
-    docling_vlm: DoclingVlmParserConfig = field(default_factory=lambda: DoclingVlmParserConfig(model="granitedocling"))
-    active: str = "docling"
+    mineru_cloud: MineruCloudParserConfig = field(default_factory=MineruCloudParserConfig)
+    active: str = "mineru"
     volcengine: VolcengineParserConfig = field(default_factory=VolcengineParserConfig)
 
     def __init__(
         self,
-        mineru: MineruParserConfig | None = None,
-        docling: DoclingParserConfig | None = None,
-        docling_vlm: DoclingVlmParserConfig | None = None,
-        active: str = "docling",
+        active: str = "mineru",
         volcengine: VolcengineParserConfig | None = None,
+        download_timeout: int = 60,
+        mineru_cloud: MineruCloudParserConfig | None = None,
+        mineru: MineruParserConfig | None = None,
     ):
-        mineru_config = mineru or MineruParserConfig()
-        docling_config = docling or DoclingParserConfig()
-        object.__setattr__(self, "mineru", mineru_config)
-        object.__setattr__(self, "docling", docling_config)
-        object.__setattr__(self, "docling_vlm", docling_vlm or DoclingVlmParserConfig(model="granitedocling"))
+        object.__setattr__(self, "download_timeout", download_timeout)
+        object.__setattr__(self, "mineru", mineru or MineruParserConfig())
+        object.__setattr__(self, "mineru_cloud", mineru_cloud or MineruCloudParserConfig())
         object.__setattr__(self, "active", active)
         object.__setattr__(self, "volcengine", volcengine or VolcengineParserConfig())
 

@@ -32,7 +32,8 @@ def test_real_volcengine_pdf(tmp_path):
     path.write_bytes(pdf)
     raw = yaml.safe_load(DEFAULT_CONFIG_FILE.read_text())
     for name, backend in raw["parser"].items():
-        backend["enable"] = name == "volcengine"
+        if isinstance(backend, dict):
+            backend["enable"] = name == "volcengine"
     config_path = tmp_path / "parser.yaml"
     config_path.write_text(yaml.safe_dump(raw))
     config = load_parser_config(config_path)

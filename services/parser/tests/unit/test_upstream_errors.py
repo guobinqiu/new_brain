@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException, UploadFile
 
-from services.parser.app.main import app, parse_file, upstream_exception_handler
+from services.parser.app.main import ParseFileRequest, app, parse_file, upstream_exception_handler
 from services.parser.common.schema import TextBlock
 from services.parser.service import ParserService
 from shared.config import ParserConfig
@@ -15,24 +15,22 @@ from shared.upstream import UpstreamServiceError
 
 
 @pytest.mark.parametrize("failure", [RuntimeError, ValueError, TypeError, KeyError, OSError])
-def test_local_parser_failure_is_normalized_and_cleans_upload(monkeypatch, failure):
+def test_parser_failure_is_normalized(monkeypatch, failure):
     paths = []
 
     def fail(path, **kwargs):
         paths.append(Path(path))
         raise failure("private-document private-key")
 
-    monkeypatch.setattr(app.state, "parser_service", SimpleNamespace(parse_file=fail), raising=False)
-    upload = UploadFile(filename="private-document.txt", file=BytesIO(b"private-document"))
+    monkeypatch.setattr(app.state, "parser_service", SimpleNamespace(parse_url=fail), raising=False)
+    request = ParseFileRequest(filename="private-document.txt", presigned_url="https://source/private-document.txt")
     with pytest.raises(UpstreamServiceError) as caught:
-        parse_file(upload)
+        parse_file(request)
     error = caught.value
     assert error.service == "parser"
     assert error.status_code == 502
     assert error.retryable is False
     assert error.error == str(failure("private-document private-key"))
-    assert upload.file.closed
-    assert len(paths) == 1 and not paths[0].exists()
     response = asyncio.run(upstream_exception_handler(None, error))
     assert response.status_code == 502
     assert json.loads(response.body) == error.detail()
@@ -40,9 +38,9 @@ def test_local_parser_failure_is_normalized_and_cleans_upload(monkeypatch, failu
 
 @pytest.mark.parametrize("blocks", [None, [object()], [TextBlock(text={"private-key": "private-document"})]])
 def test_invalid_local_blocks_are_upstream_errors(monkeypatch, blocks):
-    monkeypatch.setattr(app.state, "parser_service", SimpleNamespace(parse_file=lambda *args, **kwargs: blocks), raising=False)
+    monkeypatch.setattr(app.state, "parser_service", SimpleNamespace(parse_url=lambda *args, **kwargs: (blocks, None)), raising=False)
     with pytest.raises(UpstreamServiceError) as caught:
-        parse_file(UploadFile(filename="a.txt", file=BytesIO(b"private-document")))
+        parse_file(ParseFileRequest(presigned_url="https://source/a.txt", filename="a.txt"))
     assert caught.value.status_code == 502
     assert caught.value.retryable is False
     assert caught.value.error
@@ -57,14 +55,11 @@ def test_invalid_local_blocks_are_upstream_errors(monkeypatch, blocks):
     ("private-name.txt", b""),
     ("private-name.txt", b"\xff"),
 ])
-def test_invalid_files_are_safe_400(monkeypatch, filename, content):
-    monkeypatch.setattr(app.state, "parser_service", ParserService(ParserConfig()), raising=False)
-    upload = UploadFile(filename=filename, file=BytesIO(content))
-    with pytest.raises(HTTPException) as caught:
-        parse_file(upload)
-    assert caught.value.status_code == 400
-    assert caught.value.detail
-    assert upload.file.closed
+def test_invalid_local_files_fail(tmp_path, filename, content):
+    path = tmp_path / filename
+    path.write_bytes(content)
+    with pytest.raises((ValueError, UnicodeDecodeError)):
+        ParserService(ParserConfig()).parse_file(str(path), original_filename=filename)
 
 
 def test_existing_upstream_error_is_preserved(monkeypatch):
@@ -73,7 +68,7 @@ def test_existing_upstream_error_is_preserved(monkeypatch):
     def fail(*args, **kwargs):
         raise error
 
-    monkeypatch.setattr(app.state, "parser_service", SimpleNamespace(parse_file=fail), raising=False)
+    monkeypatch.setattr(app.state, "parser_service", SimpleNamespace(parse_url=fail), raising=False)
     with pytest.raises(UpstreamServiceError) as caught:
-        parse_file(UploadFile(filename="a.txt", file=BytesIO(b"text")))
+        parse_file(ParseFileRequest(presigned_url="https://source/a.txt", filename="a.txt"))
     assert caught.value is error

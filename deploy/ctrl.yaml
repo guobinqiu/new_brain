@@ -18,6 +18,7 @@ services:
       TZ: Asia/Shanghai
       STACK: brain
       CTRL_STACK: brain_ctrl
+      INFRA_STACK: brain_infra
       APP_PROJECT_ROOT: /app
       HOST_PROJECT_ROOT: ${PROJECT_ROOT}
     healthcheck:

@@ -10,5 +10,5 @@ class ParserClient(Protocol):
     def close(self) -> None:
         ...
 
-    def parse_file(self, filepath: str, *, original_filename: str | None = None) -> list[dict]:
+    def parse_file(self, presigned_url: str, *, filename: str) -> dict:
         ...

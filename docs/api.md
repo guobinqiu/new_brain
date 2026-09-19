@@ -59,7 +59,7 @@ Content-Type: application/json
 
 ## 集群管理
 
-集群管理接口只给管理台使用。Ops 服务通过 Docker Engine API 访问 Swarm manager 管理 service、task、node 和日志，通过 Docker CLI 执行 `docker stack deploy`。固定一台发布 manager 维护 `deploy/.env`、`deploy/ctrl.yaml`、`deploy/deploy.yaml`、代码目录和挂载路径；Ops 必须部署在这台发布 manager 上，才能保证部署文件中的宿主机绑定路径正确
+集群管理接口只给管理台使用。Ops 服务通过 Docker Engine API 访问 Swarm manager 管理 service、task、node 和日志，通过 Docker CLI 执行 `docker stack deploy`。固定一台发布 manager 维护 `deploy/.env`、`deploy/ctrl.yaml`、`deploy/infra.yaml`、`deploy/deploy.yaml`、代码目录和挂载路径；Ops 必须部署在这台发布 manager 上，才能保证部署文件中的宿主机绑定路径正确
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
@@ -76,11 +76,13 @@ Content-Type: application/json
 | `GET` | `/api/ops/configs/{name}` | 读取配置文件 |
 | `POST` | `/api/ops/configs/{name}/validate` | 校验配置内容 |
 | `PUT` | `/api/ops/configs/{name}` | 保存配置 |
-| `POST` | `/api/ops/configs/apply` | 应用配置；服务配置滚动更新对应 service，部署配置发布业务 stack |
-| `POST` | `/api/ops/stack/deploy` | 使用当前 `deploy/deploy.yaml` 发布业务部署 |
-| `POST` | `/api/ops/stack/remove` | 删除业务部署下的 service 和网络，不删除数据 |
+| `POST` | `/api/ops/configs/apply` | 应用配置；服务配置滚动更新对应 service，部署配置发布对应 stack |
+| `POST` | `/api/ops/stack/deploy?target=app` | 发布应用；`target=infra` 仅发布基础服务，省略时默认为 app |
+| `POST` | `/api/ops/stack/remove?target=app` | 删除选定 stack；支持 app/infra，不删除绑定目录数据和外部网络 |
 
-`/api/ops/services/scale` 请求体为 `{"service":"inference","replicas":3}`，仅用于 `rag`、`parser`、`inference`、`llm`。其他 service 路径参数支持 `postgres`、`qdrant`、`minio`、`loki`、`promtail`、`etcd`、`milvus`、`rag`、`parser`、`inference`、`llm`、`ops`、`nginx`。`configs/{name}` 支持 `rag`、`parser`、`inference`、`llm`、`deploy_env`、`stack`。保存配置只写文件；`POST /api/ops/configs/apply` 请求体为 `{"name":"inference"}`，服务配置会 rollout 对应 service，`deploy_env` 和 `stack` 会执行业务 stack deploy
+`/api/ops/services/scale` 请求体为 `{"service":"brain_inference","replicas":3}`，仅用于标记 `group=app` 的服务。所有 service 参数使用 Swarm 的实际服务名。`configs/{name}` 支持 `rag`、`parser`、`inference`、`llm`、`deploy_env`、`stack`、`infra`。保存配置只写文件；`POST /api/ops/configs/apply` 请求体为 `{"name":"inference"}`，服务配置会 rollout 对应 service，`stack` 和 `deploy_env` 发布应用 stack，`infra` 发布基础服务 stack。
+
+`target=app` 使用 `deploy/deploy.yaml` 和 `STACK`（默认 `brain`）；`target=infra` 使用 `deploy/infra.yaml` 和 `INFRA_STACK`（默认 `brain_infra`）。两者共用 `deploy/.env`，修改其中的基础服务变量后需单独发布 infra；发布 app 不会更新 infra。未知 target 返回 422。旧的合并部署迁移步骤见 README。
 
 ## 应用管理
 
@@ -640,13 +642,19 @@ DELETE /api/v1/rag/files/{file_id}
 
 ```http
 POST /v1/parse/file
-Content-Type: multipart/form-data
+Content-Type: application/json
 Authorization: Bearer <SERVICE_API_KEY>
 ```
 
-通过 `file` 字段上传文档，返回按阅读顺序排列的解析块，不在 parser 中切片
+请求 JSON：`{"presigned_url": "https://storage.example/report.pdf?signature=...", "filename": "report.pdf"}`。两个字段必填，下载地址必须使用 HTTP 或 HTTPS。
 
-RAG 始终调用此接口，PDF 后端由 `parser.yaml` 五选一，方舟请求由 parser 发出；其他格式走 parser 内部原生解析
+返回按阅读顺序排列的 `blocks`，不在 Parser 中切片。Parser 下载文件时返回 `file_size`（字节数）；云端直接读取 URL 时省略该字段。
+
+PDF 后端由 `parser.yaml` 的 enable 开关选择。`mineru_cloud` 直接提交 URL 到单文件解析接口，轮询任务并转换结果 JSON；URL 必须能被云平台访问，内网 MinIO 地址不能直接给云平台使用。旧 Office（`.doc/.xls/.ppt`）需要启用 `mineru_cloud`。本地 MinerU、火山方舟及原生格式解析由 Parser 下载到临时目录后处理，结束或异常时清理。RAG 只转交 URL 和文件名，不下载或转上传文件内容。
+
+`parser.download_timeout` 控制本地解析前的下载超时，单位秒。MinerU 云端通过 `MINERU_API_KEY` 读取 Token，`mineru_cloud.timeout` 控制提交、轮询及读取结果的总时间。启用 `mineru_cloud` 时关闭其他 PDF 后端的 enable。
+
+`mineru` 为本地 MinerU 4.0 Python SDK 后端，下载 PDF 后解析全文，返回相同的 blocks；`tier` 支持 `flash/basic/standard/advanced`，`parse_method` 支持 `auto/ocr/txt`。模型准备见 `scripts/download_models.txt`，与其他 PDF 后端只能启用一个，不需要云端 API Key。
 
 TXT 按空行分段，Word 按原生段落读取，Markdown 按语法元素读取，PPT 按页内文本元素读取并携带幻灯片页码，Excel 按表格结构输出。所有格式的文本块统一带 `kind`，不为不存在的类别生成空块
 

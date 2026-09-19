@@ -33,13 +33,13 @@ class FakeServices:
         self.rollouts.append(service)
         return {"service": service, "action": "rollout"}
 
-    def deploy_stack(self):
-        self.deploys.append("stack")
-        return {"action": "deploy", "stack": "brain"}
+    def deploy_stack(self, target="app"):
+        self.deploys.append("stack" if target == "app" else target)
+        return {"action": "deploy", "stack": "brain" if target == "app" else "brain_infra"}
 
-    def remove_stack(self):
-        self.removes.append("stack")
-        return {"action": "remove", "stack": "brain"}
+    def remove_stack(self, target="app"):
+        self.removes.append("stack" if target == "app" else target)
+        return {"action": "remove", "stack": "brain" if target == "app" else "brain_infra"}
 
     def list_tasks(self, service):
         return []
@@ -229,6 +229,37 @@ def test_scale_endpoint_sets_service_replicas(monkeypatch):
     assert response.status_code == 200
     assert response.json() == {"service": "inference", "action": "scale", "replicas": 3}
     assert services.scales == [("inference", 3)]
+
+
+def test_infra_publish_remove_and_apply_do_not_deploy_apps(monkeypatch):
+    monkeypatch.setenv("RAG_ADMIN_PASSWORD", "secret")
+    services = FakeServices()
+    configs = FakeConfigs()
+    configs.service = None
+    configs.requires_deploy = True
+    client = TestClient(create_app(services=services, configs=configs))
+    headers = {"Authorization": f"Bearer {_token('secret')}"}
+
+    response = client.post("/api/ops/stack/deploy?target=infra", headers=headers)
+    assert response.status_code == 200
+    assert response.json()["stack"] == "brain_infra"
+    response = client.post("/api/ops/stack/remove?target=infra", headers=headers)
+    assert response.status_code == 200
+    assert response.json()["stack"] == "brain_infra"
+    response = client.post("/api/ops/configs/apply", headers=headers, json={"name": "infra"})
+    assert response.status_code == 200
+    assert response.json()["deploy"]["stack"] == "brain_infra"
+    assert services.deploys == ["infra", "infra"]
+    assert services.removes == ["infra"]
+
+
+def test_unknown_deployment_target_is_rejected(monkeypatch):
+    monkeypatch.setenv("RAG_ADMIN_PASSWORD", "secret")
+    services = FakeServices()
+    client = TestClient(create_app(services=services, configs=FakeConfigs()))
+    response = client.post("/api/ops/stack/deploy?target=unknown", headers={"Authorization": f"Bearer {_token('secret')}"})
+    assert response.status_code == 422
+    assert services.deploys == []
 
 
 def _token(password: str) -> str:

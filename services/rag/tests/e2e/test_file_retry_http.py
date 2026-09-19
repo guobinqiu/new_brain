@@ -53,8 +53,10 @@ def test_failed_index_refreshes_presign_and_reuses_file_id(isolated_pg):
     storage.make_bucket(bucket)
 
     class Parser:
-        def parse_file(self, path, **kwargs):
-            return [{"type": "text", "text": Path(path).read_text()}]
+        def parse_file(self, presigned_url, **kwargs):
+            response = httpx.get(presigned_url)
+            response.raise_for_status()
+            return {"blocks": [{"type": "text", "text": response.text}], "file_size": len(response.content)}
 
     class Vector:
         documents = {}

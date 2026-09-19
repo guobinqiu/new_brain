@@ -3,6 +3,7 @@ set dotenv-path := "deploy/.env"
 
 CTRL_STACK := "brain_ctrl"
 DEPLOY_STACK := "brain"
+INFRA_STACK := "brain_infra"
 NETWORK := "brain-net"
 ROOT := justfile_directory()
 
@@ -11,6 +12,9 @@ ctrl action:
 
 deploy action:
 	just _deploy-{{action}}
+
+infra action:
+	just _infra-{{action}}
 
 _ctrl-up: _network-up
 	env PROJECT_ROOT={{quote(ROOT)}} docker stack deploy --with-registry-auth -c deploy/ctrl.yaml {{CTRL_STACK}}
@@ -23,6 +27,12 @@ _deploy-up: _network-up
 
 _deploy-down:
 	docker stack rm {{DEPLOY_STACK}}
+
+_infra-up: _network-up
+	env PROJECT_ROOT={{quote(ROOT)}} docker stack deploy --with-registry-auth -c deploy/infra.yaml {{INFRA_STACK}}
+
+_infra-down:
+	docker stack rm {{INFRA_STACK}}
 
 _network-up:
 	docker network inspect {{NETWORK}} >/dev/null 2>&1 || docker network create --driver overlay --attachable {{NETWORK}}

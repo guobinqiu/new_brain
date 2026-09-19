@@ -80,29 +80,3 @@ def test_sync_index_deadline_stops_next_stage(monkeypatch, endpoint):
     assert error.value.retryable is False
     assert writes == []
     assert deadline.request_timeout(60) == 60
-
-
-def test_download_presigned_file_uses_yaml_timeout(monkeypatch, tmp_path):
-    from services.rag.core.index import service
-    from shared.config import StorageConfig
-
-    calls = []
-
-    class Response:
-        content = b"hello"
-
-        def raise_for_status(self):
-            return None
-
-    def fake_get(url, timeout):
-        calls.append((url, timeout))
-        return Response()
-
-    monkeypatch.setenv("DOWNLOAD_TIMEOUT", "1")
-    monkeypatch.setattr(service.httpx, "get", fake_get)
-
-    path = tmp_path / "download.txt"
-    service.download_presigned_file("https://source/a.txt", path, StorageConfig(download_timeout=33))
-
-    assert calls == [("https://source/a.txt", 33)]
-    assert path.read_bytes() == b"hello"

@@ -60,9 +60,13 @@ def test_index_failure_crosses_http_hops_once(monkeypatch, failure):
         return PlainTextResponse("document", status_code=403 if failure == "download" else 200)
 
     @supplier.post("/v1/parse/file")
-    def parse(request: Request):
+    def parse(request: Request, body: dict):
         assert request.headers["traceparent"].split("-")[1] == "a" * 32
         calls["parser"] += 1
+        assert body["filename"] == "a.txt"
+        downloaded = httpx.get(body["presigned_url"])
+        if not downloaded.is_success:
+            return JSONResponse({"error": downloaded.text, "retryable": False, "traceId": "a" * 32}, status_code=502)
         if failure == "parser":
             return JSONResponse({"private": "document"}, status_code=500)
         return {"blocks": [{"type": "text", "text": "document"}]}

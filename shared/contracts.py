@@ -40,6 +40,11 @@ class ParserFormulaBlock(BaseModel):
 ParserBlock = Annotated[ParserTextBlock | ParserTableBlock | ParserFormulaBlock, Field(discriminator="type")]
 
 
+class ParseFileResponse(BaseModel):
+    blocks: list[ParserBlock]
+    file_size: int | None = Field(default=None, ge=0)
+
+
 class EmbeddingRequest(BaseModel):
     texts: list[str]
 
@@ -119,5 +124,5 @@ class Parser(Protocol):
     def stop(self) -> None:
         ...
 
-    def parse_file(self, filepath: str, *, original_filename: str | None = None) -> list[dict]:
+    def parse_file(self, presigned_url: str, *, filename: str) -> dict:
         ...

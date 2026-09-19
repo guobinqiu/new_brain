@@ -1,28 +1,25 @@
 parser:
+  download_timeout: 60
+
   mineru:
     enable: true
-    base_url: http://mineru_api_server:8000
-    timeout: 300 # 单次请求超时，单位秒
-    tier: standard
+    tier: basic # flash, basic, standard, advanced
+    parse_method: auto # auto, ocr, txt
+    image_analysis: false
+  
+  mineru_cloud:
+    enable: false
+    base_url: https://mineru.net
+    timeout: 300
+    model_version: vlm # 可选值: pipeline|vlm|MinerU-HTML
+    enable_formula: true
+    enable_table: true
+    language: ch
     retry:
       max_attempts: 3
       interval_seconds: 0.5
-    parse_method: auto # auto, ocr, txt
-    formula: true
-    table: true
 
-  # 解析效果一般不如mineru，但可作为备选方案  
-  docling:
-    enable: false
-    formula: true
-    table: true
-    # TableFormer 模式：fast 快但复杂表易失败；accurate 慢但对多列/图标表结构化强
-    table_mode: accurate
-  docling_vlm:
-    enable: false
-    model: granitedocling
-
-  # ============== prompt 偶尔可能返回不合法的json导致解析失败，依赖重试机制
+  # 基于 prompt 偶尔会返回非法json导致解析失败，需有重试机制
   volcengine:
     enable: false
     base_url: https://ark.cn-beijing.volces.com/api/v3

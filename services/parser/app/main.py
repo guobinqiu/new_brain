@@ -1,11 +1,8 @@
 from contextlib import asynccontextmanager
-import shutil
-import tempfile
-from pathlib import Path
 
-from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, HttpUrl, field_validator
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -15,7 +12,7 @@ from services.parser.service import ParserService
 from services.parser.common.validation import InvalidDocumentError
 from services.parser.app.config import load_parser_config
 from services.parser.common.schema import FormulaBlock, TableBlock, TextBlock
-from shared.contracts import ParserBlock, ParserFormulaBlock, ParserTableBlock, ParserTextBlock
+from shared.contracts import ParseFileResponse, ParserBlock, ParserFormulaBlock, ParserTableBlock, ParserTextBlock
 from shared.service_auth import require_service_api_key
 from shared.config import LoggingConfig
 from shared.logging_config import configure_logging
@@ -67,8 +64,15 @@ def ready():
     return {"status": "ready"}
 
 
-class ParseFileResponse(BaseModel):
-    blocks: list[ParserBlock]
+class ParseFileRequest(BaseModel):
+    presigned_url: str
+    filename: str = Field(min_length=1)
+
+    @field_validator("presigned_url")
+    @classmethod
+    def validate_url(cls, value: str) -> str:
+        HttpUrl(value)
+        return value
 
 
 def get_parser_service() -> ParserService:
@@ -80,24 +84,16 @@ def get_parser_service() -> ParserService:
 
 
 @app.post("/v1/parse/file", response_model=ParseFileResponse, response_model_exclude_none=True, dependencies=[Depends(require_service_api_key)])
-def parse_file(file: UploadFile = File(...)):
-    original_filename = file.filename or "upload"
-    suffix = Path(original_filename).suffix
+def parse_file(req: ParseFileRequest):
     try:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            temp_path = Path(tmpdir) / f"upload{suffix}"
-            with temp_path.open("wb") as temp_file:
-                shutil.copyfileobj(file.file, temp_file)
-            blocks = get_parser_service().parse_file(str(temp_path), original_filename=original_filename)
-        return ParseFileResponse(blocks=[_block_response(block) for block in blocks])
+        blocks, file_size = get_parser_service().parse_url(req.presigned_url, filename=req.filename)
+        return ParseFileResponse(blocks=[_block_response(block) for block in blocks], file_size=file_size)
     except (UpstreamServiceError, HTTPException):
         raise
     except Exception as exc:
         if isinstance(exc, (InvalidDocumentError, UnicodeDecodeError)):
             raise HTTPException(status_code=400, detail=str(exc) or None) from exc
         raise upstream_error("parser", exc) from exc
-    finally:
-        file.file.close()
 
 
 def _block_response(block) -> ParserBlock:

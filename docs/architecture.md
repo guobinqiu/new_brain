@@ -118,15 +118,11 @@ flowchart TB
     Route -->|文本与结构化文档| Native["原生读取"]
     Route -->|PDF| Select{"选择一个解析后端"}
     Select --> Ark["Volcengine · 方舟 API"]
-    Select --> MP["MinerU Pipeline"]
-    Select --> MV["MinerU VLM"]
-    Select --> DP["Docling Pipeline"]
-    Select --> DV["Docling VLM"]
+    Select --> MP["MinerU 本地 · 4.0"]
+    Select --> MV["MinerU Cloud"]
     Native --> Blocks["统一文档块"]
     MP --> Blocks
     MV --> Blocks
-    DP --> Blocks
-    DV --> Blocks
     Ark --> Blocks
     Blocks --> RAG["RAG API · 切块与索引"]
 ```

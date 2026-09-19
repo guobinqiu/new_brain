@@ -134,6 +134,24 @@ def test_remove_stack_runs_docker_cli():
     )]
 
 
+def test_infra_deploy_and_remove_use_independent_stack():
+    runner = FakeRunner()
+    manager = SwarmManager(docker=FakeDocker(), infra_stack="custom_infra", runner=runner)
+
+    assert manager.deploy_stack("infra") == {"action": "deploy", "stack": "custom_infra"}
+    assert manager.remove_stack("infra") == {"action": "remove", "stack": "custom_infra"}
+    assert runner.calls[0][0] == ["docker", "stack", "deploy", "--with-registry-auth", "-c", "deploy/infra.yaml", "custom_infra"]
+    assert runner.calls[1][0] == ["docker", "stack", "rm", "custom_infra"]
+
+
+def test_unknown_deployment_target_does_not_run_command():
+    runner = FakeRunner()
+    manager = SwarmManager(docker=FakeDocker(), runner=runner)
+    with pytest.raises(ValueError):
+        manager.deploy_stack("unknown")
+    assert runner.calls == []
+
+
 def test_rejects_unknown_service():
     manager = SwarmManager(docker=FakeDocker(), stack="brain")
 

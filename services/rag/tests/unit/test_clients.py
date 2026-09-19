@@ -27,16 +27,15 @@ def test_http_parser_client_parses_file(tmp_path):
 
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/v1/parse/file"
-        assert request.headers["content-type"].startswith("multipart/form-data")
-        assert b'filename="a.txt"' in request.content
-        assert b"hello parser" in request.content
-        return httpx.Response(200, json={"blocks": [{"type": "text", "text": "hello"}]})
+        assert request.headers["content-type"] == "application/json"
+        assert json.loads(request.content) == {"presigned_url": "https://source/a.txt", "filename": "a.txt"}
+        return httpx.Response(200, json={"blocks": [{"type": "text", "text": "hello"}], "file_size": 5})
 
     client = HttpParserClient("http://parser:7000", http_client=httpx.Client(transport=httpx.MockTransport(handler)))
 
-    blocks = client.parse_file(str(source), original_filename="a.txt")
+    result = client.parse_file("https://source/a.txt", filename="a.txt")
 
-    assert blocks == [{"type": "text", "text": "hello"}]
+    assert result == {"blocks": [{"type": "text", "text": "hello", "kind": "text"}], "file_size": 5}
 
 
 def test_http_parser_client_forwards_service_auth_and_traceparent(tmp_path):
@@ -56,7 +55,7 @@ def test_http_parser_client_forwards_service_auth_and_traceparent(tmp_path):
             api_key="service-key",
             http_client=httpx.Client(transport=httpx.MockTransport(handler)),
         )
-        assert client.parse_file(str(source)) == []
+        assert client.parse_file("https://source/a.txt", filename="a.txt") == {"blocks": []}
     finally:
         reset_traceparent(token)
 
@@ -71,7 +70,7 @@ def test_http_parser_client_maps_network_error_to_upstream_error(tmp_path):
     client = HttpParserClient("http://parser:7000", http_client=httpx.Client(transport=httpx.MockTransport(handler)))
 
     try:
-        client.parse_file(str(source), original_filename="a.txt")
+        client.parse_file("https://source/a.txt", filename="a.txt")
     except UpstreamServiceError as exc:
         assert exc.status_code == 503
         assert exc.retryable is True

@@ -50,18 +50,17 @@ RUN --mount=type=bind,source=services/ops/pyproject.toml,target=/app/services/op
 CMD ["/app/.venv/bin/uvicorn", "services.ops.app.main:app", "--host", "0.0.0.0", "--port", "7002", "--reload"]
 
 FROM base AS parser
-RUN apt-get update -o Acquire::Retries=5 -o Acquire::http::Timeout=30 \
-  && apt-get install -y --no-install-recommends --fix-missing \
-  -o Acquire::Retries=5 \
-  -o Acquire::http::Timeout=30 \
-  libreoffice \
-  && rm -rf /var/lib/apt/lists/*
+ARG SERVICE_EXTRA=cpu
 RUN --mount=type=bind,source=services/parser/pyproject.toml,target=/app/services/parser/pyproject.toml,readonly \
   --mount=type=bind,source=services/parser/uv.lock,target=/app/services/parser/uv.lock,readonly \
   if [ "$USE_CN_MIRROR" = "true" ]; then \
-  cd /app/services/parser && UV_DEFAULT_INDEX="$UV_DEFAULT_INDEX_CN" uv sync --frozen --no-install-project; \
+  cd /app/services/parser && \
+  uv export --frozen --no-emit-project --extra "$SERVICE_EXTRA" -o /tmp/parser-requirements.txt > /dev/null && \
+  uv venv "$UV_PROJECT_ENVIRONMENT" && \
+  uv pip sync --python "$UV_PROJECT_ENVIRONMENT/bin/python" --require-hashes --default-index "$UV_DEFAULT_INDEX_CN" /tmp/parser-requirements.txt && \
+  rm /tmp/parser-requirements.txt; \
   else \
-  cd /app/services/parser && uv sync --frozen --no-install-project; \
+  cd /app/services/parser && uv sync --frozen --no-install-project --extra "$SERVICE_EXTRA"; \
   fi
 CMD ["/app/.venv/bin/uvicorn", "services.parser.app.main:app", "--host", "0.0.0.0", "--port", "7000", "--reload"]
 

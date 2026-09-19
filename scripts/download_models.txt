@@ -10,31 +10,18 @@ modelscope download BAAI/bge-reranker-base --local-dir models/BAAI/bge-reranker-
 modelscope download BAAI/bge-reranker-v2-m3 --local-dir models/BAAI/bge-reranker-v2-m3
 modelscope download BAAI/bge-reranker-large --local-dir models/BAAI/bge-reranker-large
 
-# MinerU 模型
-MINERU_TOOLS_CONFIG_JSON=models/mineru/mineru.json mineru-models-download -s modelscope -m pipeline
-MINERU_TOOLS_CONFIG_JSON=models/mineru/mineru.json mineru-models-download -s modelscope -m vlm
+# MinerU 4.0 模型；使用 Parser 环境中的 mineru-kit，与运行时共用模型根目录
+export MINERU_MODEL_BASE_DIR="$PWD/models/mineru"
 
-# Docling standard pipeline 默认模型集合：layout + tableformer + code_formula + picture_classifier + rapidocr
-docling-tools models download -o models/docling
+# basic：仅小模型；后端自动按当前机器选择
+uv run --project services/parser --python 3.11 mineru-kit models download --tier basic --source modelscope
+uv run --project services/parser --python 3.11 mineru-kit models verify --tier basic
 
-# Docling standard pipeline 单项模型
-docling-tools models download -o models/docling layout
-docling-tools models download -o models/docling tableformer
-docling-tools models download -o models/docling tableformerv2
-docling-tools models download -o models/docling code_formula
-docling-tools models download -o models/docling picture_classifier
-docling-tools models download -o models/docling rapidocr
-docling-tools models download -o models/docling easyocr
+# standard/advanced：小模型 + VLM；以下按部署目标二选一
+# CPU：运行时同样设置 MINERU_MODEL_SMALL_BACKEND=onnx、MINERU_MODEL_VLM_ENGINE=llama-cpp
+uv run --project services/parser --python 3.11 mineru-kit models download --tier standard --small-backend onnx --vlm-engine llama-cpp --source modelscope
+uv run --project services/parser --python 3.11 mineru-kit models verify --tier standard --small-backend onnx --vlm-engine llama-cpp
 
-# Docling VLM 模型
-docling-tools models download -o models/docling granitedocling
-docling-tools models download -o models/docling granitedocling_mlx
-docling-tools models download -o models/docling smoldocling
-docling-tools models download -o models/docling smoldocling_mlx
-
-# Docling 可选视觉、图表、OCR 模型
-docling-tools models download -o models/docling smolvlm
-docling-tools models download -o models/docling granite_vision
-docling-tools models download -o models/docling granite_chart_extraction
-docling-tools models download -o models/docling granite_chart_extraction_v4
-docling-tools models download -o models/docling nemotron_ocr_v2
+# NVIDIA GPU：运行时同样设置 MINERU_MODEL_SMALL_BACKEND=torch、MINERU_MODEL_VLM_ENGINE=vllm
+uv run --project services/parser --python 3.11 --extra gpu mineru-kit models download --tier standard --small-backend torch --vlm-engine vllm --source modelscope
+uv run --project services/parser --python 3.11 --extra gpu mineru-kit models verify --tier standard --small-backend torch --vlm-engine vllm

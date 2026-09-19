@@ -70,7 +70,7 @@ def test_parse_md_embedded_image_does_not_invoke_document_backend(tmp_path, monk
     import services.parser.service as service_mod
     from PIL import Image
 
-    class FailingDoclingParser:
+    class FailingMineruParser:
         ready = True
 
         def __init__(self, config):
@@ -85,7 +85,7 @@ def test_parse_md_embedded_image_does_not_invoke_document_backend(tmp_path, monk
         def parse_file(self, filepath, *, original_filename=None):
             raise AssertionError("markdown should not be parsed by document backend")
 
-    monkeypatch.setattr(service_mod, "DoclingPipelineDocumentParser", FailingDoclingParser)
+    monkeypatch.setattr(service_mod, "MineruDocumentParser", FailingMineruParser)
     docs_dir = tmp_path / "docs"
     docs_dir.mkdir()
     outside_image = tmp_path / "outside.png"
@@ -101,11 +101,11 @@ def test_parse_md_embedded_image_does_not_invoke_document_backend(tmp_path, monk
 def test_parse_pdf_routes_to_active_document_backend(tmp_path):
     from services.parser.common.schema import TextBlock
     from services.parser.service import ParserService
-    from shared.config import MineruParserConfig, ParserConfig
+    from shared.config import ParserConfig
 
     pdf_file = tmp_path / "test.pdf"
     _create_minimal_pdf(str(pdf_file), "PDF test")
-    service = ParserService(ParserConfig(active="mineru", mineru=MineruParserConfig()))
+    service = ParserService(ParserConfig(active="mineru"))
     calls = []
 
     class FakeDocumentParser:
@@ -123,46 +123,34 @@ def test_parse_pdf_routes_to_active_document_backend(tmp_path):
     assert blocks == [TextBlock("PDF test")]
 
 
-def test_parse_legacy_office_routes_through_conversion(tmp_path, monkeypatch):
-    import services.parser.service as service_mod
+def test_parse_legacy_office_rejects_local_input(tmp_path):
+    from services.parser.service import ParserService
     from services.parser.common.schema import TextBlock
+    from shared.config import ParserConfig
 
     doc_file = tmp_path / "legacy.doc"
     doc_file.write_text("legacy", encoding="utf-8")
-    converted_file = tmp_path / "converted.docx"
-    converted_file.write_text("converted", encoding="utf-8")
     calls = []
 
-    class FakeConversion:
-        def __init__(self, filepath, target_suffix):
-            self.filepath = filepath
-            self.target_suffix = target_suffix
+    class FakeDocumentBackend:
+        ready = True
 
-        def __enter__(self):
-            calls.append((self.filepath, self.target_suffix))
-            return converted_file
+        def parse_file(self, filepath, *, original_filename=None):
+            calls.append((filepath, original_filename))
+            return [TextBlock("legacy remote")]
 
-        def __exit__(self, exc_type, exc, tb):
-            return False
+    service = ParserService(ParserConfig())
+    service.pdf_parser = FakeDocumentBackend()
 
-    class FakeDocxParser:
-        def parse(self, filepath):
-            return [TextBlock(f"converted:{filepath}")]
-
-    monkeypatch.setattr("services.parser.documents.parser.convert_legacy_office_file", FakeConversion)
-    service = service_mod.ParserService(service_mod.ParserConfig())
-    service.document_parser.parsers[".docx"] = FakeDocxParser()
-
-    blocks = service.parse_file(str(doc_file))
-
-    assert calls == [(str(doc_file), ".docx")]
-    assert blocks == [TextBlock(f"converted:{converted_file}")]
+    with pytest.raises(ValueError, match="Unsupported file type"):
+        service.parse_file(str(doc_file), original_filename="legacy.doc")
+    assert calls == []
 
 
 def test_parse_unsupported_file_type_raises_before_document_backend(tmp_path, monkeypatch):
     import services.parser.service as service_mod
 
-    class FailingDoclingParser:
+    class FailingMineruParser:
         ready = True
 
         def __init__(self, config):
@@ -177,7 +165,7 @@ def test_parse_unsupported_file_type_raises_before_document_backend(tmp_path, mo
         def parse_file(self, filepath, *, original_filename=None):
             raise AssertionError("unsupported files should not reach document backend")
 
-    monkeypatch.setattr(service_mod, "DoclingPipelineDocumentParser", FailingDoclingParser)
+    monkeypatch.setattr(service_mod, "MineruDocumentParser", FailingMineruParser)
     path = tmp_path / "data.png"
     path.write_text("not supported", encoding="utf-8")
 

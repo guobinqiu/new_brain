@@ -5,7 +5,7 @@ from typing import Any
 
 import yaml
 
-from shared.config import DoclingParserConfig, DoclingVlmParserConfig, MineruParserConfig, ParserConfig, RetryConfig, VolcengineParserConfig
+from shared.config import MineruCloudParserConfig, MineruParserConfig, ParserConfig, RetryConfig, VolcengineParserConfig
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -16,13 +16,24 @@ def load_parser_config(config_file: str | Path | None = None) -> ParserConfig:
     with _resolve_config_path(config_file).open("r", encoding="utf-8") as f:
         raw = yaml.safe_load(f) or {}
     parser = raw.get("parser") or {}
-    active = _select_enabled_backend(parser, ("mineru", "docling", "docling_vlm", "volcengine"))
+    active = _select_enabled_backend(parser, ("mineru", "mineru_cloud", "volcengine"))
     volcengine = parser.get("volcengine") or {}
+    cloud = parser.get("mineru_cloud") or {}
     return ParserConfig(
         active=active,
+        download_timeout=int(parser.get("download_timeout", 60)),
         mineru=_parse_mineru_config(parser.get("mineru") or {}),
-        docling=_parse_docling_config(parser.get("docling") or {}),
-        docling_vlm=_parse_docling_vlm_config(parser.get("docling_vlm") or {}),
+        mineru_cloud=MineruCloudParserConfig(
+            enable=active == "mineru_cloud",
+            base_url=cloud.get("base_url", "https://mineru.net"),
+            timeout=int(cloud.get("timeout", 300)),
+            model_version=cloud.get("model_version", "vlm"),
+            enable_formula=bool(cloud.get("enable_formula", True)),
+            enable_table=bool(cloud.get("enable_table", True)),
+            language=cloud.get("language", "ch"),
+            retry=_parse_retry_config(cloud.get("retry")),
+            api_key=_env_value("MINERU_API_KEY"),
+        ),
         volcengine=VolcengineParserConfig(
             enable=active == "volcengine",
             model=volcengine["model"] if active == "volcengine" else volcengine.get("model"),
@@ -39,35 +50,17 @@ def load_parser_config(config_file: str | Path | None = None) -> ParserConfig:
 
 
 def _parse_mineru_config(raw: dict[str, Any]) -> MineruParserConfig:
+    tier = str(raw.get("tier", "basic"))
+    parse_method = str(raw.get("parse_method", "auto"))
+    if tier not in {"flash", "basic", "standard", "advanced"}:
+        raise ValueError(f"unsupported mineru.tier: {tier}")
+    if parse_method not in {"auto", "ocr", "txt"}:
+        raise ValueError(f"unsupported mineru.parse_method: {parse_method}")
     return MineruParserConfig(
         enable=bool(raw.get("enable", False)),
-        parse_method=str(raw.get("parse_method", "auto")),
-        formula=bool(raw.get("formula", True)),
-        table_enable=bool(raw.get("table", True)),
-        base_url=raw.get("base_url"),
-        timeout=int(raw.get("timeout", 300)),
-        tier=str(raw.get("tier", "standard")),
-        retry=_parse_retry_config(raw.get("retry")),
-        api_key=_env_value("MINERU_API_KEY"),
-    )
-
-
-def _parse_docling_config(raw: dict[str, Any]) -> DoclingParserConfig:
-    table_mode = str(raw.get("table_mode", "accurate"))
-    if table_mode not in {"fast", "accurate"}:
-        raise ValueError(f"unsupported docling.table_mode: {table_mode}, supported values: fast, accurate")
-    return DoclingParserConfig(
-        enable=bool(raw.get("enable", False)),
-        formula=bool(raw.get("formula", True)),
-        table_enable=bool(raw.get("table", True)),
-        table_mode=table_mode,
-    )
-
-
-def _parse_docling_vlm_config(raw: dict[str, Any]) -> DoclingVlmParserConfig:
-    return DoclingVlmParserConfig(
-        enable=bool(raw.get("enable", False)),
-        model=raw.get("model") or "granitedocling",
+        tier=tier,
+        parse_method=parse_method,
+        image_analysis=bool(raw.get("image_analysis", False)),
     )
 
 

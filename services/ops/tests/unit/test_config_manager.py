@@ -70,3 +70,11 @@ def test_config_manager_rejects_unknown_or_invalid_config(tmp_path):
 
     with pytest.raises(ValueError):
         manager.validate("deploy_env", "bad env line")
+
+
+def test_config_manager_manages_infra_separately(tmp_path):
+    manager = ConfigManager(tmp_path)
+    item = manager.write("infra", "services: {}\n")
+    assert item.path == "deploy/infra.yaml"
+    assert item.requires_deploy is True
+    assert not (tmp_path / "deploy/deploy.yaml").exists()

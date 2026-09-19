@@ -88,12 +88,12 @@ def test_index_file_uses_application_parser(tmp_path):
     calls = []
 
     class Parser:
-        def parse_file(self, path, *, original_filename):
-            calls.append((path, original_filename))
-            return [
+        def parse_file(self, presigned_url, *, filename):
+            calls.append((presigned_url, filename))
+            return {"blocks": [
                 {"type": "text", "text": "hello"},
                 {"type": "text", "text": "world"},
-            ]
+            ], "file_size": 5}
 
     class VectorClient:
         def add_file_chunks(self, chunks, file_id):
@@ -108,10 +108,11 @@ def test_index_file_uses_application_parser(tmp_path):
     state.vector_client = VectorClient()
 
     with app_collection("imsdom"):
-        count = index_service.index_file(state, "file-1", path, "a.txt")
+        count, size = index_service.index_file(state, "file-1", "https://source/a.txt", "a.txt")
 
     assert count == 2
-    assert calls[0] == (str(path), "a.txt")
+    assert size == 5
+    assert calls[0] == ("https://source/a.txt", "a.txt")
     assert calls[1][0] == "vector"
     chunks = calls[1][1]
     assert [chunk["content"] for chunk in chunks] == ["hello", "world"]

@@ -4,6 +4,7 @@ import os
 import subprocess
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Literal
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Query
@@ -62,6 +63,7 @@ def create_app(*, services=None, configs=None) -> FastAPI:
         DockerEngineClient(),
         stack=os.getenv("STACK", "brain"),
         ctrl_stack=os.getenv("CTRL_STACK", "brain_ctrl"),
+        infra_stack=os.getenv("INFRA_STACK", "brain_infra"),
         project_root=project_root,
         host_project_root=os.getenv("HOST_PROJECT_ROOT"),
     )
@@ -112,12 +114,12 @@ def create_app(*, services=None, configs=None) -> FastAPI:
         return _service_action(lambda: {"role": role, "command": app.state.services.join_command(role)})
 
     @app.post("/api/ops/stack/deploy", dependencies=[Depends(require_admin_jwt)])
-    def deploy_stack():
-        return _service_action(lambda: app.state.services.deploy_stack())
+    def deploy_stack(target: Literal["app", "infra"] = "app"):
+        return _service_action(lambda: app.state.services.deploy_stack(target))
 
     @app.post("/api/ops/stack/remove", dependencies=[Depends(require_admin_jwt)])
-    def remove_stack():
-        return _service_action(lambda: app.state.services.remove_stack())
+    def remove_stack(target: Literal["app", "infra"] = "app"):
+        return _service_action(lambda: app.state.services.remove_stack(target))
 
     @app.get("/api/ops/configs", dependencies=[Depends(require_admin_jwt)])
     def list_configs():
@@ -164,7 +166,7 @@ def _apply_config(configs, services, name: str) -> dict:
         payload["rollout"] = services.rollout(config.service)
         payload["deploy_required"] = False
     else:
-        payload["deploy"] = services.deploy_stack()
+        payload["deploy"] = services.deploy_stack("infra" if name == "infra" else "app")
         payload["deploy_required"] = False
     return payload
 

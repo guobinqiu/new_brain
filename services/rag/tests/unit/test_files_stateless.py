@@ -49,13 +49,8 @@ def stateless(monkeypatch, tmp_path):
         def delete_file_chunks(self, file_id):
             return len(self.documents.pop((current_app_id(), file_id), []))
 
-    def download(url, path, storage):
-        assert storage.download_timeout == 60
-        Path(path).write_text("first" if url.endswith("first") else "updated", encoding="utf-8")
-
     parser = Mock()
-    parser.parse_file.side_effect = lambda path, **kwargs: [{"type": "text", "text": Path(path).read_text()}]
-    monkeypatch.setattr(index_service, "download_presigned_file", download)
+    parser.parse_file.side_effect = lambda url, **kwargs: {"blocks": [{"type": "text", "text": "first" if url.endswith("first") else "updated"}]}
     minio = Mock(side_effect=AssertionError("external presigned indexing must not use Minio"))
     monkeypatch.setattr(service, "Minio", minio)
     state = SimpleNamespace(
@@ -319,8 +314,8 @@ def test_index_failure_stops_later_steps_without_retry(stateless, monkeypatch, s
     state.vector_client.collections.add("tenant_a")
     state.db_client = Mock()
     if stage == "download":
-        operation = Mock(side_effect=httpx.ConnectError("secret signed url"))
-        monkeypatch.setattr(index_service, "download_presigned_file", operation)
+        operation = state.parser_client.parse_file
+        operation.side_effect = UpstreamServiceError(service="parser", error="download failed", retryable=True, status_code=503)
     elif stage == "parse":
         operation = state.parser_client.parse_file
         operation.side_effect = RuntimeError("private document")
@@ -338,8 +333,6 @@ def test_index_failure_stops_later_steps_without_retry(stateless, monkeypatch, s
     assert operation.call_count == 1
     state.db_client.upsert_file.assert_not_called()
     assert state.vector_client.documents == {}
-    if stage == "download":
-        state.parser_client.parse_file.assert_not_called()
 
 
 def test_stateless_file_listing_reports_unavailable(stateless):
