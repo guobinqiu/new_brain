@@ -80,7 +80,7 @@ Content-Type: application/json
 | `POST` | `/api/ops/stack/deploy?target=app` | 发布应用；`target=infra` 仅发布基础服务，省略时默认为 app |
 | `POST` | `/api/ops/stack/remove?target=app` | 删除选定 stack；支持 app/infra，不删除绑定目录数据和外部网络 |
 
-`/api/ops/services/scale` 请求体为 `{"service":"brain_inference","replicas":3}`，仅用于标记 `group=app` 的服务。所有 service 参数使用 Swarm 的实际服务名。`configs/{name}` 支持 `rag`、`parser`、`inference`、`llm`、`deploy_env`、`stack`、`infra`。保存配置只写文件；`POST /api/ops/configs/apply` 请求体为 `{"name":"inference"}`，服务配置会 rollout 对应 service，`stack` 和 `deploy_env` 发布应用 stack，`infra` 发布基础服务 stack。
+`/api/ops/services/scale` 请求体为 `{"service":"brain_inference","replicas":3}`，仅用于标记 `group=app` 的服务。所有 service 参数使用 Swarm 的实际服务名。`configs/{name}` 支持 `rag`、`parser`、`inference`、`llm`、`env`、`deploy`、`infra`。保存配置只写文件；`POST /api/ops/configs/apply` 请求体为 `{"name":"inference"}`，服务配置会 rollout 对应 service，`deploy` 和 `env` 发布应用 stack，`infra` 发布基础服务 stack。
 
 `target=app` 使用 `deploy/deploy.yaml` 和 `STACK`（默认 `brain`）；`target=infra` 使用 `deploy/infra.yaml` 和 `INFRA_STACK`（默认 `brain_infra`）。两者共用 `deploy/.env`，修改其中的基础服务变量后需单独发布 infra；发布 app 不会更新 infra。未知 target 返回 422。旧的合并部署迁移步骤见 README。
 

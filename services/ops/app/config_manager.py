@@ -31,8 +31,8 @@ CONFIG_SPECS = {
     "parser": ConfigSpec(name="parser", path="services/parser/config/parser.yaml", service="brain_parser"),
     "inference": ConfigSpec(name="inference", path="services/inference/config/inference.yaml", service="brain_inference"),
     "llm": ConfigSpec(name="llm", path="services/llm/config/llm.yaml", service="brain_llm"),
-    "deploy_env": ConfigSpec(name="deploy_env", path="deploy/.env", service=None, format="env", requires_deploy=True),
-    "stack": ConfigSpec(name="stack", path="deploy/deploy.yaml", service=None, requires_deploy=True),
+    "env": ConfigSpec(name="env", path="deploy/.env", service=None, format="env", requires_deploy=True),
+    "deploy": ConfigSpec(name="deploy", path="deploy/deploy.yaml", service=None, requires_deploy=True),
     "infra": ConfigSpec(name="infra", path="deploy/infra.yaml", service=None, requires_deploy=True),
 }
 

@@ -147,7 +147,7 @@ def test_saving_deploy_config_only_marks_deploy_required(monkeypatch):
     client = TestClient(app)
 
     response = client.put(
-        "/api/ops/configs/stack",
+        "/api/ops/configs/deploy",
         headers={"Authorization": f"Bearer {_token('secret')}"},
         json={"content": "services:\n  rag:\n    image: brain-rag:dev\n"},
     )
@@ -173,7 +173,7 @@ def test_applying_deploy_config_deploys_stack(monkeypatch):
     response = client.post(
         "/api/ops/configs/apply",
         headers={"Authorization": f"Bearer {_token('secret')}"},
-        json={"name": "stack"},
+        json={"name": "deploy"},
     )
 
     assert response.status_code == 200

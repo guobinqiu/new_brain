@@ -25,38 +25,38 @@ def test_config_manager_reads_and_writes_allowed_config(tmp_path):
     assert (path / "inference.yaml").read_text(encoding="utf-8") == "tei:\n  enable: true\n"
 
 
-def test_config_manager_manages_deploy_env_without_yaml_validation(tmp_path):
+def test_config_manager_manages_env_without_yaml_validation(tmp_path):
     root = tmp_path
     deploy_path = root / "deploy"
     deploy_path.mkdir()
     (deploy_path / ".env").write_text("DATABASE_URL=postgresql://rag:rag@host/rag\n", encoding="utf-8")
     manager = ConfigManager(root)
 
-    item = manager.read("deploy_env")
-    assert item.name == "deploy_env"
+    item = manager.read("env")
+    assert item.name == "env"
     assert item.path == "deploy/.env"
     assert item.service is None
     assert item.requires_deploy is True
 
-    manager.validate("deploy_env", "DATABASE_URL=postgresql://rag:rag@host/rag\nVALUE=[\n")
-    manager.write("deploy_env", "A=1\n# comment\nEMPTY=\n")
+    manager.validate("env", "DATABASE_URL=postgresql://rag:rag@host/rag\nVALUE=[\n")
+    manager.write("env", "A=1\n# comment\nEMPTY=\n")
 
     assert (deploy_path / ".env").read_text(encoding="utf-8") == "A=1\n# comment\nEMPTY=\n"
 
 
-def test_config_manager_manages_stack_yaml_as_deploy_config(tmp_path):
+def test_config_manager_manages_deploy_yaml_as_deploy_config(tmp_path):
     root = tmp_path
     deploy_path = root / "deploy"
     deploy_path.mkdir()
     (deploy_path / "deploy.yaml").write_text("services:\n  rag:\n    image: brain-rag:dev\n", encoding="utf-8")
     manager = ConfigManager(root)
 
-    item = manager.read("stack")
-    assert item.name == "stack"
+    item = manager.read("deploy")
+    assert item.name == "deploy"
     assert item.path == "deploy/deploy.yaml"
     assert item.service is None
     assert item.requires_deploy is True
-    manager.validate("stack", "services:\n  rag:\n    image: brain-rag:dev\n")
+    manager.validate("deploy", "services:\n  rag:\n    image: brain-rag:dev\n")
 
 
 def test_config_manager_rejects_unknown_or_invalid_config(tmp_path):
@@ -69,7 +69,7 @@ def test_config_manager_rejects_unknown_or_invalid_config(tmp_path):
         manager.validate("inference", "embedded: [")
 
     with pytest.raises(ValueError):
-        manager.validate("deploy_env", "bad env line")
+        manager.validate("env", "bad env line")
 
 
 def test_config_manager_manages_infra_separately(tmp_path):

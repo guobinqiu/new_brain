@@ -212,7 +212,7 @@ const logsService = ref('')
 const serviceLogs = ref('')
 
 const currentConfig = computed(() => configs.value.find(item => item.name === selectedConfig.value))
-const deployTarget = computed(() => ({ stack: 'app', infra: 'infra' })[selectedConfig.value])
+const deployTarget = computed(() => ({ deploy: 'app', infra: 'infra' })[selectedConfig.value])
 const deployConfigs = computed(() => configs.value.filter(item => item.requires_deploy))
 const serviceConfigs = computed(() => configs.value.filter(item => !item.requires_deploy))
 const controlServices = computed(() => services.value.filter(item => item.group === 'ctrl'))
@@ -226,8 +226,8 @@ function portsText(ports) {
 
 function configLabel(item) {
   if (!item) return '-'
-  if (item.name === 'deploy_env') return t('ops.environment')
-  if (item.name === 'stack') return t('ops.tabs.appServices')
+  if (item.name === 'env') return t('ops.environment')
+  if (item.name === 'deploy') return t('ops.tabs.appServices')
   if (item.name === 'infra') return t('ops.tabs.infraServices')
   return item.requires_deploy ? item.path : item.service || item.name
 }
