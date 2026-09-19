@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 from pathlib import Path
 
@@ -70,30 +69,26 @@ def _apply_environment(raw: dict) -> None:
         auth["apps"] = []
     else:
         password = os.getenv("RAG_ADMIN_PASSWORD", "")
-        auth["apps"] = _load_app_credentials()
+        auth["apps"] = _load_app_credentials(auth.get("apps", []))
     auth.setdefault("admin", {})["password"] = password
     _apply_database_secret(raw)
 
 
-def _load_app_credentials() -> list[dict[str, str]]:
-    try:
-        apps = json.loads(os.getenv("RAG_APPS", "[]"))
-    except json.JSONDecodeError:
-        raise ValueError("RAG_APPS must be a JSON array of app credentials") from None
+def _load_app_credentials(apps: list) -> list[dict[str, str]]:
     if not isinstance(apps, list):
-        raise ValueError("RAG_APPS must be a JSON array of app credentials")
+        raise ValueError("auth.apps must be a list of app credentials")
     app_ids = set()
     api_keys = set()
     credentials = []
     for app in apps:
         if not isinstance(app, dict) or not isinstance(app.get("app_id"), str):
-            raise ValueError("RAG_APPS entries require an app_id string")
+            raise ValueError("auth.apps entries require an app_id string")
         app_id = validate_app_id(app["app_id"])
         api_key = app.get("api_key")
         if not isinstance(api_key, str) or not api_key.strip():
-            raise ValueError("RAG_APPS entries require a nonempty api_key")
+            raise ValueError("auth.apps entries require a nonempty api_key")
         if app_id in app_ids or api_key in api_keys:
-            raise ValueError("RAG_APPS app_id and api_key must each be unique")
+            raise ValueError("auth.apps app_id and api_key must each be unique")
         app_ids.add(app_id)
         api_keys.add(api_key)
         credentials.append({"app_id": app_id, "api_key": api_key})

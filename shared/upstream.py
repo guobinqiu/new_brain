@@ -16,7 +16,7 @@ class UpstreamServiceError(RuntimeError):
         self.trace_id = trace_id or get_trace_id()
 
     def detail(self) -> dict:
-        return ErrorResponse(error=self.error, retryable=self.retryable, traceId=self.trace_id).model_dump()
+        return ErrorResponse(error=self.error, service=self.service, retryable=self.retryable, traceId=self.trace_id).model_dump()
 
 
 def _external_error(detail: object) -> str | None:
@@ -57,6 +57,6 @@ def internal_error(service: str, exc: Exception) -> UpstreamServiceError:
     except ValueError:
         return UpstreamServiceError(service=service, error=exc.response.text, retryable=False, status_code=502)
     return UpstreamServiceError(
-        service=service, error=detail.error, retryable=detail.retryable,
+        service=detail.service or service, error=detail.error, retryable=detail.retryable,
         status_code=exc.response.status_code, trace_id=detail.traceId,
     )

@@ -4,10 +4,11 @@ from shared.contracts import ErrorResponse, ParserBlock, ParserTextBlock, Parser
 
 
 def test_error_response_carries_error_trace_and_retryable():
-    response = ErrorResponse(error="unsupported", traceId="a" * 32, retryable=False)
+    response = ErrorResponse(error="unsupported", service="parser", traceId="a" * 32, retryable=False)
 
     assert response.model_dump() == {
         "error": "unsupported",
+        "service": "parser",
         "traceId": "a" * 32,
         "retryable": False,
     }

@@ -175,7 +175,7 @@ mineru:
    just push parser
    ```
 
-   `IMAGE_TAG` 是所有应用镜像共用的标签。执行整套应用部署前，确认其他应用对应的 `amd64-gpu` 镜像也已存在于仓库。`--reload` 和 rollout 不会给旧镜像安装新依赖。
+   `IMAGE_TAG` 是所有应用镜像共用的标签。执行整套应用部署前，确认其他应用对应的 `amd64-gpu` 镜像也已存在于仓库。修改挂载的代码或应用配置后需 rollout；依赖变化仍需重新构建镜像，rollout 不会给旧镜像安装新依赖。
 
 3. 下载并校验 standard 模型。
 
@@ -257,6 +257,7 @@ POST /api/v1/rag/files
 | --------- | ------- | ----------------- |
 | success   | boolean | 固定为 `true`     |
 | error     | null    | 成功时为空        |
+| service   | null    | 成功时为空        |
 | retryable | boolean | 固定为 `false`    |
 | traceId   | string  | 本次请求 trace ID |
 | file_id   | string  | 文件 ID           |
@@ -267,6 +268,7 @@ POST /api/v1/rag/files
 | --------- | ------- | ------------------------ |
 | success   | boolean | 固定为 `false`           |
 | error     | string  | 原始错误信息             |
+| service   | string  | 错误所属服务或组件，如 parser、inference、vector、database |
 | retryable | boolean | 当前错误是否建议上游重试 |
 | traceId   | string  | 本次请求 trace ID        |
 | file_id   | string  | 文件 ID                  |
@@ -303,6 +305,7 @@ curl -X POST http://localhost:5175/api/v1/rag/files \
 {
   "success": true,
   "error": null,
+  "service": null,
   "retryable": false,
   "traceId": "8fbf6f4f7d5146b7a3b0eaa2bb84fb6c",
   "file_id": "file-001"
@@ -315,6 +318,7 @@ curl -X POST http://localhost:5175/api/v1/rag/files \
 {
   "success": false,
   "error": "parser returned HTTP 503",
+  "service": "parser",
   "retryable": true,
   "traceId": "7c4909520441497e9aa26aa258c76f31",
   "file_id": "file-001"
@@ -395,6 +399,7 @@ curl -X POST http://localhost:5175/api/v1/rag/files/batch \
     {
       "success": true,
       "error": null,
+      "service": null,
       "retryable": false,
       "traceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "file_id": "file-001"
@@ -402,6 +407,7 @@ curl -X POST http://localhost:5175/api/v1/rag/files/batch \
     {
       "success": true,
       "error": null,
+      "service": null,
       "retryable": false,
       "traceId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "file_id": "file-002"
@@ -419,6 +425,7 @@ curl -X POST http://localhost:5175/api/v1/rag/files/batch \
     {
       "success": true,
       "error": null,
+      "service": null,
       "retryable": false,
       "traceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "file_id": "file-001"
@@ -426,6 +433,7 @@ curl -X POST http://localhost:5175/api/v1/rag/files/batch \
     {
       "success": false,
       "error": "inference returned HTTP 503",
+      "service": "inference",
       "retryable": true,
       "traceId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "file_id": "file-002"
@@ -523,6 +531,7 @@ curl -X POST http://localhost:5175/api/v1/rag/search \
 ```json
 {
   "error": "sparse search is not configured",
+  "service": "rag",
   "retryable": false,
   "traceId": "94f8f2dab8a2400587153d69912bea48"
 }
@@ -578,6 +587,7 @@ curl -X DELETE http://localhost:5175/api/v1/rag/files/file-001 \
 ```json
 {
   "error": "Fail connecting to vector database",
+  "service": "rag",
   "retryable": true,
   "traceId": "d93fc7e6fe3541cb96c1f7e421c12eea"
 }

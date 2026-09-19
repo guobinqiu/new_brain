@@ -8,7 +8,6 @@ pytestmark = pytest.mark.unit
 def config_environment(monkeypatch):
     monkeypatch.setenv("RAG_ADMIN_PASSWORD", "dummy-admin-password")
     monkeypatch.delenv("DATABASE_URL", raising=False)
-    monkeypatch.delenv("RAG_APPS", raising=False)
     for name in ("SERVICE_API_KEY", "PARSER_API_KEY", "INFERENCE_API_KEY", "SILICONFLOW_CN_API_KEY", "SILICONFLOW_INTL_API_KEY", "QDRANT_API_KEY", "MILVUS_TOKEN", "QDRANT_CLOUD_API_KEY", "MILVUS_CLOUD_TOKEN"):
         monkeypatch.delenv(name, raising=False)
     for name, value in {
@@ -42,7 +41,7 @@ def _base_config(vector: str = "qdrant") -> dict:
     return {
         "search": {"top_k": 5, "rerank_fetch_k": 20, "rerank": True},
         "auth": {"admin": {"username": "admin"}},
-        "storage": {"endpoint_url": "https://storage.example:9000", "bucket": "documents", "download_timeout": 44},
+        "storage": {"endpoint_url": "https://storage.example:9000", "bucket": "documents", "presign_timeout": 44},
         "logging": {"level": "WARNING", "loki_url": "http://logs:3100"},
         "api": {
             "index_timeout": 222,
@@ -103,7 +102,7 @@ def test_load_config_file_reads_service_bound_qdrant_config(tmp_path, monkeypatc
     assert config.search.rerank is True
     assert config.storage.endpoint_url == "https://storage.example:9000"
     assert config.storage.bucket == "documents"
-    assert config.storage.download_timeout == 44
+    assert config.storage.presign_timeout == 44
     assert config.logging.loki_url == "http://logs:3100"
     assert config.api.index_timeout == 222
     assert config.api.batch_index.base_url == "http://rag:6000"
@@ -210,8 +209,8 @@ def test_load_config_file_selects_enabled_database(tmp_path, monkeypatch):
     import yaml
     from services.rag.core.loader import load_config_file
 
-    monkeypatch.setenv("RAG_APPS", "not-json")
     raw = _base_config("qdrant")
+    raw.setdefault("auth", {})["apps"] = "invalid"
     path = tmp_path / "rag.yaml"
     path.write_text(yaml.safe_dump(raw), encoding="utf-8")
 
@@ -226,14 +225,13 @@ def test_load_config_file_selects_enabled_database(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("database", [None, {}, {"postgres": {"enable": False}}])
 def test_load_config_without_database_reads_apps_and_allows_core_only_runtime(tmp_path, monkeypatch, database):
-    import json
     import yaml
     from services.rag.core.loader import load_config_file
 
     raw = _base_config("qdrant")
     raw["db"] = database
     apps = [{"app_id": "tenant_a", "api_key": "key-a"}, {"app_id": "tenant_b", "api_key": "key-b"}]
-    monkeypatch.setenv("RAG_APPS", json.dumps(apps))
+    raw.setdefault("auth", {})["apps"] = apps
     monkeypatch.setenv("DATABASE_URL", "postgresql://unused:dummy@unused/db")
     monkeypatch.delenv("RAG_ADMIN_PASSWORD")
     path = tmp_path / "rag.yaml"
@@ -251,6 +249,27 @@ def test_load_config_without_database_reads_apps_and_allows_core_only_runtime(tm
 
 
 
+
+
+@pytest.mark.parametrize("apps", [
+    "invalid",
+    [{"api_key": "key-a"}],
+    [{"app_id": "tenant_a", "api_key": ""}],
+    [{"app_id": "tenant_a", "api_key": "key-a"}, {"app_id": "tenant_a", "api_key": "key-b"}],
+    [{"app_id": "tenant_a", "api_key": "key-a"}, {"app_id": "tenant_b", "api_key": "key-a"}],
+])
+def test_load_config_without_database_rejects_invalid_apps(tmp_path, apps):
+    import yaml
+    from services.rag.core.loader import load_config_file
+
+    raw = _base_config("qdrant")
+    raw["db"] = {}
+    raw["auth"]["apps"] = apps
+    path = tmp_path / "rag.yaml"
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="auth.apps"):
+        load_config_file(path)
 
 
 def test_load_config_file_selects_one_enabled_vector_backend(tmp_path):

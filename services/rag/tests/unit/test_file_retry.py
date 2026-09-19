@@ -52,9 +52,10 @@ def test_retry_reuses_file_identity_and_delegates_presign(monkeypatch):
         ready=True,
         db_client=Database(),
         vector_client=SimpleNamespace(app_collection_exists=lambda app_id: True, app_scope=lambda app_id: nullcontext()),
-        config=SimpleNamespace(storage=SimpleNamespace(download_timeout=60)),
+        config=SimpleNamespace(storage=SimpleNamespace(presign_timeout=60)),
     )
     def presign(template, variables, **kwargs):
+        assert kwargs["timeout"] == 60
         assert variables == {"app_id": "tenant", "file_id": "original", "filename": "report.pdf", "s3_url": state.db_client.record.s3_url}
         return "https://example.com/fresh"
     monkeypatch.setattr(files, "fetch_presigned_url", presign)
@@ -68,7 +69,7 @@ def test_index_file_fetches_presigned_url_when_missing(monkeypatch):
         ready=True,
         db_client=Database(),
         vector_client=SimpleNamespace(app_scope=lambda app_id: nullcontext()),
-        config=SimpleNamespace(storage=SimpleNamespace(download_timeout=60)),
+        config=SimpleNamespace(storage=SimpleNamespace(presign_timeout=60)),
     )
     def presign(template, variables, **kwargs):
         assert variables == {"app_id": "tenant", "file_id": "original", "filename": "report.pdf", "s3_url": state.db_client.record.s3_url}
@@ -89,7 +90,7 @@ def test_presign_failure_is_saved_and_returned_with_original_file_id(monkeypatch
         ready=True,
         db_client=Database(),
         vector_client=SimpleNamespace(app_collection_exists=lambda app_id: True, app_scope=lambda app_id: nullcontext()),
-        config=SimpleNamespace(storage=SimpleNamespace(download_timeout=60)),
+        config=SimpleNamespace(storage=SimpleNamespace(presign_timeout=60)),
     )
     def fail(*args, **kwargs):
         raise UpstreamServiceError(service="presign", error="connection lost", retryable=True, status_code=503)
@@ -99,3 +100,5 @@ def test_presign_failure_is_saved_and_returned_with_original_file_id(monkeypatch
     assert error.value.detail["file_id"] == "original"
     assert error.value.detail["retryable"] is True
     assert state.db_client.error["error"] == "connection lost"
+    assert state.db_client.error["service"] == "presign"
+    assert error.value.detail["service"] == "presign"

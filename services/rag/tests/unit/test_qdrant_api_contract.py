@@ -67,7 +67,7 @@ def test_index_file_indexes_presigned_file_synchronously(monkeypatch):
         Principal(type="app", app_id="imsdom"),
     )
 
-    assert result == {"success": True, "error": None, "retryable": False, "traceId": result["traceId"], "file_id": "abc123"}
+    assert result == {"success": True, "error": None, "service": None, "retryable": False, "traceId": result["traceId"], "file_id": "abc123"}
     assert len(result["traceId"]) == 32
     assert calls == [
         ("exists", "imsdom"),

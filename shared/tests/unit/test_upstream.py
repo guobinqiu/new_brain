@@ -40,8 +40,12 @@ def test_external_message_is_unchanged(message):
 
 
 def test_internal_error_is_preserved():
-    detail = {"error": "Balance insufficient", "retryable": False, "traceId": "a" * 32}
+    detail = {"error": "Balance insufficient", "service": "provider", "retryable": False, "traceId": "a" * 32}
     assert internal_error("inference", response_error(502, json=detail)).detail() == detail
+
+
+def test_network_error_identifies_target_service():
+    assert upstream_error("parser", httpx.ConnectError("connect failed")).detail()["service"] == "parser"
 
 
 @pytest.mark.parametrize("status", [429, 500, 502, 503, 504])

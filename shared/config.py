@@ -176,7 +176,7 @@ class LoggingConfig:
 class StorageConfig:
     endpoint_url: str | None = None
     bucket: str = "rag"
-    download_timeout: int = 60
+    presign_timeout: int = 60
 
 
 @dataclass(frozen=True)
@@ -269,7 +269,7 @@ def parse_app_config(raw: dict[str, Any]) -> AppConfig:
         storage=StorageConfig(
             endpoint_url=storage.get("endpoint_url"),
             bucket=str(storage.get("bucket", "rag")),
-            download_timeout=int(storage.get("download_timeout", 60)),
+            presign_timeout=int(storage.get("presign_timeout", 60)),
         ),
         api=ApiConfig(
             rate_limit=str(api.get("rate_limit", "120/minute")),

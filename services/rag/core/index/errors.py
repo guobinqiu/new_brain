@@ -15,7 +15,7 @@ logger = logging.getLogger("services.rag")
 
 def index_error_detail(error: UpstreamServiceError, file_id: str) -> dict:
     return {
-        "success": False, "error": error.error, "retryable": error.retryable,
+        "success": False, "error": error.error, "service": error.service, "retryable": error.retryable,
         "file_id": file_id, "traceId": get_trace_id(),
     }
 

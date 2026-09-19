@@ -18,7 +18,8 @@ pytestmark = pytest.mark.unit
     (main.general_handler, RuntimeError("database query failed: details"), 500),
 ])
 async def test_exception_handlers_return_original_error(handler, error, status):
-    request = Request({"type": "http", "method": "POST", "path": "/api/v1/llm/chat/stream", "headers": [], "state": {"trace_id": "a" * 32}})
+    request = Request({"type": "http", "method": "POST", "path": "/api/v1/llm/chat/stream", "headers": [], "app": main.app, "state": {"trace_id": "a" * 32}})
     response = await handler(request, error)
     assert response.status_code == status
     assert json.loads(response.body)["error"] == str(error)
+    assert json.loads(response.body)["service"] == "llm"

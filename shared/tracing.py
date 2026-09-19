@@ -60,6 +60,7 @@ def get_trace_id() -> str:
 
 
 def install_trace_middleware(app: FastAPI, *, service_name: str) -> None:
+    app.state.service_name = service_name
     logger = logging.getLogger("brain.trace")
 
     @app.middleware("http")

@@ -589,7 +589,7 @@ def test_search_returns_sdk_error_details(monkeypatch, entrypoint, caplog):
     response = asyncio.run(upstream_exception_handler(None, raised.value))
     assert response.status_code == 500
     body = json.loads(response.body)
-    assert body == {"error": str(error), "retryable": False, "traceId": raised.value.trace_id}
+    assert body == {"error": str(error), "service": "rag", "retryable": False, "traceId": raised.value.trace_id}
     assert body["traceId"]
     assert any(record.exc_info and record.exc_info[1] is error for record in caplog.records)
 

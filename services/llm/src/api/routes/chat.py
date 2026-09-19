@@ -100,6 +100,7 @@ async def chat_stream(request: Request, req: ChatRequest, graph=Depends(_chat_gr
             yield _sse({
                 "type": "error",
                 "message": str(e),
+                "service": getattr(e, "service", None) or "llm",
                 "trace_id": get_trace_id(),
             })
 

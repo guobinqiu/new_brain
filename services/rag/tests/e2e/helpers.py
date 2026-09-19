@@ -200,7 +200,7 @@ def index_uploaded_file(
         },
     )
     assert response.status_code == 200, response.text
-    assert response.json() == {"success": True, "error": None, "retryable": False, "traceId": response.json()["traceId"], "file_id": indexed_file_id}
+    assert response.json() == {"success": True, "error": None, "service": None, "retryable": False, "traceId": response.json()["traceId"], "file_id": indexed_file_id}
     assert len(response.json()["traceId"]) == 32
     return indexed_file_id
 

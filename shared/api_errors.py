@@ -15,7 +15,7 @@ async def unhandled_exception_handler(request, exc):
     logger.error("Unhandled service error", exc_info=(type(exc), exc, exc.__traceback__), extra={
         "trace_id": trace_id, "method": request.method, "path": request.url.path,
     })
-    detail = {"success": False, "error": str(exc) or repr(exc), "retryable": False, "traceId": trace_id}
+    detail = {"success": False, "error": str(exc) or repr(exc), "service": getattr(request.app.state, "service_name", request.app.title), "retryable": False, "traceId": trace_id}
     if "file_id" in request.path_params:
         detail["file_id"] = request.path_params["file_id"]
     headers = {}
@@ -34,7 +34,7 @@ async def upstream_exception_handler(request, exc):
 
 async def http_exception_handler(request, exc):
     error = UpstreamServiceError(
-        service=request.app.title, error=exc.detail if isinstance(exc.detail, str) else json.dumps(exc.detail),
+        service=getattr(request.app.state, "service_name", request.app.title), error=exc.detail if isinstance(exc.detail, str) else json.dumps(exc.detail),
         retryable=exc.status_code == 503, status_code=exc.status_code,
     )
     if request.url.path == "/ready":
@@ -43,5 +43,5 @@ async def http_exception_handler(request, exc):
 
 
 async def validation_exception_handler(request, exc):
-    error = UpstreamServiceError(service=request.app.title, error=str(exc), retryable=False, status_code=422)
+    error = UpstreamServiceError(service=getattr(request.app.state, "service_name", request.app.title), error=str(exc), retryable=False, status_code=422)
     return await upstream_exception_handler(request, error)

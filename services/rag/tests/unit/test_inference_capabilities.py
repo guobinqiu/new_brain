@@ -28,6 +28,7 @@ def test_upstream_error_survives_inference_hop():
     detail = {
         "traceId": "a" * 32,
         "error": "upstream billing authorization is insufficient", "retryable": False,
+        "service": "inference",
     }
     client = HttpInferenceClient("http://inference:7001")
     client.dense._client.close()

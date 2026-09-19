@@ -2,12 +2,13 @@ model_name: vllm
 openai_base_url: http://19.16.1.233:8000/v1
 llm_kwargs: ""
 use_responses_api: false
+database_url: postgresql://rag:rag@postgres:5432/rag
 
 llm_concurrency_limit: 10
 request:
-  timeout: 60
+  timeout: 10
 model:
-  timeout: 60
+  timeout: 10
 
 cors_origins: ["*"]
 rate_limit_default: 100/minute

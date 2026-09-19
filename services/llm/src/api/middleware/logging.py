@@ -43,6 +43,6 @@ async def log_requests(request: Request, call_next):
         )
         return JSONResponse(
             status_code=504,
-            content={"error": str(exc) or repr(exc), "timeout": settings.request_timeout, "traceId": trace_id},
+            content={"error": str(exc) or repr(exc), "service": "llm", "timeout": settings.request_timeout, "traceId": trace_id},
             headers={"X-Trace-Id": trace_id}
         )

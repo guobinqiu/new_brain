@@ -9,7 +9,7 @@ x-json-logging: &json-logging
 services:
   rag:
     image: ${IMAGE_REGISTRY}/brain-rag:${IMAGE_TAG}
-    command: ["/app/.venv/bin/uvicorn", "services.rag.app.main:app", "--host", "0.0.0.0", "--port", "6000", "--reload"]
+    command: ["/app/.venv/bin/uvicorn", "services.rag.app.main:app", "--host", "0.0.0.0", "--port", "6000"]
     labels:
       logging: loki
     env_file:
@@ -43,7 +43,7 @@ services:
 
   parser:
     image: ${IMAGE_REGISTRY}/brain-parser:${IMAGE_TAG}
-    command: ["/app/.venv/bin/uvicorn", "services.parser.app.main:app", "--host", "0.0.0.0", "--port", "7000", "--reload"]
+    command: ["/app/.venv/bin/uvicorn", "services.parser.app.main:app", "--host", "0.0.0.0", "--port", "7000"]
     labels:
       logging: loki
     env_file:
@@ -81,7 +81,7 @@ services:
 
   inference:
     image: ${IMAGE_REGISTRY}/brain-inference:${IMAGE_TAG}
-    command: ["/app/.venv/bin/uvicorn", "services.inference.app.main:app", "--host", "0.0.0.0", "--port", "7001", "--reload"]
+    command: ["/app/.venv/bin/uvicorn", "services.inference.app.main:app", "--host", "0.0.0.0", "--port", "7001"]
     labels:
       logging: loki
     env_file:
@@ -115,7 +115,7 @@ services:
 
   llm:
     image: ${IMAGE_REGISTRY}/brain-llm:${IMAGE_TAG}
-    command: ["/app/.venv/bin/uvicorn", "services.llm.src.main:app", "--host", "0.0.0.0", "--port", "6001", "--reload"]
+    command: ["/app/.venv/bin/uvicorn", "services.llm.src.main:app", "--host", "0.0.0.0", "--port", "6001"]
     labels:
       logging: loki
     env_file:

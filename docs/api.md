@@ -14,7 +14,7 @@ Parser 服务接口为 `/v1/parse/file`，Inference 保持 `/v1/*`。现有内�
 
 外部系统调用业务接口时，每个请求都使用 Bearer API key。
 
-关系数据库启用时，App Key 从数据库校验；全部关闭时，从环境变量 `RAG_APPS` 的 `[{"app_id":"...","api_key":"..."}]` 绑定校验。关库前须将现有数据库应用绑定的 `app_id` 和 `api_key` 原样填入 `RAG_APPS`，关库后沿用凭据，调用方无需更换 Key。两种来源不会同时使用，数据库故障不回退到配置凭据
+关系数据库启用时，App Key 从数据库校验；全部关闭时，从 `rag.yaml` 的 `auth.apps` 列表读取应用绑定校验。关库前须将现有数据库应用绑定的 `app_id` 和 `api_key` 原样填入 `auth.apps`，关库后沿用凭据，调用方无需更换 Key。两种来源不会同时使用，数据库故障不回退到配置凭据
 
 请求头：
 
@@ -231,7 +231,7 @@ PUT /api/rag/apps/{app_id}/presign-config
 
 可用变量为 `app_id`、`file_id`、`s3_url`、`filename`，来自失败记录及所属应用。`tojson` 自动处理字符串引号和转义，模板渲染后通过 `json.loads()` 解析。`params` 编码为 URL 查询参数，`body` 根据 `Content-Type` 编码为 JSON 或 `application/x-www-form-urlencoded` 表单，其他 Content-Type 使用字符串请求体。GET 可以只配 `params`，POST 可以同时配 `params` 和 `body`
 
-上游响应按 `response_url_path` 取值，如 `data.download_url`，数组下标可写成 `data.0.url`，空路径表示整个 JSON 响应就是 URL 字符串。提取结果必须为 HTTP(S) 下载 URL。API key 可放在 headers 或参数中；供应商 AK/SK 动态签名需要接入其签名实现，当前模板不会自行计算签名。请求超时沿用 `storage.download_timeout`，受索引剩余预算约束
+上游响应按 `response_url_path` 取值，如 `data.download_url`，数组下标可写成 `data.0.url`，空路径表示整个 JSON 响应就是 URL 字符串。提取结果必须为 HTTP(S) 下载 URL。API key 可放在 headers 或参数中；供应商 AK/SK 动态签名需要接入其签名实现，当前模板不会自行计算签名。请求超时由 `storage.presign_timeout` 控制，受索引剩余预算约束
 
 有库模式要求目标 app 已经初始化向量集合，未初始化时返回 `app database is not initialized`。无库模式会在首次索引时创建当前已鉴权应用的集合，不需要关系数据库或管理台初始化
 外部系统的 `app_id` 来自 Bearer API key，请求体里不用传 `app_id`。User JWT 面向管理台，不绑定业务 app；管理台调用索引、搜索、文件列表或向量数据接口时需要显式传 `app_id`。
@@ -272,6 +272,7 @@ Content-Type: application/json
 {
   "success": true,
   "error": null,
+  "service": null,
   "retryable": false,
   "traceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "file_id": "550e8400-e29b-41d4-a716-446655440000"
@@ -331,6 +332,7 @@ Content-Type: application/json
     {
       "success": true,
       "error": null,
+      "service": null,
       "retryable": false,
       "traceId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "file_id": "file-a"
@@ -338,6 +340,7 @@ Content-Type: application/json
     {
       "success": false,
       "error": "parser unavailable",
+      "service": "parser",
       "retryable": true,
       "traceId": "cccccccccccccccccccccccccccccccc",
       "file_id": "file-b"
@@ -354,6 +357,7 @@ Content-Type: application/json
 {
   "success": false,
   "error": "fieldName(sparse_vector) not found",
+  "service": "vector",
   "retryable": false,
   "traceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "file_id": "550e8400-e29b-41d4-a716-446655440000"
@@ -362,15 +366,17 @@ Content-Type: application/json
 
 两个索引入口的参数校验、鉴权、限流错误也使用此结构。进入业务函数后保留请求的 file_id 或生成新 ID；入口提前拒绝时生成本次失败的 file_id，不创建文件记录。其他 RAG API 的成功响应格式不变
 
-RAG、Parser、Inference、LLM 的未捕获异常返回 HTTP 500，正文包含 `success: false`、原始 `error`、`retryable: false` 和 `traceId`；路径包含 `file_id` 时一并返回。完整堆栈只写日志，不使用固定的“Internal Server Error”替代异常说明。外部错误缺少可识别的说明字段时保留响应正文，前端按文本显示，不执行其中的 HTML。LLM 流式响应开始后的错误通过 SSE 错误事件返回。
+RAG、Parser、Inference、LLM 的未捕获异常返回 HTTP 500，正文包含 `success: false`、原始 `error`、`service`、`retryable: false` 和 `traceId`；路径包含 `file_id` 时一并返回。完整堆栈只写日志，不使用固定的“Internal Server Error”替代异常说明。外部错误缺少可识别的说明字段时保留响应正文，前端按文本显示，不执行其中的 HTML。LLM 流式响应开始后的错误通过 SSE 错误事件返回。
 
-索引成功、失败响应均包含相同的五个顶层字段：`success`、`error`、`retryable`、`traceId`、`file_id`，不使用 `data` 或 `detail` 包装，也不使用自定义错误码。成功时 `error` 为 null、`retryable` 为 false；失败时 `error` 保留原始错误说明，没有说明时为 null。完整异常堆栈写入日志。retryable 表示当前错误是否适合由调用方继续重试，不代表本次请求没有产生部分写入。向量库和 PG 未分类的写入错误默认 false
+索引成功、失败响应均包含相同的六个顶层字段：`success`、`error`、`service`、`retryable`、`traceId`、`file_id`，不使用 `data` 或 `detail` 包装，也不使用自定义错误码。成功时 `error`、`service` 为 null、`retryable` 为 false；失败时 `error` 保留原始错误说明，没有说明时为 null。完整异常堆栈写入日志。retryable 表示当前错误是否适合由调用方继续重试，不代表本次请求没有产生部分写入。向量库和 PG 未分类的写入错误默认 false
 
 服务内只在失败发生的局部阶段做快速重试：Parser 重试方舟 PDF 解析调用；Inference 重试当前 provider 的 embedding、sparse embedding 和 rerank 调用；RAG 重试 PostgreSQL metadata 写入和 Milvus/Qdrant 集合创建、upsert、flush、stale chunk 清理等向量库写入。RAG 不重跑整条索引链路，向量库写入重试不会重新解析或重新 embedding。`max_attempts` 包含第一次正常执行，默认 3；`interval_seconds` 是固定等待时间，默认 0.5 秒。当前 PyMilvus 3.0.1 仍有无法通过公开开关彻底关闭的 schema 刷新重试。上游从首次提交起建议提供稳定的 `file_id`，重试复用同一个 ID 和相同文档；同一应用同一文件需串行提交。`file_id` 可省略，但连接中断时上游可能拿不到服务端生成的 ID
 
 向量写入成功后 PG 更新失败，接口返回失败但不删除向量。错误响应不代表回滚；写入超时可能已提交。相同 ID 重试最终成功后覆盖分片并更新 PG，不提供跨副本并发事务保证
 
 `rag.yaml` 的 `api.index_timeout` 默认 600 秒，从工作线程开始执行索引时计时，Nginx 等待固定 900 秒。索引入口同步执行，阶段间检查截止时间，超出预算返回 HTTP 504，后续阶段不再启动；正在执行的同步调用需等待结束或自身超时，不保证恰好到 600 秒返回，不能把超时当作撤销操作。上游和其他代理的等待时间需要大于应用预算并留出余量
+
+`service` 标识错误所属服务或组件，如 `rag`、`parser`、`inference`、`vector`、`database`、`presign`。内部调用保留下游返回的 service；连接下游失败时标记目标服务。旧错误记录没有 service 时返回 null。LLM 的 SSE 错误事件使用 `{type: "error", message, service, trace_id}`，模型调用超时时 service 为 `llm`。
 
 每个阶段日志包含耗时和 `trace_id`，上游通过响应的 `traceId` 关联排查。内部服务解析并透传 traceparent；外部服务暂不发送该头，调用日志仍关联当前 TraceId
 
@@ -560,7 +566,7 @@ GET /api/rag/files?limit=50&cursor=...&app_id=<app_id>
 状态字段：
 
 - `success`：索引成功。
-- `failed`：索引失败，`error` 返回 `{error, retryable, traceId}` 或 null。PG 的原有 error TEXT 字段保存同一 JSON，无表结构变更；重启恢复的旧任务没有原请求 TraceId 时存 null，旧的非 JSON 错误记录不直接展示。重新索引和索引成功会清除 error
+- `failed`：索引失败，`error` 返回 `{error, service, retryable, traceId}` 或 null。PG 的原有 error TEXT 字段保存同一 JSON，无表结构变更；重启恢复的旧任务没有原请求 TraceId 时存 null，旧的非 JSON 错误记录不直接展示。重新索引和索引成功会清除 error
 
 响应：
 
@@ -575,6 +581,7 @@ GET /api/rag/files?limit=50&cursor=...&app_id=<app_id>
       "chunk_count": 12,
       "status": "success",
       "error": null,
+      "service": null,
       "created_at": "2026-08-18T17:00:00+08:00",
       "indexed_at": "2026-08-18T17:00:30+08:00"
     }
@@ -736,11 +743,12 @@ dense 响应项包含 `object: "embedding"`、`embedding`、`index`；sparse 响
 
 `/ready` 返回当前就绪状态和已启用能力，不触发推理。修改配置后重启 Inference 生效。硅基流动适配仅提供 dense 与可选 rerank
 
-失败响应平铺返回 `error`、`retryable`、`traceId`。`error` 保存原始错误说明，没有时为 null；完整异常堆栈写入日志。例如计费异常返回 HTTP 502：
+失败响应平铺返回 `error`、`service`、`retryable`、`traceId`。`error` 保存原始错误说明，没有时为 null；完整异常堆栈写入日志。例如计费异常返回 HTTP 502：
 
 ```json
 {
   "error": "balance is insufficient",
+  "service": "inference",
   "retryable": false,
   "traceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 }

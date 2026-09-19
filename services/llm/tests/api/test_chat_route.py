@@ -10,7 +10,10 @@ from __future__ import annotations
 
 import json
 
+import httpx
 import pytest
+from openai import APITimeoutError
+from shared.upstream import UpstreamServiceError
 
 from starlette.requests import Request
 
@@ -141,7 +144,12 @@ async def test_chat_stream_emits_token_done_events(route_request, monkeypatch):
     assert "".join(event["content"] for event in events if event["type"] == "token") == "退款 7 天"
 
 
-async def test_chat_stream_handles_error_emits_error_event(route_request, monkeypatch):
+@pytest.mark.parametrize("error,service", [
+    (RuntimeError("upstream broken"), "llm"),
+    (APITimeoutError(request=httpx.Request("POST", "https://model.test")), "llm"),
+    (UpstreamServiceError(service="rag", error="search failed", retryable=True, status_code=503), "rag"),
+])
+async def test_chat_stream_handles_error_emits_error_event(route_request, monkeypatch, error, service):
     """graph 抛异常时，SSE 应推 error 事件而不是返回 5xx。"""
 
     import langsmith
@@ -169,7 +177,7 @@ async def test_chat_stream_handles_error_emits_error_event(route_request, monkey
     class _FailGraph:
         async def astream(self, *a, **kw):
             observed.append(langsmith.get_tracing_context())
-            raise RuntimeError("upstream broken")
+            raise error
             yield  # for type checker
 
     resp = await chat_stream(route_request, ChatRequest(message="hi", thread_id="t1"), graph=_FailGraph())
@@ -181,7 +189,8 @@ async def test_chat_stream_handles_error_emits_error_event(route_request, monkey
     assert "error" in types, f"应推 error 事件，实际: {types}"
     err = next(e for e in events if e.get("type") == "error")
     assert "message" in err or "trace_id" in err
-    assert err["message"] == "upstream broken"
+    assert err["message"] == str(error)
+    assert err["service"] == service
     assert types == ["error"]
     assert observed[0]["enabled"] is True
     assert observed[0]["project_name"] == "yaml-project"

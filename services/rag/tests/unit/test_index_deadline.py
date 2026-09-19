@@ -25,7 +25,7 @@ def test_index_route_returns_flat_error(monkeypatch, message):
     state = SimpleNamespace(config=SimpleNamespace(api=ApiConfig(index_timeout=780)))
     response = files.open_index_file(SimpleNamespace(app=SimpleNamespace(state=state)), object(), object())
     assert response.status_code == 502
-    assert json.loads(response.body) == {"success": False, "error": message, "retryable": False, "file_id": "file-a", "traceId": detail["traceId"]}
+    assert json.loads(response.body) == {"success": False, "error": message, "service": "parser", "retryable": False, "file_id": "file-a", "traceId": detail["traceId"]}
 
 
 def test_request_timeout_uses_remaining_budget(monkeypatch):
@@ -68,7 +68,7 @@ def test_sync_index_deadline_stops_next_stage(monkeypatch, endpoint):
         search=SearchConfig(),
         auth=AuthConfig(admin=AdminAuthConfig(username="admin", password="test")),
         services=ServiceClientsConfig(vector=VectorServiceConfig(provider="qdrant", base_url="http://qdrant:6333")),
-        storage=StorageConfig(download_timeout=60),
+        storage=StorageConfig(presign_timeout=60),
         api=ApiConfig(index_timeout=20),
     )
     request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(config=config)))

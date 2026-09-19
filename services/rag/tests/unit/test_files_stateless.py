@@ -122,7 +122,7 @@ def test_stateless_index_failure_preserves_error_without_metadata(stateless, fai
         service.index_file(state, _request(file_id="file_a"), principal)
     assert error.value.status_code == status
     detail = error.value.detail
-    assert set(detail) == {"success", "error", "retryable", "file_id", "traceId"}
+    assert set(detail) == {"success", "error", "service", "retryable", "file_id", "traceId"}
     assert detail["error"] == str(failure)
     assert detail["file_id"] == "file_a"
     assert len(detail["traceId"]) == 32
@@ -157,12 +157,12 @@ def test_metadata_failure_after_vector_write_is_reported(stateless, mark_failed_
     state.db_client.mark_file_failed.assert_called_once()
     import json
     assert json.loads(state.db_client.mark_file_failed.call_args.args[2]) == {
-        "error": "metadata unavailable", "retryable": False, "traceId": error.value.detail["traceId"],
+        "error": "metadata unavailable", "service": "database", "retryable": False, "traceId": error.value.detail["traceId"],
     }
 
     state.db_client.upsert_file.side_effect = None
     result = service.index_file(state, _request(file_id="file_a"), Principal(type="app", app_id="tenant_a"))
-    assert result == {"success": True, "error": None, "retryable": False, "traceId": error.value.detail["traceId"], "file_id": "file_a"}
+    assert result == {"success": True, "error": None, "service": None, "retryable": False, "traceId": error.value.detail["traceId"], "file_id": "file_a"}
     assert len(state.vector_client.documents) == 1
     assert len(state.vector_client.documents["tenant_a", "file_a"]) == 1
 
@@ -214,6 +214,7 @@ async def test_batch_index_dispatches_single_file_requests(monkeypatch):
             return httpx.Response(502, json={
                 "success": False,
                 "error": "parser unavailable",
+                "service": "parser",
                 "retryable": True,
                 "traceId": "b" * 32,
                 "file_id": "file_b",
@@ -221,6 +222,7 @@ async def test_batch_index_dispatches_single_file_requests(monkeypatch):
         return httpx.Response(200, json={
             "success": True,
             "error": None,
+            "service": None,
             "retryable": False,
             "traceId": "a" * 32,
             "file_id": body["file_id"],
@@ -259,8 +261,8 @@ async def test_batch_index_dispatches_single_file_requests(monkeypatch):
     assert result == {
         "success": False,
         "files": [
-            {"success": True, "error": None, "retryable": False, "traceId": "a" * 32, "file_id": "file_a"},
-            {"success": False, "error": "parser unavailable", "retryable": True, "traceId": "b" * 32, "file_id": "file_b"},
+            {"success": True, "error": None, "service": None, "retryable": False, "traceId": "a" * 32, "file_id": "file_a"},
+            {"success": False, "error": "parser unavailable", "service": "parser", "retryable": True, "traceId": "b" * 32, "file_id": "file_b"},
         ],
     }
     assert [call[0] for call in calls] == ["/api/v1/rag/files", "/api/v1/rag/files"]

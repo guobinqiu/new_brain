@@ -36,7 +36,7 @@ RUN --mount=type=bind,source=services/rag/pyproject.toml,target=/app/services/ra
   else \
   cd /app/services/rag && uv sync --frozen --no-install-project; \
   fi
-CMD ["/app/.venv/bin/uvicorn", "services.rag.app.main:app", "--host", "0.0.0.0", "--port", "6000", "--reload"]
+CMD ["/app/.venv/bin/uvicorn", "services.rag.app.main:app", "--host", "0.0.0.0", "--port", "6000"]
 
 FROM base AS ops
 COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
@@ -47,7 +47,7 @@ RUN --mount=type=bind,source=services/ops/pyproject.toml,target=/app/services/op
   else \
   cd /app/services/ops && uv sync --frozen --no-install-project; \
   fi
-CMD ["/app/.venv/bin/uvicorn", "services.ops.app.main:app", "--host", "0.0.0.0", "--port", "7002", "--reload"]
+CMD ["/app/.venv/bin/uvicorn", "services.ops.app.main:app", "--host", "0.0.0.0", "--port", "7002"]
 
 FROM base AS parser
 ARG SERVICE_EXTRA=cpu
@@ -62,7 +62,7 @@ RUN --mount=type=bind,source=services/parser/pyproject.toml,target=/app/services
   else \
   cd /app/services/parser && uv sync --frozen --no-install-project --extra "$SERVICE_EXTRA"; \
   fi
-CMD ["/app/.venv/bin/uvicorn", "services.parser.app.main:app", "--host", "0.0.0.0", "--port", "7000", "--reload"]
+CMD ["/app/.venv/bin/uvicorn", "services.parser.app.main:app", "--host", "0.0.0.0", "--port", "7000"]
 
 FROM base AS inference
 ARG SERVICE_EXTRA=cpu
@@ -73,7 +73,7 @@ RUN --mount=type=bind,source=services/inference/pyproject.toml,target=/app/servi
   else \
   cd /app/services/inference && uv sync --frozen --no-install-project --extra "$SERVICE_EXTRA"; \
   fi
-CMD ["/app/.venv/bin/uvicorn", "services.inference.app.main:app", "--host", "0.0.0.0", "--port", "7001", "--reload"]
+CMD ["/app/.venv/bin/uvicorn", "services.inference.app.main:app", "--host", "0.0.0.0", "--port", "7001"]
 
 FROM base AS llm
 RUN --mount=type=bind,source=services/llm/pyproject.toml,target=/app/services/llm/pyproject.toml,readonly \
@@ -88,4 +88,4 @@ COPY services/__init__.py /app/services/__init__.py
 COPY services/llm/__init__.py /app/services/llm/__init__.py
 COPY services/llm/pytest.ini /app/services/llm/pytest.ini
 
-CMD ["/app/.venv/bin/uvicorn", "services.llm.src.main:app", "--host", "0.0.0.0", "--port", "6001", "--reload"]
+CMD ["/app/.venv/bin/uvicorn", "services.llm.src.main:app", "--host", "0.0.0.0", "--port", "6001"]

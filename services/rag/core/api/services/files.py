@@ -117,7 +117,7 @@ def _index_file(state, req: FileIndexRequest, principal: Principal):
                     "metadata_success",
                 )
         logger.info("File indexed", extra={"event": "file_indexed", "document_filename": filename, "file_id": file_id, "trace_id": get_trace_id(), "chunk_count": count})
-        return {"success": True, "error": None, "retryable": False, "traceId": get_trace_id(), "file_id": file_id}
+        return {"success": True, "error": None, "service": None, "retryable": False, "traceId": get_trace_id(), "file_id": file_id}
     except Exception as exc:
         if isinstance(exc, UpstreamServiceError):
             error = exc
@@ -190,7 +190,7 @@ def retry_file(state, file_id: str, app_id: str | None, principal: Principal):
             )
             detail, status = index_error_detail(error, file_id), error.status_code
         if claimed:
-            stored_error = {key: detail[key] for key in ("error", "retryable", "traceId")}
+            stored_error = {key: detail.get(key) for key in ("error", "service", "retryable", "traceId")}
             _mark_file_failed_if_possible(state, effective_principal, file_id, json.dumps(stored_error))
         logger.exception("File retry failed", extra={"file_id": file_id, "trace_id": get_trace_id()})
         raise HTTPException(status, detail) from exc
@@ -208,7 +208,7 @@ def _resolve_presigned_url(state, app_id: str, file_id: str, s3_url: str, filena
         return fetch_presigned_url(template, {
             "app_id": app_id, "file_id": file_id,
             "s3_url": s3_url, "filename": filename,
-        }, timeout=state.config.storage.download_timeout)
+        }, timeout=state.config.storage.presign_timeout)
 
 
 def files(state, limit: int = 50, cursor: str | None = None, app_id: str | None = None, principal: Principal | None = None):
@@ -342,7 +342,7 @@ def _file_error(value: str | None) -> dict | None:
         return None
     if not isinstance(error, dict) or type(error.get("retryable")) is not bool:
         return None
-    return {"error": error.get("error"), "retryable": error["retryable"], "traceId": error.get("traceId")}
+    return {"error": error.get("error"), "service": error.get("service"), "retryable": error["retryable"], "traceId": error.get("traceId")}
 
 
 def _mark_file_failed_if_possible(state, principal: Principal, file_id: str, error: str) -> None:

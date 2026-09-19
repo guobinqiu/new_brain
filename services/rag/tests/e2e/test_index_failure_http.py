@@ -136,7 +136,7 @@ def test_index_failure_crosses_http_hops_once(monkeypatch, failure):
                     rag.state.vector_client = Vector()
                     rag.state.parser_client = parser
                     rag.state.config = SimpleNamespace(
-                        database=None, api=ApiConfig(), chunking=ChunkingConfig(), storage=StorageConfig(download_timeout=10),
+                        database=None, api=ApiConfig(), chunking=ChunkingConfig(), storage=StorageConfig(presign_timeout=10),
                         auth=AuthConfig(admin=AdminAuthConfig(username="test", password="test"), apps=[AppCredential(app_id="tenant_a", api_key="app-key")]),
                     )
                     with http_server(rag) as rag_url, httpx.Client(base_url=rag_url, timeout=10, trust_env=False) as client:
@@ -146,7 +146,7 @@ def test_index_failure_crosses_http_hops_once(monkeypatch, failure):
                         }, json={"file_id": "same-id", "filename": "a.txt", "s3_url": "s3://bucket/a.txt", "presigned_url": supplier_url + "/source"})
                     assert response.status_code == (200 if failure == "success" else 500 if failure == "metadata" else 502)
                     detail = response.json()
-                    assert set(detail) == {"success", "error", "retryable", "file_id", "traceId"}
+                    assert set(detail) == {"success", "error", "service", "retryable", "file_id", "traceId"}
                     assert detail["file_id"] == "same-id"
                     assert detail["traceId"] == "a" * 32
                     assert detail["success"] is (failure == "success")
@@ -154,7 +154,7 @@ def test_index_failure_crosses_http_hops_once(monkeypatch, failure):
                     if failure in {"parser", "payment", "malformed"}:
                         assert "private" in response.text
                     if failure != "success":
-                        assert set(stored_errors[0]) == {"error", "retryable", "traceId"}
+                        assert set(stored_errors[0]) == {"error", "service", "retryable", "traceId"}
                         assert stored_errors[0]["retryable"] == detail["retryable"]
                         assert stored_errors[0]["traceId"] == detail["traceId"]
                     if failure == "metadata":
@@ -189,7 +189,7 @@ def test_index_rejection_returns_index_protocol(status):
         response = client.post("/api/rag/files", params={"count": "invalid" if status == 422 else "1"})
         assert response.status_code == status
         body = response.json()
-        assert set(body) == {"success", "error", "retryable", "traceId", "file_id"}
+        assert set(body) == {"success", "error", "service", "retryable", "traceId", "file_id"}
         assert body["success"] is False
         assert body["retryable"] is False
         assert body["file_id"]

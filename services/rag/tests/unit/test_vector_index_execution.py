@@ -228,8 +228,17 @@ def test_qdrant_readiness_error_is_not_retried(monkeypatch):
     with pytest.raises(RuntimeError) as raised:
         qdrant._wait_collection_ready(sdk, "test_chunks")
     assert raised.value is error
-    sdk.get_collection.assert_called_once_with("test_chunks", timeout=30)
+    sdk.get_collection.assert_called_once_with("test_chunks")
     sdk.count.assert_not_called()
+
+
+def test_qdrant_readiness_passes_timeout_to_count():
+    sdk = Mock()
+
+    qdrant._wait_collection_ready(sdk, "test_chunks", timeout=120)
+
+    sdk.get_collection.assert_called_once_with("test_chunks")
+    sdk.count.assert_called_once_with(collection_name="test_chunks", exact=True, timeout=120)
 
 
 def test_milvus_disables_grpc_retries(monkeypatch):

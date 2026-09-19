@@ -45,7 +45,7 @@ def _index(client, document, file_id=None):
     response = client.post("/api/v1/rag/files", json=payload)
     assert response.status_code == 200
     body = response.json()
-    assert set(body) == {"success", "error", "retryable", "traceId", "file_id"}
+    assert set(body) == {"success", "error", "service", "retryable", "traceId", "file_id"}
     assert body["error"] is None
     assert body["success"] is True
     assert body["retryable"] is False

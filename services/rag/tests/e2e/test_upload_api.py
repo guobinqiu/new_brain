@@ -119,7 +119,7 @@ class TestUploadAPI:
         )
 
         assert resp.status_code == 200, resp.text
-        assert resp.json() == {"success": True, "error": None, "retryable": False, "traceId": resp.json()["traceId"], "file_id": "550e8400-e29b-41d4-a716-446655440000"}
+        assert resp.json() == {"success": True, "error": None, "service": None, "retryable": False, "traceId": resp.json()["traceId"], "file_id": "550e8400-e29b-41d4-a716-446655440000"}
         assert len(resp.json()["traceId"]) == 32
 
     def test_index_presigned_url_accepts_custom_file_id(self, app_api_client, api_client, test_txt_path):
@@ -138,7 +138,7 @@ class TestUploadAPI:
         )
 
         assert resp.status_code == 200, resp.text
-        assert resp.json() == {"success": True, "error": None, "retryable": False, "traceId": resp.json()["traceId"], "file_id": file_id}
+        assert resp.json() == {"success": True, "error": None, "service": None, "retryable": False, "traceId": resp.json()["traceId"], "file_id": file_id}
         assert len(resp.json()["traceId"]) == 32
 
     def test_index_presigned_url_accepts_uuid_hex_file_id(self, app_api_client, api_client, test_txt_path):
@@ -156,7 +156,7 @@ class TestUploadAPI:
         )
 
         assert resp.status_code == 200, resp.text
-        assert resp.json() == {"success": True, "error": None, "retryable": False, "traceId": resp.json()["traceId"], "file_id": "550e8400e29b41d4a716446655440000"}
+        assert resp.json() == {"success": True, "error": None, "service": None, "retryable": False, "traceId": resp.json()["traceId"], "file_id": "550e8400e29b41d4a716446655440000"}
         assert len(resp.json()["traceId"]) == 32
 
     def test_index_presigned_url_can_infer_filename_from_s3_url(self, app_api_client, api_client, test_txt_path):

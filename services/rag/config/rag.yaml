@@ -9,8 +9,8 @@ logging:
 storage:
   endpoint_url: http://minio:9000
   bucket: rag
-  # RAG 下载源文件
-  download_timeout: 60
+  # 获取预签名下载地址的请求超时，单位秒
+  presign_timeout: 60
 
 api:
   rate_limit: 120/minute
@@ -25,14 +25,18 @@ api:
     # 单次批量最多并发文件数
     max_concurrency: 5
 auth:
+  # 仅在关系数据库关闭时使用
+  apps:
+    - app_id: imsdom
+      api_key: bk_sOximdu9G4KyfSXklZvp4SPPe2iZLSu3Gh6AJLQ2a_E
   admin:
     username: admin
 db:
   # 关系数据库可启用零个或一个
-  # 全部关闭时从 RAG_APPS 读取应用绑定，索引只写向量库
+  # 全部关闭时从 auth.apps 读取应用绑定，索引只写向量库
   postgres:
     enable: true
-    url: "" # 读取 DATABASE_URL，连接串包含密码
+    url: postgresql://rag:rag@postgres:5432/rag
     pool_size: 5
     retry:
       max_attempts: 3

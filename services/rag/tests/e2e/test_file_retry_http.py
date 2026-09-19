@@ -79,7 +79,7 @@ def test_failed_index_refreshes_presign_and_reuses_file_id(isolated_pg):
     auth = AuthConfig(admin=AdminAuthConfig(username="test", password="test"), apps=[credential])
     app.state.config = SimpleNamespace(
         auth=auth, database=None, api=ApiConfig(), chunking=ChunkingConfig(),
-        storage=StorageConfig(endpoint_url="http://127.0.0.1:9000", bucket=bucket, download_timeout=5),
+        storage=StorageConfig(endpoint_url="http://127.0.0.1:9000", bucket=bucket, presign_timeout=5),
     )
     app.state.ready = True
     app.state.db_client = isolated_pg
@@ -106,7 +106,7 @@ def test_failed_index_refreshes_presign_and_reuses_file_id(isolated_pg):
             assert indexed.status_code == 200, indexed.text
             assert indexed.json()["file_id"] == record["file_id"]
             assert indexed.json()["success"] is True
-            assert set(indexed.json()) == {"success", "error", "retryable", "traceId", "file_id"}
+            assert set(indexed.json()) == {"success", "error", "service", "retryable", "traceId", "file_id"}
             stored = isolated_pg.get_file("tenant", record["file_id"])
             assert stored.status == "success" and stored.error is None
             assert len(app.state.vector_client.documents) == 1

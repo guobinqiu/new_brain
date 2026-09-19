@@ -21,7 +21,7 @@ def _load_settings() -> dict:
     values["rag_max_retries"] = rag.get("max_retries", 2)
     values["openai_api_key"] = os.getenv("OPENAI_API_KEY")
     values["langchain_api_key"] = os.getenv("LANGCHAIN_API_KEY", "")
-    values["database_url"] = os.getenv("DATABASE_URL")
+    values["database_url"] = os.getenv("DATABASE_URL") or values.get("database_url")
     return values
 
 

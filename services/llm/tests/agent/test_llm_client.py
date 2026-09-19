@@ -4,10 +4,14 @@ import pytest
 pytestmark = pytest.mark.unit
 
 
-def test_create_llm_uses_yaml_behavior_and_environment_connections(monkeypatch, tmp_path):
+@pytest.mark.parametrize("database_env", [None, "postgresql://test:test@localhost:5432/test"])
+def test_create_llm_uses_yaml_behavior_and_environment_connections(monkeypatch, tmp_path, database_env):
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setenv("LANGCHAIN_API_KEY", "test-tracing-key")
-    monkeypatch.setenv("DATABASE_URL", "postgresql://test:test@localhost:5432/test")
+    if database_env is None:
+        monkeypatch.delenv("DATABASE_URL", raising=False)
+    else:
+        monkeypatch.setenv("DATABASE_URL", database_env)
     monkeypatch.setenv("OPENAI_BASE_URL", "http://wrong-llm.example/v1")
     monkeypatch.setenv("MODEL_NAME", "ignored-model")
     monkeypatch.setenv("RAG_BASE_URL", "http://wrong-rag.example:6000")
@@ -21,6 +25,7 @@ def test_create_llm_uses_yaml_behavior_and_environment_connections(monkeypatch, 
     config_path.write_text(
         "openai_base_url: http://llm.example/v1\n"
         "model_name: test-model\n"
+        "database_url: postgresql://rag:rag@postgres:5432/rag\n"
         "request:\n"
         "  timeout: 45\n"
         "model:\n"
@@ -54,7 +59,7 @@ def test_create_llm_uses_yaml_behavior_and_environment_connections(monkeypatch, 
     assert settings.model_timeout == 55
     assert settings.rag_timeout == 12.5
     assert settings.langchain_api_key == "test-tracing-key"
-    assert settings.database_url == "postgresql://test:test@localhost:5432/test"
+    assert settings.database_url == (database_env or "postgresql://rag:rag@postgres:5432/rag")
 
 
 async def test_semaphore_uses_settings_and_reuses_initialized_instance(monkeypatch):

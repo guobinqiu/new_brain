@@ -1,4 +1,3 @@
-import json
 import os
 import socket
 import subprocess
@@ -69,7 +68,7 @@ def stateless_rag(tmp_path_factory):
         "S3_SESSION_TOKEN", "RAG_ADMIN_PASSWORD",
     ):
         env.pop(name, None)
-    env["RAG_APPS"] = json.dumps(credentials)
+    raw["auth"]["apps"] = credentials
     env["RAG_NODE_ID"] = "e2e_stateless_" + uuid.uuid4().hex
     env["RAG_PEERS"] = ""
     env["NO_PROXY"] = ",".join(filter(None, [env.get("NO_PROXY"), "127.0.0.1", "localhost"]))

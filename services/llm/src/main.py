@@ -70,6 +70,7 @@ async def _create_checkpointer():
 
 
 app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+app.state.service_name = "llm"
 app.state.limiter = limiter
 app.add_middleware(
     CORSMiddleware,
@@ -89,7 +90,7 @@ async def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
     logger.warning("rate limit exceeded", detail=str(exc.detail))
     return JSONResponse(
         status_code=429,
-        content={"error": str(exc.detail)},
+        content={"error": str(exc.detail), "service": "llm"},
         headers={
             "Retry-After": str(exc.detail),
             "X-Trace-Id": get_trace_id(),
@@ -106,26 +107,26 @@ async def validation_handler(request: Request, exc: RequestValidationError):
     logger.warning("validation failed", errors=errors)
     return JSONResponse(
         status_code=422,
-        content={"error": str(exc), "details": errors}
+        content={"error": str(exc), "service": "llm", "details": errors}
     )
 
 
 @app.exception_handler(RateLimitError)
 async def rate_limit_handler(request: Request, exc: RateLimitError):
     logger.error("llm rate limited", exc_info=exc)
-    return JSONResponse(status_code=429, content={"error": str(exc)})
+    return JSONResponse(status_code=429, content={"error": str(exc), "service": "llm"})
 
 
 @app.exception_handler(APIStatusError)
 async def api_status_handler(request: Request, exc: APIStatusError):
     logger.error("llm api error", status_code=exc.status_code, exc_info=exc)
-    return JSONResponse(status_code=502, content={"error": str(exc)})
+    return JSONResponse(status_code=502, content={"error": str(exc), "service": "llm"})
 
 
 @app.exception_handler(APIConnectionError)
 async def connection_handler(request: Request, exc: APIConnectionError):
     logger.error("llm connection failed", exc_info=exc)
-    return JSONResponse(status_code=503, content={"error": str(exc)})
+    return JSONResponse(status_code=503, content={"error": str(exc), "service": "llm"})
 
 
 @app.exception_handler(Exception)
