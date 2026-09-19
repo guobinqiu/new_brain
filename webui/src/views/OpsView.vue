@@ -32,11 +32,7 @@
                   <p>{{ currentConfig?.path || '' }}</p>
                 </div>
                 <div class="editor-actions">
-                  <el-radio-group v-model="deployTarget" size="small" :disabled="configAction === 'deploy'">
-                    <el-radio-button value="app">{{ t('ops.tabs.appServices') }}</el-radio-button>
-                    <el-radio-button value="infra">{{ t('ops.tabs.infraServices') }}</el-radio-button>
-                  </el-radio-group>
-                  <el-button size="small" type="primary" :loading="configAction === 'deploy'" @click="publishStack">{{ t('ops.actions.publish') }}</el-button>
+                  <el-button v-if="deployTarget" size="small" type="primary" :loading="configAction === 'deploy'" @click="publishStack">{{ t('ops.actions.publish') }}</el-button>
                 </div>
               </div>
               <el-input v-model="configContent" type="textarea" :rows="26" spellcheck="false" />
@@ -206,7 +202,6 @@ const selectedConfig = ref('')
 const configContent = ref('')
 const joinCommand = ref('')
 const configAction = ref('')
-const deployTarget = ref('app')
 const serviceActionKey = ref('')
 const scalingService = ref('')
 const serviceLogLoading = ref('')
@@ -217,6 +212,7 @@ const logsService = ref('')
 const serviceLogs = ref('')
 
 const currentConfig = computed(() => configs.value.find(item => item.name === selectedConfig.value))
+const deployTarget = computed(() => ({ stack: 'app', infra: 'infra' })[selectedConfig.value])
 const deployConfigs = computed(() => configs.value.filter(item => item.requires_deploy))
 const serviceConfigs = computed(() => configs.value.filter(item => !item.requires_deploy))
 const controlServices = computed(() => services.value.filter(item => item.group === 'ctrl'))
@@ -230,6 +226,9 @@ function portsText(ports) {
 
 function configLabel(item) {
   if (!item) return '-'
+  if (item.name === 'deploy_env') return t('ops.environment')
+  if (item.name === 'stack') return t('ops.tabs.appServices')
+  if (item.name === 'infra') return t('ops.tabs.infraServices')
   return item.requires_deploy ? item.path : item.service || item.name
 }
 
@@ -280,8 +279,6 @@ async function ensureSelectedConfig() {
 
 async function selectConfig(name) {
   selectedConfig.value = name
-  if (name === 'infra') deployTarget.value = 'infra'
-  if (name === 'stack') deployTarget.value = 'app'
   try {
     const res = await axios.get(`/api/ops/configs/${name}`)
     configContent.value = res.data?.content || ''
@@ -324,7 +321,8 @@ async function applyConfig() {
 
 async function publishStack() {
   const target = deployTarget.value
-  const name = t(target === 'infra' ? 'ops.tabs.infraServices' : 'ops.tabs.appServices')
+  if (!target) return
+  const name = configLabel(currentConfig.value)
   try {
     await confirmBox(t, t('ops.publishConfirm', { name }), t('ops.actions.publish'), { type: 'warning' })
   } catch {
