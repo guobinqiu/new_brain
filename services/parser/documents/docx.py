@@ -22,13 +22,31 @@ class DocxBlockParser(BlockParser):
                 paragraph = Paragraph(child, document)
                 text = paragraph.text.strip()
                 if text:
-                    merged.append(TextBlock(text, kind=_paragraph_kind(paragraph)))
+                    kind = _paragraph_kind(paragraph)
+                    merged.append(TextBlock(text, kind=kind, level=_heading_level(paragraph) if kind == "heading" else None))
                 continue
             if tag == "tbl":
                 table = Table(child, document)
                 rows = [[cell.text.strip() for cell in row.cells] for row in table.rows]
                 merged.extend(table_rows_to_blocks("", rows))
         return merged
+
+
+def _heading_level(paragraph) -> int | None:
+    from docx.oxml.ns import qn
+
+    properties = [paragraph._p.pPr]
+    style = paragraph.style
+    while style is not None:
+        properties.append(style.element.pPr)
+        style = style.base_style
+    for prop in properties:
+        if prop is not None:
+            outline = prop.find(qn("w:outlineLvl"))
+            if outline is not None:
+                level = int(outline.get(qn("w:val")))
+                return level + 1 if 0 <= level < 9 else None
+    return None
 
 
 def _paragraph_kind(paragraph) -> str:

@@ -22,6 +22,7 @@ class ParserTextBlock(BaseModel):
     text: str
     kind: TextKind = "text"
     page: int | None = None
+    level: int | None = Field(default=None, ge=1, strict=True)
 
 
 class ParserTableBlock(BaseModel):

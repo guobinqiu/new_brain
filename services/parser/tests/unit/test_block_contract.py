@@ -7,8 +7,17 @@ from services.parser.common.schema import TableBlock, TextBlock
 
 def test_text_block_preserves_kind():
     block = TextBlock("title", page=2, kind="heading")
-    assert vars(block) == {"text": "title", "page": 2, "kind": "heading"}
+    assert vars(block) == {"text": "title", "page": 2, "kind": "heading", "level": None}
     assert normalize_blocks([block]) == [block]
+
+
+def test_heading_level_survives_normalization_and_http_contract():
+    from services.parser.app.main import _block_response
+
+    block = TextBlock(" Title ", page=2, kind="heading", level=3)
+    normalized = normalize_blocks([block])[0]
+    assert normalized.level == 3
+    assert _block_response(normalized).model_dump()["level"] == 3
 
 
 def test_pdf_cleaner_preserves_structured_boundaries_and_repairs_unknown_text():

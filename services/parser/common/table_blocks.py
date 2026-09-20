@@ -43,6 +43,9 @@ def table_rows_to_blocks(
                 blocks.append(TextBlock(text, page=page))
             continue
         rows = [[clean_table_text(cell).strip() for cell in row] for row in [header, *body]]
+        width = max(len(row) for row in rows)
+        columns = [index for index in range(width) if any(index < len(row) and row[index] for row in rows)]
+        rows = [[row[index] if index < len(row) else "" for index in columns] for row in rows]
         blocks.append(TableBlock(rows=rows, caption=logical_title, page=page))
     return blocks
 

@@ -98,7 +98,7 @@ def parse_file(req: ParseFileRequest):
 
 def _block_response(block) -> ParserBlock:
     if isinstance(block, TextBlock):
-        return ParserTextBlock(text=block.text, page=block.page, kind=block.kind)
+        return ParserTextBlock(text=block.text, page=block.page, kind=block.kind, level=block.level if block.kind == "heading" else None)
     if isinstance(block, TableBlock):
         return ParserTableBlock(rows=block.rows, caption=block.caption.strip() or None, page=block.page)
     if isinstance(block, FormulaBlock):

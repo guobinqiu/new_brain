@@ -8,6 +8,7 @@ class TextBlock:
     text: str
     page: int | None = None
     kind: TextKind = "text"
+    level: int | None = None
 
 
 @dataclass

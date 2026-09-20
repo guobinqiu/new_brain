@@ -2,7 +2,8 @@ import json
 from pathlib import Path
 
 from services.parser.common.cleaner import clean_parser_blocks
-from services.parser.common.schema import Block, FormulaBlock, TextBlock
+from services.parser.common.normalizer import is_section_title_text
+from services.parser.common.schema import Block, FormulaBlock, TableBlock, TextBlock
 from services.parser.common.table_blocks import clean_table_text, compact_cell_text, html_table_to_rows, strip_html_tags, table_rows_to_blocks
 
 
@@ -23,17 +24,62 @@ def content_list_to_blocks(data) -> list[Block]:
     if not isinstance(data, list):
         return []
     blocks = []
+    previous_table = None
     for item in data:
         if not isinstance(item, dict):
+            previous_table = None
             continue
+        if item.get("type") == "table":
+            rows = _table_item_rows(item)
+            has_rows = bool(rows)
+            caption = _text_value(item.get("table_caption"))
+            if blocks and isinstance(blocks[-1], TableBlock) and not caption and _cross_page_boundary(previous_table, item):
+                # Cloud results can leave empty placeholders for pages already included in the preceding table.
+                if not rows:
+                    previous_table = item
+                    continue
+                end = next((index for index, row in enumerate(rows) if _section_row(row)), len(rows))
+                continuation = rows[:end]
+                header = blocks[-1].rows[0]
+                width = len(header)
+                if continuation and width and all(len(row) >= width and not any(row[width:]) for row in continuation):
+                    continuation = [[clean_table_text(cell).strip() for cell in row[:width]] for row in continuation]
+                    first = continuation[0]
+                    if first == header or first[0] != header[0]:
+                        blocks[-1].rows.extend(continuation[1:] if first == header else continuation)
+                        rows = rows[end:]
+            blocks.extend(table_rows_to_blocks(caption, rows, page=_mineru_page(item)))
+            previous_table = item if has_rows else None
+            continue
+        previous_table = None
         blocks.extend(_content_item_to_blocks(item))
     return clean_parser_blocks(blocks)
 
 
+def _section_row(row: list[str]) -> bool:
+    cells = [cell for cell in row if cell.strip()]
+    return len(cells) == 1 and is_section_title_text(cells[0])
+
+
+def _cross_page_boundary(previous: dict | None, current: dict) -> bool:
+    if previous is None:
+        return False
+    previous_page = _mineru_page(previous)
+    current_page = _mineru_page(current)
+    if previous_page is None or current_page != previous_page + 1:
+        return False
+    left = previous.get("bbox")
+    right = current.get("bbox")
+    if not isinstance(left, list) or not isinstance(right, list) or len(left) != 4 or len(right) != 4:
+        return False
+    if not all(isinstance(value, (int, float)) for value in left + right):
+        return False
+    # MinerU content-list boxes use 0..1000 page coordinates. Only join aligned page-edge fragments.
+    return left[3] >= 850 and right[1] <= 150 and abs(left[0] - right[0]) <= 20 and abs(left[2] - right[2]) <= 20
+
+
 def _content_item_to_blocks(item: dict) -> list[Block]:
     item_type = item.get("type")
-    if item_type == "table":
-        return _table_item_to_blocks(item, _text_value(item.get("table_caption")))
     if item_type in {"image", "chart"}:
         return []
     if item_type == "list":
@@ -50,13 +96,15 @@ def _content_item_to_blocks(item: dict) -> list[Block]:
     if not text:
         return []
     kind = "heading" if item.get("text_level") else "text"
-    return [TextBlock(text, page=_mineru_page(item), kind=kind)]
+    level = item.get("text_level")
+    level = level if type(level) is int and level > 0 else None
+    return [TextBlock(text, page=_mineru_page(item), kind=kind, level=level)]
 
 
-def _table_item_to_blocks(item: dict, caption: str) -> list[Block]:
+def _table_item_rows(item: dict) -> list[list[str]]:
     table_body = item.get("table_body") or item.get("html")
     if isinstance(table_body, str) and table_body.strip():
-        return table_rows_to_blocks(caption, html_table_to_rows(table_body), page=_mineru_page(item))
+        return html_table_to_rows(table_body)
     rows = item.get("rows")
     if not isinstance(rows, list):
         return []
@@ -64,7 +112,7 @@ def _table_item_to_blocks(item: dict, caption: str) -> list[Block]:
     for row in rows:
         if isinstance(row, list):
             normalized_rows.append([compact_cell_text(str(cell)) for cell in row])
-    return table_rows_to_blocks(caption, normalized_rows, page=_mineru_page(item))
+    return normalized_rows
 
 
 def _mineru_page(item: dict) -> int | None:

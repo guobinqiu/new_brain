@@ -65,7 +65,7 @@ def test_markdown_preserves_code_lists_and_tables_as_structures(tmp_path):
     )
 
     assert MdBlockParser().parse(str(path)) == [
-        TextBlock("Heading\n=======", kind="heading"),
+        TextBlock("Heading\n=======", kind="heading", level=1),
         TextBlock("Paragraph", kind="paragraph"),
         TextBlock("- First", kind="list_item"),
         TextBlock("  - Nested", kind="list_item"),
@@ -120,6 +120,7 @@ def test_word_uses_native_heading_and_numbering_without_guessing(tmp_path):
     document.save(path)
     blocks = DocxBlockParser().parse(str(path))
     assert [block.kind for block in blocks] == ["heading", "paragraph", "list_item", "list_item", "paragraph"]
+    assert [block.level for block in blocks] == [1, None, None, None, None]
 
 
 def test_ppt_uses_title_and_explicit_bullets(tmp_path):

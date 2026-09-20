@@ -49,6 +49,6 @@ class MdBlockParser(BlockParser):
                         kind = "list_item"
                     elif quote_depth:
                         kind = "text"
-                blocks.append(TextBlock(text, kind=kind))
+                blocks.append(TextBlock(text, kind=kind, level=int(token.tag[1:]) if kind == "heading" else None))
                 covered_until = token.map[1]
         return blocks

@@ -40,5 +40,5 @@ def _to_internal_blocks(blocks: list[ParserBlock]) -> list[Block]:
         elif isinstance(block, ParserFormulaBlock):
             normalized.append(FormulaBlock(text=block.text, format=block.format, page=block.page))
         else:
-            normalized.append(TextBlock(text=block.text, page=block.page, kind=block.kind))
+            normalized.append(TextBlock(text=block.text, page=block.page, kind=block.kind, level=block.level if block.kind == "heading" else None))
     return normalized

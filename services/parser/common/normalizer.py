@@ -11,7 +11,7 @@ def normalize_blocks(blocks: list[Block]) -> list[Block]:
             text = block.text if block.kind in {"code", "list_item"} else block.text.strip()
             if not text.strip():
                 continue
-            normalized.append(TextBlock(text, page=block.page, kind=block.kind))
+            normalized.append(TextBlock(text, page=block.page, kind=block.kind, level=block.level if block.kind == "heading" else None))
             continue
 
         normalized.append(block)

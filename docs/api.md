@@ -685,7 +685,7 @@ RAG 根据 `kind` 和 `chunk_size` 组合相邻文本：标题开启章节，连
 
 | type | 必填字段 | 可选字段 |
 | --- | --- | --- |
-| `text` | `text`、`kind` | `page` |
+| `text` | `text`、`kind` | `page`、`level`（仅标题） |
 | `table` | `rows`，每行一个数组，每个单元格一个字符串 | `caption`、`page` |
 | `formula` | `text`、`format` | `page` |
 
@@ -693,7 +693,11 @@ RAG 根据 `kind` 和 `chunk_size` 组合相邻文本：标题开启章节，连
 
 `kind` 为 `heading` 标题、`paragraph` 段落、`list_item` 列表项、`code` 代码块、`text` 无法明确分类的文本。TXT 段落使用 `paragraph`；PDF 使用解析后端的分类信息，无法识别时使用 `text`
 
-所有解析后端及文件类型使用同一响应结构，不返回 `role`、`level`、`header`、`footer`、`html` 或图片块。表格不返回 `text`，由 RAG 将紧邻 heading、`caption` 和完整 `rows` 按上述规则组合为一个 Markdown 分片
+标题可携带正整数 `level`，数值越小层级越高。MinerU 保留 `text_level`，Markdown 使用标题级别，Word 使用原生大纲级别；没有明确级别时不推测。普通文本不携带级别。
+
+`level` 目前仅保留在 Parser 响应中，RAG 不使用它组合章节，仍按上述 `kind` 和长度规则切片。TXT 仍按空行段落切片。
+
+所有解析后端及文件类型使用同一响应结构，不返回 `role`、`header`、`footer`、`html` 或图片块。表格不返回 `text`，由 RAG 将紧邻 heading、`caption` 和完整 `rows` 按上述规则组合为一个 Markdown 分片
 
 ## Inference API
 

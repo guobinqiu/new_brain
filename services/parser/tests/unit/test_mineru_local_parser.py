@@ -100,7 +100,7 @@ def test_local_mineru_parses_full_document_and_preserves_blocks(tmp_path, monkey
     blocks = service.pdf_parser.parse_file("document.pdf")
     parser.parse.assert_called_once_with("document.pdf", tier="basic", ocr_mode="auto", image_analysis=False)
     render.render.assert_called_once_with(parser.parse.return_value.middle_json, "content_list")
-    assert blocks == [TextBlock("Heading", page=1, kind="heading"), TableBlock(rows=[["A", "B"], ["1", "2"]], caption="Table", page=7)]
+    assert blocks == [TextBlock("Heading", page=1, kind="heading", level=1), TableBlock(rows=[["A", "B"], ["1", "2"]], caption="Table", page=7)]
     service.stop()
     assert not service.ready
 
