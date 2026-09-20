@@ -6,8 +6,9 @@ logging:
   # 最多保留 5 个轮转日志文件
   backup_count: 5
   search_trace: true
+
 storage:
-  endpoint_url: http://minio:9000
+  endpoint_url: https://opsonic-brittny-unantagonized.ngrok-free.dev
   bucket: rag
   # 获取预签名下载地址的请求超时，单位秒
   presign_timeout: 60
