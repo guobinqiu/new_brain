@@ -1,11 +1,14 @@
-from contextlib import asynccontextmanager  # noqa: E402
+from contextlib import AsyncExitStack, asynccontextmanager  # noqa: E402
 
 from fastapi import FastAPI, Request  # noqa: E402
 from fastapi.exceptions import RequestValidationError  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from fastapi.responses import JSONResponse  # noqa: E402
+from langgraph.checkpoint.memory import MemorySaver  # noqa: E402
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver  # noqa: E402
 from openai import APIConnectionError, APIStatusError, RateLimitError  # noqa: E402
+from psycopg.rows import dict_row  # noqa: E402
+from psycopg_pool import AsyncConnectionPool  # noqa: E402
 from slowapi.errors import RateLimitExceeded  # noqa: E402
 from shared.api_errors import unhandled_exception_handler  # noqa: E402
 
@@ -58,15 +61,27 @@ async def lifespan(app: FastAPI):
 
 
 async def _create_checkpointer():
-    checkpointer_cm = AsyncPostgresSaver.from_conn_string(settings.database_url)
+    resources = AsyncExitStack()
     try:
-        checkpointer = await checkpointer_cm.__aenter__()
+        pool = AsyncConnectionPool(
+            settings.database_url,
+            min_size=1,
+            max_size=5,
+            open=False,
+            timeout=settings.request_timeout,
+            check=AsyncConnectionPool.check_connection,
+            kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row},
+        )
+        await resources.enter_async_context(pool)
+        await pool.wait(timeout=settings.request_timeout)
+        checkpointer = AsyncPostgresSaver(pool)
         await checkpointer.setup()
-    except Exception:
-        await checkpointer_cm.__aexit__(None, None, None)
-        raise
+    except Exception as exc:
+        await resources.aclose()
+        logger.warning("postgres checkpointer unavailable, using memory", error=str(exc))
+        return AsyncExitStack(), MemorySaver()
     logger.info("postgres checkpointer initialized")
-    return checkpointer_cm, checkpointer
+    return resources, checkpointer
 
 
 app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
