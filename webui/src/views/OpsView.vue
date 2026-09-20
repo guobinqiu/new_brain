@@ -3,7 +3,7 @@
     <section class="ops-section">
       <div class="page-head">
         <div>
-          <h2>{{ t('ops.title') }}</h2>
+          <h2>{{ t(`ops.tabs.${tab}`) }}</h2>
           <p>{{ t('ops.desc') }}</p>
         </div>
         <div class="ops-actions">
@@ -11,8 +11,7 @@
         </div>
       </div>
 
-      <el-tabs v-model="tab">
-        <el-tab-pane :label="t('ops.tabs.deploy')" name="deploy">
+        <template v-if="tab === 'deploy'">
           <div class="config-layout">
             <aside class="config-list">
               <el-button
@@ -45,9 +44,9 @@
               </div>
             </section>
           </div>
-        </el-tab-pane>
+        </template>
 
-        <el-tab-pane :label="t('ops.tabs.services')" name="services">
+        <template v-if="tab === 'services'">
           <el-tabs v-model="serviceTab">
             <el-tab-pane :label="t('ops.tabs.controlServices')" name="control">
               <el-table :data="controlServices" stripe>
@@ -109,9 +108,9 @@
               </el-table>
             </el-tab-pane>
           </el-tabs>
-        </el-tab-pane>
+        </template>
 
-        <el-tab-pane :label="t('ops.tabs.configs')" name="configs">
+        <template v-if="tab === 'configs'">
           <div class="config-layout">
             <aside class="config-list">
               <el-button
@@ -144,9 +143,9 @@
               </div>
             </section>
           </div>
-        </el-tab-pane>
+        </template>
 
-        <el-tab-pane :label="t('ops.tabs.nodes')" name="nodes">
+        <template v-if="tab === 'nodes'">
           <p class="ops-note">{{ t('ops.nodesNote') }}</p>
           <div class="join-tools">
             <el-button size="small" @click="fetchJoinCommand('worker')">{{ t('ops.actions.workerJoin') }}</el-button>
@@ -163,8 +162,7 @@
               <template #default="{ row }">{{ Boolean(row.leader) }}</template>
             </el-table-column>
           </el-table>
-        </el-tab-pane>
-      </el-tabs>
+        </template>
     </section>
     <el-dialog v-model="scaleDialogVisible" :title="t('ops.actions.scale')" width="360px">
       <div class="scale-dialog">
@@ -186,14 +184,15 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import axios from '../utils/api'
 import { confirmBox } from '../utils/messageBox'
 import { errorMessage, showToast } from '../utils/toast'
 
 const { t } = useI18n()
-const tab = ref('deploy')
+const props = defineProps({ section: { type: String, required: true } })
+const tab = computed(() => props.section)
 const serviceTab = ref('app')
 const services = ref([])
 const nodes = ref([])
@@ -246,7 +245,9 @@ async function paintLoading() {
 }
 
 async function fetchAll() {
-  await Promise.all([fetchServices(), fetchNodes(), fetchConfigs()])
+  if (tab.value === 'services') return fetchServices()
+  if (tab.value === 'nodes') return fetchNodes()
+  await fetchConfigs()
 }
 
 async function fetchServices() {
@@ -273,7 +274,7 @@ async function fetchConfigs() {
 
 async function ensureSelectedConfig() {
   const activeConfigs = tab.value === 'deploy' ? deployConfigs.value : serviceConfigs.value
-  if (activeConfigs.some(item => item.name === selectedConfig.value)) return
+  if (activeConfigs.some(item => item.name === selectedConfig.value)) return selectConfig(selectedConfig.value)
   if (activeConfigs.length > 0) await selectConfig(activeConfigs[0].name)
 }
 
@@ -389,11 +390,6 @@ async function fetchJoinCommand(role) {
 }
 
 onMounted(fetchAll)
-watch(tab, () => {
-  if (tab.value === 'deploy' || tab.value === 'configs') {
-    ensureSelectedConfig()
-  }
-})
 </script>
 
 <style scoped>

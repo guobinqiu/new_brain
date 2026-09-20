@@ -47,6 +47,7 @@
         <aside class="side-menu">
           <el-menu
             :default-active="activeMenu"
+            :default-openeds="['ops']"
             class="side-nav"
             @select="onMenuSelect"
           >
@@ -63,7 +64,10 @@
               <el-menu-item :index="`/apps/${app.app_id}/trace`">{{ t('nav.trace') }}</el-menu-item>
             </el-sub-menu>
             <!-- <el-menu-item index="/logs">{{ t('nav.logs') }}</el-menu-item> -->
-            <el-menu-item index="/ops">{{ t('nav.ops') }}</el-menu-item>
+            <el-sub-menu index="ops">
+              <template #title>{{ t('nav.ops') }}</template>
+              <el-menu-item v-for="section in ['deploy', 'services', 'configs', 'nodes']" :key="section" :index="`/ops/${section}`">{{ t(`ops.tabs.${section}`) }}</el-menu-item>
+            </el-sub-menu>
           </el-menu>
         </aside>
 
@@ -126,7 +130,7 @@ const activeMenu = computed(() => {
 })
 
 function onMenuSelect(index) {
-  if (index === '/apps' || index === '/logs' || index === '/ops') {
+  if (index === '/apps' || index === '/logs' || index.startsWith('/ops/')) {
     router.push(index)
     return
   }

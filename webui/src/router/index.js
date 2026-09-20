@@ -29,7 +29,12 @@ const router = createRouter({
     { path: '/trace', component: TracesView },
     // { path: '/logs', component: LogsView },
     { path: '/config', redirect: '/ops' },
-    { path: '/ops', component: OpsView },
+    { path: '/ops', redirect: '/ops/deploy' },
+    ...['deploy', 'services', 'configs', 'nodes'].map(section => ({
+      path: `/ops/${section}`,
+      component: OpsView,
+      props: { section },
+    })),
     { path: '/', redirect: '/apps' },
   ],
 })
