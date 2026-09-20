@@ -173,7 +173,6 @@
   },
   "ops": {
     "title": "Cluster Management",
-    "desc": "Swarm cluster",
     "environment": "Environment variables",
     "tabs": {
       "services": "Services",

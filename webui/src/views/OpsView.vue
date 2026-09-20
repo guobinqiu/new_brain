@@ -4,7 +4,6 @@
       <div class="page-head">
         <div>
           <h2>{{ t(`ops.tabs.${tab}`) }}</h2>
-          <p>{{ t('ops.desc') }}</p>
         </div>
         <div class="ops-actions">
           <el-button size="small" @click="fetchAll">{{ t('common.refresh') }}</el-button>

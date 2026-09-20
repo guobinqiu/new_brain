@@ -173,7 +173,6 @@
   },
   "ops": {
     "title": "集群管理",
-    "desc": "Swarm 集群",
     "environment": "环境变量",
     "tabs": {
       "services": "服务",
