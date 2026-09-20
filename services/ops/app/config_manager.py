@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import stat
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -107,9 +108,23 @@ class ConfigManager:
                 raise ValueError(f"invalid env line {line_no}: invalid key")
 
     def _write_atomic(self, path: Path, content: str) -> None:
-        with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as tmp:
-            tmp.write(content)
-            tmp.flush()
-            os.fsync(tmp.fileno())
-            tmp_path = Path(tmp.name)
-        os.replace(tmp_path, path)
+        try:
+            original = path.stat()
+        except FileNotFoundError:
+            original = None
+        tmp_path = None
+        try:
+            with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as tmp:
+                tmp_path = Path(tmp.name)
+                tmp.write(content)
+                tmp.flush()
+                if original is not None:
+                    current = os.fstat(tmp.fileno())
+                    if (current.st_uid, current.st_gid) != (original.st_uid, original.st_gid):
+                        os.fchown(tmp.fileno(), original.st_uid, original.st_gid)
+                    os.fchmod(tmp.fileno(), stat.S_IMODE(original.st_mode))
+                os.fsync(tmp.fileno())
+            os.replace(tmp_path, path)
+        finally:
+            if tmp_path is not None:
+                tmp_path.unlink(missing_ok=True)

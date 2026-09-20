@@ -1,4 +1,7 @@
 from pathlib import Path
+import os
+import stat
+from unittest.mock import patch
 
 import pytest
 
@@ -78,3 +81,47 @@ def test_config_manager_manages_infra_separately(tmp_path):
     assert item.path == "deploy/infra.yaml"
     assert item.requires_deploy is True
     assert not (tmp_path / "deploy/deploy.yaml").exists()
+
+
+def test_atomic_write_preserves_permissions_and_owner(tmp_path):
+    path = tmp_path / ".env"
+    path.write_text("A=1\n")
+    path.chmod(0o640)
+    before = path.stat()
+
+    ConfigManager(tmp_path)._write_atomic(path, "A=2\n")
+
+    after = path.stat()
+    assert stat.S_IMODE(after.st_mode) == 0o640
+    assert (after.st_uid, after.st_gid) == (before.st_uid, before.st_gid)
+    assert path.read_text() == "A=2\n"
+
+
+def test_atomic_write_restores_owner_before_replace(tmp_path):
+    path = tmp_path / ".env"
+    path.write_text("A=1\n")
+    original = path.stat()
+    real_fstat = os.fstat
+    calls = []
+
+    def different_owner(fd):
+        values = list(real_fstat(fd))
+        values[4] = original.st_uid + 1
+        return os.stat_result(values)
+
+    with patch("os.fstat", side_effect=different_owner), patch("os.fchown", side_effect=lambda fd, uid, gid: calls.append((uid, gid))):
+        ConfigManager(tmp_path)._write_atomic(path, "A=2\n")
+
+    assert calls == [(original.st_uid, original.st_gid)]
+
+
+def test_atomic_write_failure_keeps_original_and_removes_temp(tmp_path):
+    path = tmp_path / ".env"
+    path.write_text("A=1\n")
+
+    with patch("os.replace", side_effect=OSError("replace failed")):
+        with pytest.raises(OSError, match="replace failed"):
+            ConfigManager(tmp_path)._write_atomic(path, "A=2\n")
+
+    assert path.read_text() == "A=1\n"
+    assert list(tmp_path.iterdir()) == [path]
