@@ -47,6 +47,10 @@ class FakeServices:
     def logs(self, service, tail=200):
         return ""
 
+    async def stream_logs(self, service, tail=50):
+        yield "first line\n"
+        yield "second line\n"
+
     def list_nodes(self):
         return []
 
@@ -99,6 +103,23 @@ def test_ops_api_accepts_admin_jwt(monkeypatch):
 
     assert response.status_code == 200
     assert response.json()["services"][0]["name"] == "brain_inference"
+
+
+def test_service_logs_are_streamed_as_sse(monkeypatch):
+    monkeypatch.setenv("RAG_ADMIN_PASSWORD", "secret")
+    app = create_app(services=FakeServices(), configs=FakeConfigs())
+    client = TestClient(app)
+
+    response = client.get(
+        "/api/ops/services/brain_inference/logs?tail=50",
+        headers={"Authorization": f"Bearer {_token('secret')}"},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert response.headers["cache-control"] == "no-cache"
+    assert response.headers["x-accel-buffering"] == "no"
+    assert response.text == 'event: log\ndata: "first line\\n"\n\nevent: log\ndata: "second line\\n"\n\n'
 
 
 def test_saving_config_only_writes_file(monkeypatch):

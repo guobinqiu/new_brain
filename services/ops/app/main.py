@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import json
 import os
 import subprocess
 from contextlib import asynccontextmanager
@@ -9,6 +11,7 @@ from typing import Literal
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.exceptions import RequestValidationError
@@ -103,7 +106,15 @@ def create_app(*, services=None, configs=None) -> FastAPI:
 
     @app.get("/api/ops/services/{service}/logs", dependencies=[Depends(require_admin_jwt)])
     def service_logs(service: str, tail: int = Query(50, ge=1, le=500)):
-        return _service_action(lambda: {"logs": app.state.services.logs(service, tail=tail)})
+        logs = _service_action(lambda: app.state.services.stream_logs(service, tail=tail))
+        return StreamingResponse(
+            _service_log_events(logs),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     @app.get("/api/ops/nodes", dependencies=[Depends(require_admin_jwt)])
     def list_nodes():
@@ -142,6 +153,17 @@ def create_app(*, services=None, configs=None) -> FastAPI:
         return _config_action(lambda: _apply_config(app.state.configs, app.state.services, request.name))
 
     return app
+
+
+async def _service_log_events(logs):
+    try:
+        async for text in logs:
+            if text:
+                yield f"event: log\ndata: {json.dumps(text, ensure_ascii=False)}\n\n"
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        yield f"event: error\ndata: {json.dumps(str(exc), ensure_ascii=False)}\n\n"
 
 
 def _validated(configs, name: str, content: str) -> dict:

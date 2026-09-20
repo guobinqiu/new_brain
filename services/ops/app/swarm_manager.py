@@ -106,6 +106,10 @@ class SwarmManager:
         self._require_managed_service(service)
         return self.docker.service_logs(service, tail=tail)
 
+    def stream_logs(self, service: str, tail: int = 50):
+        self._require_managed_service(service)
+        return self.docker.stream_service_logs(service, tail=tail)
+
     def list_nodes(self) -> list[dict]:
         return [_node_summary(node) for node in self.docker.list_nodes()]
 

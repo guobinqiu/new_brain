@@ -173,7 +173,7 @@
       </template>
     </el-dialog>
     <el-dialog v-model="logsDialogVisible" :title="`${t('ops.actions.logs')} ${logsService}`" width="960px">
-      <pre v-if="serviceLogs" class="logs-box ops-service-logs">{{ serviceLogs }}</pre>
+      <pre v-if="serviceLogs" ref="serviceLogsBox" class="logs-box ops-service-logs">{{ serviceLogs }}</pre>
       <div v-else class="trace-empty">{{ t('ops.emptyLogs') }}</div>
       <template #footer>
         <el-button @click="logsDialogVisible = false">{{ t('common.close') }}</el-button>
@@ -183,13 +183,15 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useAuthStore } from '../stores/auth'
 import axios from '../utils/api'
 import { confirmBox } from '../utils/messageBox'
 import { errorMessage, showToast } from '../utils/toast'
 
 const { t } = useI18n()
+const authStore = useAuthStore()
 const props = defineProps({ section: { type: String, required: true } })
 const tab = computed(() => props.section)
 const serviceTab = ref('app')
@@ -208,6 +210,8 @@ const scaleTarget = ref({ service: '', replicas: 0 })
 const logsDialogVisible = ref(false)
 const logsService = ref('')
 const serviceLogs = ref('')
+const serviceLogsBox = ref(null)
+let serviceLogsController = null
 
 const currentConfig = computed(() => configs.value.find(item => item.name === selectedConfig.value))
 const deployTarget = computed(() => ({ deploy: 'app', infra: 'infra' })[selectedConfig.value])
@@ -371,14 +375,79 @@ async function submitScale() {
 }
 
 async function loadServiceLogs(service) {
+  stopServiceLogs()
   serviceLogLoading.value = service
   logsService.value = service
   serviceLogs.value = ''
+  logsDialogVisible.value = true
+  const controller = new AbortController()
+  serviceLogsController = controller
   try {
-    const res = await axios.get(`/api/ops/services/${encodeURIComponent(service)}/logs`, { params: { tail: 50 } })
-    serviceLogs.value = res.data?.logs || ''
-    logsDialogVisible.value = true
-  } catch (err) { showToast('error', errorMessage(err)) } finally { serviceLogLoading.value = '' }
+    const response = await fetch(`/api/ops/services/${encodeURIComponent(service)}/logs?tail=50`, {
+      headers: {
+        Accept: 'text/event-stream',
+        Authorization: `Bearer ${authStore.authToken}`,
+      },
+      signal: controller.signal,
+    })
+    if (!response.ok) throw new Error(await response.text() || `HTTP ${response.status}`)
+    serviceLogLoading.value = ''
+    await consumeServiceLogs(response, controller.signal)
+  } catch (err) {
+    if (err.name !== 'AbortError') {
+      await appendServiceLog(`[error] ${errorMessage(err)}\n`)
+      showToast('error', errorMessage(err))
+    }
+  } finally {
+    if (serviceLogsController === controller) {
+      serviceLogsController = null
+      serviceLogLoading.value = ''
+    }
+  }
+}
+
+async function consumeServiceLogs(response, signal) {
+  if (!response.body) throw new Error('Streaming response is unavailable')
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  while (!signal.aborted) {
+    const { done, value } = await reader.read()
+    buffer += decoder.decode(value || new Uint8Array(), { stream: !done })
+    let boundary = buffer.indexOf('\n\n')
+    while (boundary >= 0) {
+      const event = buffer.slice(0, boundary)
+      buffer = buffer.slice(boundary + 2)
+      await handleServiceLogEvent(event)
+      boundary = buffer.indexOf('\n\n')
+    }
+    if (done) break
+  }
+}
+
+async function handleServiceLogEvent(event) {
+  let type = 'message'
+  const data = []
+  for (const line of event.replaceAll('\r', '').split('\n')) {
+    if (line.startsWith('event:')) type = line.slice(6).trim()
+    if (line.startsWith('data:')) data.push(line.slice(5).trimStart())
+  }
+  if (data.length === 0) return
+  const value = JSON.parse(data.join('\n'))
+  if (type === 'error') throw new Error(String(value))
+  if (type === 'log') await appendServiceLog(String(value))
+}
+
+async function appendServiceLog(text) {
+  serviceLogs.value += text
+  await nextTick()
+  if (serviceLogsBox.value) serviceLogsBox.value.scrollTop = serviceLogsBox.value.scrollHeight
+}
+
+function stopServiceLogs() {
+  if (serviceLogsController) serviceLogsController.abort()
+  serviceLogsController = null
+  serviceLogLoading.value = ''
 }
 
 async function fetchJoinCommand(role) {
@@ -389,6 +458,10 @@ async function fetchJoinCommand(role) {
 }
 
 onMounted(fetchAll)
+onBeforeUnmount(stopServiceLogs)
+watch(logsDialogVisible, visible => {
+  if (!visible) stopServiceLogs()
+})
 </script>
 
 <style scoped>
